@@ -296,8 +296,8 @@ pub proof fn os_init_refines_hl_init(c: os::Constants, s: os::State)
     let abs_c = c.interp();
     let abs_s = s.interp(c);
     //lemma_effective_mappings_equal_interp_pt_mem(s);
-    assert forall|id: nat| id < abs_c.thread_no implies (abs_s.thread_state[id]
-        === hlspec::ThreadState::Idle) by {
+    assert forall|id: nat| id < abs_c.thread_no implies (abs_s.thread_state[id] === hlspec::ThreadState::Idle) by {
+        assert(c.valid_ult(id));
         assert(c.ult2core.contains_key(id));
         let core = c.ult2core[id];
         assert(c.valid_core(core));
@@ -2288,6 +2288,16 @@ proof fn step_MapEnd_refines(c: os::Constants, s1: os::State, s2: os::State, cor
         };
         assert(s1.inflight_unmap_vaddr() =~= s2.inflight_unmap_vaddr());
         assert(!s2.inflight_vaddr().contains(vaddr));
+        assert(s1.core_states.contains_key(core) && match s1.core_states[core] {
+                    CoreState::UnmapWaiting { ult_id, vaddr: va }
+                    | CoreState::UnmapExecuting { ult_id, vaddr: va, .. }
+                    | CoreState::UnmapOpDone { ult_id, vaddr: va, .. }
+                    | CoreState::UnmapShootdownWaiting { ult_id, vaddr: va, .. }
+                    | CoreState::MapDone {ult_id, vaddr: va, result: Ok(()), .. } => {
+                        va === vaddr
+                    },
+                    _ => false,
+                });
         assert(s1.inflight_vaddr() =~= s1.inflight_unmap_vaddr().insert(vaddr));
         assert(s2.inflight_vaddr() =~= s1.inflight_vaddr().remove(vaddr));
         assert(hl_s2.mappings === hl_s1.mappings.insert(vaddr, pte));

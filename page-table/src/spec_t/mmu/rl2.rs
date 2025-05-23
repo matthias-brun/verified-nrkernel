@@ -1967,6 +1967,10 @@ proof fn next_step_preserves_inv_mapping__valid_not_pending_is_not_in_sbuf(pre: 
                     ==> pre.writer_sbuf().contains_fst(a));
             assert(post.inv_mapping__valid_not_pending_is_not_in_sbuf(c));
         },
+        Step::TLBEvict { .. } => {
+            assert(post.hist.pending_maps == pre.hist.pending_maps);
+            assert(post.inv_mapping__valid_not_pending_is_not_in_sbuf(c));
+        },
         _ => assert(post.inv_mapping__valid_not_pending_is_not_in_sbuf(c)),
     }
 }

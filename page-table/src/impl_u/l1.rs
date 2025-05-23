@@ -317,7 +317,10 @@ impl Directory {
         assert(self.interp_of_entry(i).contains_key(va));
         indexing::lemma_entry_base_from_index(self.base_vaddr, i, self.entry_size());
         match self.entries[i as int] {
-            NodeEntry::Page(p)      => {},
+            NodeEntry::Page(p)      => {
+                assert(self.interp_of_entry(i).contains_pair(self.entry_base(i), p));
+                assert(self.entry_base(i) == va);
+            },
             NodeEntry::Directory(d) => {
                 assert(self.next_entry_base(i) == d.upper_vaddr()) by {
                     assert(self.directories_obey_invariant());
