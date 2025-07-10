@@ -1627,7 +1627,7 @@ pub proof fn lemma_candidate_mapping_inflight_vmem_overlap_os_implies_hl(
                         | os::CoreState::UnmapOpDone { vaddr, result, .. }
                         | os::CoreState::UnmapShootdownWaiting { vaddr, result, .. } => {
                             let size = if result is Ok {
-                                result.get_Ok_0().frame.size
+                                result->Ok_0.frame.size
                             } else {
                                 0
                             };
@@ -1797,10 +1797,10 @@ pub proof fn lemma_candidate_mapping_inflight_vmem_overlap_hl_implies_os(
                                 pte: Some(pte),
                             }
                             &&& vaddr === v_addr
-                            &&& result.get_Ok_0() === pte
+                            &&& result->Ok_0 === pte
                         });
                         assert(overlap(
-                            MemRegion { base: vaddr, size: result.get_Ok_0().frame.size },
+                            MemRegion { base: vaddr, size: result->Ok_0.frame.size },
                             MemRegion { base: base, size: candidate_size },
                         ));
                     } else {
@@ -1872,7 +1872,7 @@ pub proof fn lemma_candidate_mapping_inflight_pmem_overlap_os_implies_hl(
                         | os::CoreState::UnmapOpDone { ult_id, vaddr, result, .. }
                         | os::CoreState::UnmapShootdownWaiting { ult_id, vaddr, result, .. } => {
                             &&& result is Ok
-                            &&& overlap(candidate.frame, result.get_Ok_0().frame)
+                            &&& overlap(candidate.frame, result->Ok_0.frame)
                         },
                         os::CoreState::Idle => false,
                     }
@@ -2035,7 +2035,7 @@ pub proof fn lemma_candidate_mapping_inflight_pmem_overlap_hl_implies_os(
                             Err(_) => pte is None,
                         }
                     });
-                    assert(overlap(candidate.frame, result.get_Ok_0().frame));
+                    assert(overlap(candidate.frame, result->Ok_0.frame));
                 },
                 _ => {},
             };

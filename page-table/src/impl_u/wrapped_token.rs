@@ -146,7 +146,7 @@ impl WrappedTokenView {
                     let l1_addr = add(l1_daddr, l1_idx);
                     let l1e = PDE { entry: self.pt_mem.read(l1_addr), layer: Ghost(1) };
                     let l1_base = x86_arch_spec.entry_base(0, 0, l0_bidx as nat);
-                    let l1_ghost_pt = pt.entries[l0_bidx as int].get_Some_0();
+                    let l1_ghost_pt = pt.entries[l0_bidx as int]->Some_0;
                     assert(PT::directories_obey_invariant_at(self, pt, 0, self.pt_mem.pml4));
                     assert(PT::inv_at(self, l1_ghost_pt, 1, l1_daddr));
                     PT::lemma_interp_at_facts(self, l1_ghost_pt, 1, l1_daddr, l1_base);
@@ -192,7 +192,7 @@ impl WrappedTokenView {
                             let l2_addr = add(l2_daddr, l2_idx);
                             let l2e = PDE { entry: self.pt_mem.read(l2_addr), layer: Ghost(2) };
                             let l2_base = x86_arch_spec.entry_base(1, l1_base, l1_bidx as nat);
-                            let l2_ghost_pt = l1_ghost_pt.entries[l1_bidx as int].get_Some_0();
+                            let l2_ghost_pt = l1_ghost_pt.entries[l1_bidx as int]->Some_0;
                             assert(PT::directories_obey_invariant_at(self, l1_ghost_pt, 1, l1_daddr));
                             assert(PT::inv_at(self, l2_ghost_pt, 2, l2_daddr));
                             PT::lemma_interp_at_facts(self, l2_ghost_pt, 2, l2_daddr, l2_base);
@@ -245,7 +245,7 @@ impl WrappedTokenView {
                                     let l3_addr = add(l3_daddr, l3_idx);
                                     let l3e = PDE { entry: self.pt_mem.read(l3_addr), layer: Ghost(3) };
                                     let l3_base = x86_arch_spec.entry_base(2, l2_base, l2_bidx as nat);
-                                    let l3_ghost_pt = l2_ghost_pt.entries[l2_bidx as int].get_Some_0();
+                                    let l3_ghost_pt = l2_ghost_pt.entries[l2_bidx as int]->Some_0;
                                     assert(PT::directories_obey_invariant_at(self, l2_ghost_pt, 2, l2_daddr));
                                     assert(PT::inv_at(self, l3_ghost_pt, 3, l3_daddr));
                                     PT::lemma_interp_at_facts(self, l3_ghost_pt, 3, l3_daddr, l3_base);
@@ -378,7 +378,7 @@ impl WrappedTokenView {
                     let l1_addr = add(l1_daddr, l1_idx);
                     let l1e = PDE { entry: self.pt_mem.read(l1_addr), layer: Ghost(1) };
                     let l1_base = x86_arch_spec.entry_base(0, 0, l0_bidx as nat);
-                    let l1_ghost_pt = pt.entries[l0_bidx as int].get_Some_0();
+                    let l1_ghost_pt = pt.entries[l0_bidx as int]->Some_0;
                     assert(PT::directories_obey_invariant_at(self, pt, 0, self.pt_mem.pml4));
                     assert(PT::inv_at(self, l1_ghost_pt, 1, l1_daddr));
                     PT::lemma_interp_at_facts(self, l1_ghost_pt, 1, l1_daddr, l1_base);
@@ -416,7 +416,7 @@ impl WrappedTokenView {
                             let l2_addr = add(l2_daddr, l2_idx);
                             let l2e = PDE { entry: self.pt_mem.read(l2_addr), layer: Ghost(2) };
                             let l2_base = x86_arch_spec.entry_base(1, l1_base, l1_bidx as nat);
-                            let l2_ghost_pt = l1_ghost_pt.entries[l1_bidx as int].get_Some_0();
+                            let l2_ghost_pt = l1_ghost_pt.entries[l1_bidx as int]->Some_0;
                             assert(PT::directories_obey_invariant_at(self, l1_ghost_pt, 1, l1_daddr));
                             assert(PT::inv_at(self, l2_ghost_pt, 2, l2_daddr));
                             PT::lemma_interp_at_facts(self, l2_ghost_pt, 2, l2_daddr, l2_base);
@@ -459,7 +459,7 @@ impl WrappedTokenView {
                                     let l3_addr = add(l3_daddr, l3_idx);
                                     let l3e = PDE { entry: self.pt_mem.read(l3_addr), layer: Ghost(3) };
                                     let l3_base = x86_arch_spec.entry_base(2, l2_base, l2_bidx as nat);
-                                    let l3_ghost_pt = l2_ghost_pt.entries[l2_bidx as int].get_Some_0();
+                                    let l3_ghost_pt = l2_ghost_pt.entries[l2_bidx as int]->Some_0;
                                     assert(PT::directories_obey_invariant_at(self, l2_ghost_pt, 2, l2_daddr));
                                     assert(PT::inv_at(self, l3_ghost_pt, 3, l3_daddr));
                                     PT::lemma_interp_at_facts(self, l3_ghost_pt, 3, l3_daddr, l3_base);

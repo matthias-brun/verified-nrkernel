@@ -723,7 +723,7 @@ pub open spec fn directories_obey_invariant_at(tok: WrappedTokenView, pt: PTDir,
 {
     forall|i: nat| i < X86_NUM_ENTRIES ==> {
         (#[trigger] entry_at_spec(tok, pt, layer, ptr, i))@ matches GPDE::Directory { addr, ..}
-            ==> inv_at(tok, pt.entries[i as int].get_Some_0(), layer + 1, addr)
+            ==> inv_at(tok, pt.entries[i as int]->Some_0, layer + 1, addr)
     }
 }
 
@@ -799,17 +799,17 @@ pub open spec fn ghost_pt_used_regions_pairwise_disjoint(tok: WrappedTokenView, 
 // TODO: this may be implied by the other ones
 pub open spec fn ghost_pt_region_notin_used_regions(tok: WrappedTokenView, pt: PTDir, layer: nat, ptr: usize) -> bool {
     forall|i: nat|
-        i < pt.entries.len() && pt.entries[i as int].is_Some()
-        ==> !(#[trigger] pt.entries[i as int].get_Some_0().used_regions.contains(pt.region))
+        i < pt.entries.len() && pt.entries[i as int] is Some
+        ==> !(#[trigger] pt.entries[i as int]->Some_0.used_regions.contains(pt.region))
 }
 
 pub open spec fn ghost_pt_used_regions_rtrancl(tok: WrappedTokenView, pt: PTDir, layer: nat, ptr: usize) -> bool {
     // reflexive
     &&& pt.used_regions.contains(pt.region)
     // transitive
-    &&& forall|i: nat, r: MemRegion| #![trigger pt.entries[i as int].get_Some_0().used_regions.contains(r), pt.used_regions.contains(r)]
-            i < pt.entries.len() && pt.entries[i as int].is_Some() &&
-            pt.entries[i as int].get_Some_0().used_regions.contains(r)
+    &&& forall|i: nat, r: MemRegion| #![trigger pt.entries[i as int]->Some_0.used_regions.contains(r), pt.used_regions.contains(r)]
+            i < pt.entries.len() && pt.entries[i as int] is Some &&
+            pt.entries[i as int]->Some_0.used_regions.contains(r)
             ==> pt.used_regions.contains(r)
 }
 
@@ -832,7 +832,7 @@ pub open spec fn interp_at_entry(tok: WrappedTokenView, pt: PTDir, layer: nat, p
     match entry_at_spec(tok, pt, layer, ptr, idx)@ {
         GPDE::Directory { addr: dir_addr, .. } => {
             let entry_base = x86_arch_spec.entry_base(layer, base_vaddr, idx);
-            l1::NodeEntry::Directory(interp_at(tok, pt.entries[idx as int].get_Some_0(), layer + 1, dir_addr, entry_base))
+            l1::NodeEntry::Directory(interp_at(tok, pt.entries[idx as int]->Some_0, layer + 1, dir_addr, entry_base))
         },
         GPDE::Page { addr, RW, US, XD, .. } =>
             l1::NodeEntry::Page(
@@ -885,12 +885,12 @@ pub proof fn lemma_inv_at_changed_tok(tok1: WrappedTokenView, tok2: WrappedToken
     assert forall|i: nat|
     i < X86_NUM_ENTRIES implies {
         let entry = #[trigger] entry_at_spec(tok2, pt, layer, ptr, i)@;
-        entry is Directory ==> inv_at(tok2, pt.entries[i as int].get_Some_0(), layer + 1, entry->Directory_addr)
+        entry is Directory ==> inv_at(tok2, pt.entries[i as int]->Some_0, layer + 1, entry->Directory_addr)
     } by {
         let entry = entry_at_spec(tok2, pt, layer, ptr, i)@;
         if entry is Directory {
             assert(directories_obey_invariant_at(tok1, pt, layer, ptr));
-            lemma_inv_at_changed_tok(tok1, tok2, pt.entries[i as int].get_Some_0(), layer + 1, entry->Directory_addr);
+            lemma_inv_at_changed_tok(tok1, tok2, pt.entries[i as int]->Some_0, layer + 1, entry->Directory_addr);
         }
     };
 }
@@ -1110,7 +1110,7 @@ broadcast proof fn lemma_interp_at_entry_changed_tok(tok1: WrappedTokenView, pt1
     match entry_at_spec(tok1, pt1, layer, ptr, idx)@ {
         GPDE::Directory { addr: dir_addr, .. } => {
             let e_base = x86_arch_spec.entry_base(layer, base, idx);
-            let dir_pt = pt1.entries[idx as int].get_Some_0();
+            let dir_pt = pt1.entries[idx as int]->Some_0;
             assert(directories_obey_invariant_at(tok1, pt1, layer, ptr));
             assert(directories_obey_invariant_at(tok2, pt2, layer, ptr));
             lemma_interp_at_aux_facts(tok1, dir_pt, layer + 1, dir_addr, e_base, seq![]);
@@ -1168,7 +1168,7 @@ proof fn lemma_interp_at_aux_facts(tok: WrappedTokenView, pt: PTDir, layer: nat,
                 match entry_at_spec(tok, pt, layer, ptr, j)@ {
                     GPDE::Directory { addr: dir_addr, .. }  => {
                         &&& res[j as int] is Directory
-                        &&& res[j as int]->Directory_0 == interp_at(tok, pt.entries[j as int].get_Some_0(), (layer + 1) as nat, dir_addr, x86_arch_spec.entry_base(layer, base, j))
+                        &&& res[j as int]->Directory_0 == interp_at(tok, pt.entries[j as int]->Some_0, (layer + 1) as nat, dir_addr, x86_arch_spec.entry_base(layer, base, j))
                     },
                     GPDE::Page { addr, .. } => res[j as int] is Page && res[j as int]->Page_0.frame.base == addr,
                     GPDE::Invalid             => res[j as int] is Invalid,
@@ -1240,8 +1240,8 @@ proof fn lemma_no_empty_directories_implies_interp_at_no_empty_directories(tok: 
 //        if entry.is_dir(layer) {
 //            assert(entry@ is Directory);
 //            let dir_addr = entry.address();
-//            assert(pt.entries[idx as int].is_Some());
-//            let dir_pt: Ghost<PTDir> = Ghost(pt.entries.index(idx as int).get_Some_0());
+//            assert(pt.entries[idx as int] is Some);
+//            let dir_pt: Ghost<PTDir> = Ghost(pt.entries.index(idx as int)->Some_0);
 //            assert(directories_obey_invariant_at(mem, pt, layer as nat, ptr));
 //            proof {
 //                assert(interp@.inv());
@@ -1264,7 +1264,7 @@ proof fn lemma_no_empty_directories_implies_interp_at_no_empty_directories(tok: 
 //            let res = Ok((entry_base, pte));
 //            proof {
 //            if interp@.resolve(vaddr as nat).is_Ok() {
-//                assert(interp@.entries[idx as int]->Page_0 === interp@.resolve(vaddr as nat).get_Ok_0().1);
+//                assert(interp@.entries[idx as int]->Page_0 === interp@.resolve(vaddr as nat)->Ok_0.1);
 //                assert(interp@.entries[idx as int] === interp_at_entry(mem, pt, layer as nat, ptr, base as nat, idx as nat));
 //            }
 //            }
@@ -2000,12 +2000,12 @@ proof fn lemma_empty_at_interp_at_aux_equal_l1_empty_dir(tok: WrappedTokenView, 
         init.len() <= X86_NUM_ENTRIES,
         idx < X86_NUM_ENTRIES,
         entry_at_spec(tok, pt, layer, ptr, idx)@ is Directory,
-        empty_at(tok, pt.entries[idx as int].get_Some_0(), (layer + 1) as nat, entry_at_spec(tok, pt, layer, ptr, idx)@->Directory_addr),
+        empty_at(tok, pt.entries[idx as int]->Some_0, (layer + 1) as nat, entry_at_spec(tok, pt, layer, ptr, idx)@->Directory_addr),
     ensures
         ({ let res =
             interp_at_aux(
                 tok,
-                pt.entries[idx as int].get_Some_0(),
+                pt.entries[idx as int]->Some_0,
                 layer + 1,
                 entry_at_spec(tok, pt, layer, ptr, idx)@->Directory_addr,
                 x86_arch_spec.entry_base(layer, base, idx),
@@ -2017,7 +2017,7 @@ proof fn lemma_empty_at_interp_at_aux_equal_l1_empty_dir(tok: WrappedTokenView, 
 {
     let e_ptr = entry_at_spec(tok, pt, layer, ptr, idx)@->Directory_addr;
     let e_base = x86_arch_spec.entry_base(layer, base, idx);
-    let e_pt = pt.entries[idx as int].get_Some_0();
+    let e_pt = pt.entries[idx as int]->Some_0;
 
     if init.len() >= X86_NUM_ENTRIES as nat {
     } else {
@@ -2032,12 +2032,12 @@ proof fn lemma_empty_at_interp_at_equal_l1_empty_dir(tok: WrappedTokenView, pt: 
         inv_at(tok, pt, layer, ptr),
         idx < X86_NUM_ENTRIES,
         entry_at_spec(tok, pt, layer, ptr, idx)@ is Directory,
-        empty_at(tok, pt.entries[idx as int].get_Some_0(), (layer + 1) as nat, entry_at_spec(tok, pt, layer, ptr, idx)@->Directory_addr),
+        empty_at(tok, pt.entries[idx as int]->Some_0, (layer + 1) as nat, entry_at_spec(tok, pt, layer, ptr, idx)@->Directory_addr),
     ensures
         ({ let res =
             interp_at(
                 tok,
-                pt.entries[idx as int].get_Some_0(),
+                pt.entries[idx as int]->Some_0,
                 layer + 1,
                 entry_at_spec(tok, pt, layer, ptr, idx)@->Directory_addr,
                 x86_arch_spec.entry_base(layer, base, idx));
@@ -2216,10 +2216,10 @@ fn insert_empty_directory(
         tok@.orig_st == old(tok)@.orig_st,
         //tok.alloc_available_pages() == old(tok)@.alloc_available_pages() - 1,
         forall|i: nat| #![auto] i < X86_NUM_ENTRIES && i != idx ==> entry_at_spec(tok@, res.0@, layer as nat, ptr, i)@ == entry_at_spec(old(tok)@, res.0@, layer as nat, ptr, i)@,
-        forall|r: MemRegion| r != res.0@.region && r != res.0@.entries[idx as int].get_Some_0().region ==> tok@.regions[r] == old(tok)@.regions[r],
+        forall|r: MemRegion| r != res.0@.region && r != res.0@.entries[idx as int]->Some_0.region ==> tok@.regions[r] == old(tok)@.regions[r],
         ({ let pt_with_empty = res.0@; let new_dir_region = res.1; let new_dir_entry = res.2;
            let rebuild_root_pt_inner = res.3@;
-           let new_dir_pt = pt_with_empty.entries[idx as int].get_Some_0();
+           let new_dir_pt = pt_with_empty.entries[idx as int]->Some_0;
            let entry_base = x86_arch_spec.entry_base(layer as nat, base as nat, idx as nat);
            let new_dir_interp = interp_at(tok@, new_dir_pt, (layer + 1) as nat, new_dir_region.base, entry_base);
            let interp = interp_at(old(tok)@, pt, layer as nat, ptr, base as nat);
@@ -2771,7 +2771,7 @@ fn unmap_aux(
             assert(pt.entries[idx as int] is Some);
             let ghost dir_pt = pt.entries[idx as int]->Some_0;
             assert(directories_obey_invariant_at(tok@, pt, layer as nat, ptr));
-            assert(forall|r: MemRegion| #![auto] pt.entries[idx as int].get_Some_0().used_regions.contains(r) ==> pt.used_regions.contains(r));
+            assert(forall|r: MemRegion| #![auto] pt.entries[idx as int]->Some_0.used_regions.contains(r) ==> pt.used_regions.contains(r));
 
             let ghost rebuild_root_pt_inner = |pt_new_inner: PTDir, removed_regions: Set<MemRegion>| {
                 let pt_new = PTDir {
@@ -2920,9 +2920,9 @@ fn unmap_aux(
 
                     assert(forall|i: nat, r: MemRegion|
                         i < X86_NUM_ENTRIES && i != idx
-                        && pt_after_rec.entries[i as int].is_Some()
-                        && pt_after_rec.entries[i as int].get_Some_0().used_regions.contains(r)
-                        ==> !pt.entries[idx as int].get_Some_0().used_regions.contains(r))
+                        && pt_after_rec.entries[i as int] is Some
+                        && pt_after_rec.entries[i as int]->Some_0.used_regions.contains(r)
+                        ==> !pt.entries[idx as int]->Some_0.used_regions.contains(r))
                     by {
                         reveal(ghost_pt_used_regions_pairwise_disjoint);
                     };

@@ -1021,7 +1021,7 @@ impl Directory {
                         // (i.e. must be on some lower level).
                         let new_dir = self.new_empty_dir(entry);
                         // We never fail to insert an accepted mapping into an empty directory
-                        Ok(self.update(entry, NodeEntry::Directory(new_dir.map_frame(base, pte).get_Ok_0())))
+                        Ok(self.update(entry, NodeEntry::Directory(new_dir.map_frame(base, pte)->Ok_0)))
                     }
                 },
             }
@@ -1101,11 +1101,11 @@ impl Directory {
     //        self.accepted_mapping(base, pte),
     //        self.map_frame(base, pte).is_Ok(),
     //    ensures
-    //        self.map_frame(base, pte).get_Ok_0().layer === self.layer,
-    //        self.map_frame(base, pte).get_Ok_0().arch === self.arch,
-    //        self.map_frame(base, pte).get_Ok_0().base_vaddr === self.base_vaddr,
-    //        !self.map_frame(base, pte).get_Ok_0().empty(),
-    //        self.map_frame(base, pte).get_Ok_0().inv(),
+    //        self.map_frame(base, pte)->Ok_0.layer === self.layer,
+    //        self.map_frame(base, pte)->Ok_0.arch === self.arch,
+    //        self.map_frame(base, pte)->Ok_0.base_vaddr === self.base_vaddr,
+    //        !self.map_frame(base, pte)->Ok_0.empty(),
+    //        self.map_frame(base, pte)->Ok_0.inv(),
     //        !exists|b:nat| true
     //            && self.interp().map.contains_key(b)
     //            && between(base, b, b + (#[trigger] self.interp().map.index(b)).frame.size),
@@ -1117,7 +1117,7 @@ impl Directory {
     //    self.lemma_accepted_mapping_implies_interp_accepted_mapping_auto();
     //    indexing::lemma_index_from_base_and_addr(self.base_vaddr, base, self.entry_size(), self.num_entries());
     //
-    //    let res = self.map_frame(base, pte).get_Ok_0();
+    //    let res = self.map_frame(base, pte)->Ok_0;
     //
     //    let entry = self.index_for_vaddr(base);
     //    indexing::lemma_entry_base_from_index(self.base_vaddr, entry, self.entry_size());
@@ -1148,7 +1148,7 @@ impl Directory {
     //                assert(res.directories_obey_invariant(true));
     //                assert(res.directories_are_nonempty());
     //                assert(res.inv());
-    //                assert(equal(self.map_frame(base, pte).get_Ok_0().layer, self.layer));
+    //                assert(equal(self.map_frame(base, pte)->Ok_0.layer, self.layer));
     //
     //                assert(res.entries.index(entry as int) is Directory);
     //                assert(!res.empty());
@@ -1516,7 +1516,7 @@ impl Directory {
     //    self.lemma_accepted_mapping_implies_interp_accepted_mapping_auto();
     //    indexing::lemma_index_from_base_and_addr(self.base_vaddr, base, self.entry_size(), self.num_entries());
     //
-    //    let res = self.map_frame(base, pte).get_Ok_0();
+    //    let res = self.map_frame(base, pte)->Ok_0;
     //    if self.map_frame(base, pte).is_Ok() {
     //        self.lemma_map_frame_preserves_inv(base, pte);
     //    }
@@ -1572,7 +1572,7 @@ impl Directory {
     //        extra::mod_mult_zero_implies_mod_zero(self.base_vaddr, self.entry_size(), self.num_entries());
     //    };
     //
-    //    let res = self.map_frame(base, pte).get_Ok_0();
+    //    let res = self.map_frame(base, pte)->Ok_0;
     //    if self.map_frame(base, pte).is_Ok() {
     //        self.lemma_map_frame_preserves_inv(base, pte);
     //    }
@@ -1618,9 +1618,9 @@ impl Directory {
     //                        assert(self.interp().map_frame(base, pte).is_Ok());
     //
     //                        assert(equal(self.interp().map.insert(base, pte), self.update(entry, NodeEntry::Directory(nd)).interp().map));
-    //                        assert(equal(self.interp().map.insert(base, pte), self.interp().map_frame(base, pte).get_Ok_0().map));
+    //                        assert(equal(self.interp().map.insert(base, pte), self.interp().map_frame(base, pte)->Ok_0.map));
     //
-    //                        assert(equal(self.map_frame(base, pte).get_Ok_0().interp(), self.interp().map_frame(base, pte).get_Ok_0()));
+    //                        assert(equal(self.map_frame(base, pte)->Ok_0.interp(), self.interp().map_frame(base, pte)->Ok_0));
     //                    },
     //                    Err(e) => {
     //                        assert(d.map_frame(base, pte).is_Err());
@@ -1674,16 +1674,16 @@ impl Directory {
     //                new_dir.lemma_map_frame_empty_is_ok(base, pte);
     //                new_dir.lemma_map_frame_preserves_inv(base, pte);
     //
-    //                let new_dir_mapped = new_dir.map_frame(base, pte).get_Ok_0();
+    //                let new_dir_mapped = new_dir.map_frame(base, pte)->Ok_0;
     //                assert(new_dir.map_frame(base, pte).is_Ok());
     //                assert(new_dir_mapped.inv());
     //                new_dir.lemma_map_frame_refines_map_frame(base, pte);
     //                assert(new_dir.interp().map_frame(base, pte).is_Ok());
-    //                assert(equal(new_dir_mapped.interp(), new_dir.interp().map_frame(base, pte).get_Ok_0()));
+    //                assert(equal(new_dir_mapped.interp(), new_dir.interp().map_frame(base, pte)->Ok_0));
     //
     //                new_dir.lemma_empty_implies_interp_empty(true);
     //                assert(new_dir.interp().map =~= map![]);
-    //                assert(new_dir.interp().map_frame(base, pte).get_Ok_0().map =~= map![base => pte]);
+    //                assert(new_dir.interp().map_frame(base, pte)->Ok_0.map =~= map![base => pte]);
     //                assert(self.interp_of_entry(entry).map =~= map![]);
     //                assert(equal(self.interp_of_entry(entry).map, map![]));
     //                assert(equal(map![].insert(base, pte), new_dir_mapped.interp().map));
@@ -1756,13 +1756,13 @@ impl Directory {
     //        self.accepted_unmap(base),
     //        self.unmap(base).is_Ok(),
     //    ensures
-    //        self.unmap(base).get_Ok_0().inv(),
+    //        self.unmap(base)->Ok_0.inv(),
     //    decreases self.arch.layers.len() - self.layer
     //{
     //    broadcast use group_ambient;
     //    ambient_lemmas2();
     //
-    //    let res = self.unmap(base).get_Ok_0();
+    //    let res = self.unmap(base)->Ok_0;
     //
     //    let entry = self.index_for_vaddr(base);
     //    indexing::lemma_entry_base_from_index(self.base_vaddr, entry, self.entry_size());
@@ -1859,10 +1859,10 @@ impl Directory {
     //    }
     //
     //    let nself_res = self.unmap(base);
-    //    let nself     = self.unmap(base).get_Ok_0();
+    //    let nself     = self.unmap(base)->Ok_0;
     //
     //    let i_nself_res = self.interp().unmap(base);
-    //    let i_nself     = self.interp().unmap(base).get_Ok_0();
+    //    let i_nself     = self.interp().unmap(base)->Ok_0;
     //
     //    let entry = self.index_for_vaddr(base);
     //    indexing::lemma_entry_base_from_index(self.base_vaddr, entry, self.entry_size());
@@ -1893,7 +1893,7 @@ impl Directory {
     //                    assert(new_d.inv());
     //                    assert(d.unmap(base).is_Ok());
     //                    assert(d.interp().unmap(base).is_Ok());
-    //                    assert(equal(new_d.interp(), d.interp().unmap(base).get_Ok_0()));
+    //                    assert(equal(new_d.interp(), d.interp().unmap(base)->Ok_0));
     //                    if new_d.empty() {
     //                        new_d.lemma_empty_implies_interp_empty(true);
     //                        d.interp().lemma_unmap_decrements_len(base);
@@ -1903,7 +1903,7 @@ impl Directory {
     //                        assert(d.interp().map.dom() =~= set![base]);
     //                        assert(nself_res.is_Ok());
     //                        assert(equal(self.interp_of_entry(entry).map, d.interp().map));
-    //                        assert(equal(d.interp().unmap(base).get_Ok_0().map, d.interp().map.remove(base)));
+    //                        assert(equal(d.interp().unmap(base)->Ok_0.map, d.interp().map.remove(base)));
     //                        assert(self.interp_of_entry(entry).map.remove(base) =~= map![]);
     //                        assert(self.update(entry, NodeEntry::Invalid).inv());
     //                        self.lemma_remove_from_interp_of_entry_implies_remove_from_interp(entry, base, NodeEntry::Invalid, true);
