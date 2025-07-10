@@ -82,6 +82,75 @@ pub proof fn next_preserves_inv(c: os::Constants, s1: os::State, s2: os::State, 
     next_step_preserves_inv(c, s1, s2, step, lbl);
 }
 
+pub proof fn next_step_preserves_inv_basic(c: os::Constants, s1: os::State, s2: os::State, step: os::Step, lbl: RLbl)
+    requires
+        s1.inv(c),
+        os::next_step(c, s1, s2, step, lbl),
+    ensures
+        s2.inv_basic(c),
+{
+    hide(os::State::inv_inflight_pte_wf);
+    hide(os::State::inv_mapped_pte_wf);
+    hide(os::State::inv_successful_unmaps);
+    hide(os::State::inv_unsuccessful_maps);
+    hide(os::State::inv_successful_maps);
+    hide(os::State::inv_overlap_of_mapped_maps);
+    hide(os::State::inv_lock);
+
+    broadcast use
+        to_rl1::next_preserves_inv,
+        to_rl1::next_refines;
+
+    assert(s2.wf(c));
+    assert(s2.inv_inflight_pte_wf(c)) by {
+        reveal(os::State::inv_inflight_pte_wf);
+        reveal(os::State::inv_mapped_pte_wf);
+    };
+
+    assert(s2.inv_mapped_pte_wf(c)) by {
+        reveal(os::State::inv_inflight_pte_wf);
+        reveal(os::State::inv_mapped_pte_wf);
+    };
+
+    assert(s2.inv_successful_unmaps(c)) by {
+        reveal(os::State::inv_successful_unmaps);
+        reveal(os::State::inv_lock);
+    };
+
+    assert(s2.inv_unsuccessful_maps(c)) by {
+        reveal(os::State::inv_unsuccessful_maps);
+        reveal(os::State::inv_lock);
+    };
+
+    assert(s2.inv_successful_maps(c)) by {
+        reveal(os::State::inv_successful_maps);
+        reveal(os::State::inv_lock);
+    };
+
+    assert(s2.inv_overlap_of_mapped_maps(c)) by {
+        reveal(os::State::inv_overlap_of_mapped_maps);
+        reveal(os::State::inv_lock);
+    };
+
+    assert(s2.inv_lock(c)) by {
+        reveal(os::State::inv_lock);
+
+        assert forall|core: Core|
+            s2.os_ext.lock === Some(core) implies #[trigger] c.valid_core(core) && s2.core_states[core].is_in_crit_sect()
+        by {
+            if s2.os_ext.lock == s1.os_ext.lock {
+                assert(c.valid_core(core));
+                assert(s1.core_states[core].is_in_crit_sect());
+            }
+        };
+
+        assert forall|core: Core|
+            #[trigger] c.valid_core(core) && s2.core_states[core].is_in_crit_sect() implies s2.os_ext.lock === Some(core)
+        by {
+        };
+    };
+}
+
 #[verifier::rlimit(100)] #[verifier(spinoff_prover)]
 pub proof fn next_step_preserves_inv(c: os::Constants, s1: os::State, s2: os::State, step: os::Step, lbl: RLbl)
     requires
@@ -107,7 +176,8 @@ pub proof fn next_step_preserves_inv(c: os::Constants, s1: os::State, s2: os::St
     };
     */
 
-    assert(s2.inv_basic(c));
+
+    next_step_preserves_inv_basic(c, s1, s2, step, lbl);
     next_step_preserves_inv_mmu(c, s1, s2, step, lbl);
     next_step_preserves_inv_allocated_mem(c, s1, s2, step, lbl);
     next_step_preserves_overlap_mem_inv(c, s1, s2, step, lbl);
