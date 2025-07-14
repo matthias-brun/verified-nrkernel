@@ -99,6 +99,9 @@ pub const MASK_L3_PG_FLAG_PAT: usize = bit!(7usize);
 pub const MASK_DIRTY_ACCESS: usize = bit!(5) | bit!(6);
 pub const MASK_NEG_DIRTY_ACCESS: usize = !MASK_DIRTY_ACCESS;
 
+pub const MASK_PROT_FLAGS: usize = bit!(63usize) | bit!(2usize) | bit!(1usize);
+pub const MASK_NEG_PROT_FLAGS: usize = !MASK_PROT_FLAGS;
+
 // In the implementation we can always use the 12:52 mask as the invariant guarantees that in the
 // other cases, the lower bits are already zero anyway.
 // We cannot use dual exec/spec constants here because for those Verus currently doesn't support
