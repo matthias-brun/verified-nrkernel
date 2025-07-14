@@ -48,6 +48,7 @@ pub enum Step {
     // TSO
     WriteNonneg,
     WriteNonpos,
+    WriteProtect,
     Read,
     Barrier,
     SadWrite,
@@ -65,6 +66,11 @@ impl State {
     pub open spec fn is_happy_writenonpos(self, core: Core, addr: usize, value: usize) -> bool {
         &&& !self.writes.tso.is_empty() ==> core == self.writes.core
         &&& self.pt_mem.is_nonpos_write(addr, value)
+    }
+
+    pub open spec fn is_happy_writeprotect(self, core: Core, addr: usize, value: usize) -> bool {
+        &&& !self.writes.tso.is_empty() ==> core == self.writes.core
+        &&& self.pt_mem.is_prot_write(addr, value)
     }
 
     pub open spec fn is_tso_read_deterministic(self, core: Core, addr: usize) -> bool {
@@ -290,6 +296,28 @@ pub open spec fn step_WriteNonpos(pre: State, post: State, c: Constants, lbl: Lb
         ))
 }
 
+pub open spec fn step_WriteProtect(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+    &&& lbl matches Lbl::Write(core, addr, value)
+
+    &&& pre.happy
+    &&& c.valid_core(core)
+    &&& c.in_ptmem_range(addr as nat, 8)
+    &&& aligned(addr as nat, 8)
+    &&& pre.is_happy_writeprotect(core, addr, value)
+    &&& pre.polarity is Protect || pre.can_flip_polarity(c)
+
+    &&& post.happy      == pre.happy
+    &&& post.phys_mem   == pre.phys_mem
+    &&& post.pt_mem     == pre.pt_mem.write(addr, value)
+    &&& post.tlbs       == pre.tlbs
+    &&& post.writes.tso == pre.writes.tso.insert(addr)
+    &&& post.writes.core == core
+    &&& post.polarity == Polarity::Protect
+    &&& post.writes.nonpos == Set::new(|core| c.valid_core(core))
+    &&& post.pending_maps == pre.pending_maps
+    &&& post.pending_unmaps == pre.pending_unmaps
+}
+
 pub open spec fn step_Read(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
     &&& lbl matches Lbl::Read(core, addr, value)
 
@@ -351,6 +379,7 @@ pub open spec fn next_step(pre: State, post: State, c: Constants, step: Step, lb
         Step::TLBFillNA { core, vaddr } => step_TLBFillNA(pre, post, c, core, vaddr, lbl),
         Step::WriteNonneg               => step_WriteNonneg(pre, post, c, lbl),
         Step::WriteNonpos               => step_WriteNonpos(pre, post, c, lbl),
+        Step::WriteProtect              => step_WriteProtect(pre, post, c, lbl),
         Step::Read                      => step_Read(pre, post, c, lbl),
         Step::Barrier                   => step_Barrier(pre, post, c, lbl),
         Step::SadWrite                  => step_SadWrite(pre, post, c, lbl),

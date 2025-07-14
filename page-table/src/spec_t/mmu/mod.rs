@@ -25,7 +25,7 @@ verus! {
 pub enum Polarity {
     Mapping,
     Unmapping,
-    // Protect,
+    Protect,
 }
 
 // $line_count$}$
