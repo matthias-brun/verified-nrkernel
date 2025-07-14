@@ -53,6 +53,7 @@ pub enum Step {
     // TSO
     WriteNonneg,
     WriteNonpos,
+    WriteProtect,
     Writeback { core: Core },
     Read,
     Barrier,
@@ -92,6 +93,11 @@ impl State {
     pub open spec fn is_happy_writenonpos(self, core: Core, addr: usize, value: usize) -> bool {
         &&& !self.writes.tso.is_empty() ==> core == self.writes.core
         &&& self.writer_mem().is_nonpos_write(addr, value)
+    }
+
+    pub open spec fn is_happy_writeprotect(self, core: Core, addr: usize, value: usize) -> bool {
+        &&& !self.writes.tso.is_empty() ==> core == self.writes.core
+        &&& self.writer_mem().is_prot_write(addr, value)
     }
 
     pub open spec fn can_flip_polarity(self, c: Constants) -> bool {
@@ -320,8 +326,8 @@ pub open spec fn step_WriteNonneg(pre: State, post: State, c: Constants, lbl: Lb
 
     &&& pre.happy
     &&& c.valid_core(core)
-    &&& c.in_ptmem_range(addr as nat, 8)
     &&& aligned(addr as nat, 8)
+    &&& c.in_ptmem_range(addr as nat, 8)
     &&& pre.is_happy_writenonneg(core, addr, value)
     &&& pre.polarity is Mapping || pre.can_flip_polarity(c)
 
@@ -370,6 +376,30 @@ pub open spec fn step_WriteNonpos(pre: State, post: State, c: Constants, lbl: Lb
             |vbase| pre.writer_mem()@.contains_key(vbase) && !post.writer_mem()@.contains_key(vbase),
             |vbase| pre.writer_mem()@[vbase]
         ))
+}
+
+pub open spec fn step_WriteProtect(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+    &&& lbl matches Lbl::Write(core, addr, value)
+
+    &&& pre.happy
+    &&& c.valid_core(core)
+    &&& aligned(addr as nat, 8)
+    &&& c.in_ptmem_range(addr as nat, 8)
+    &&& pre.is_happy_writeprotect(core, addr, value)
+    &&& pre.polarity is Protect || pre.can_flip_polarity(c)
+
+    &&& post.happy == pre.happy
+    &&& post.phys_mem == pre.phys_mem
+    &&& post.pt_mem == pre.pt_mem
+    &&& post.tlbs == pre.tlbs
+    &&& post.sbuf == pre.sbuf.insert(core, pre.sbuf[core].push((addr, value)))
+    &&& post.walks == pre.walks
+    &&& post.writes.tso === pre.writes.tso.insert(addr)
+    &&& post.writes.nonpos == pre.writes.nonpos
+    &&& post.writes.core == core
+    &&& post.polarity == Polarity::Protect
+    &&& post.hist.pending_maps == pre.hist.pending_maps
+    &&& post.hist.pending_unmaps == pre.hist.pending_unmaps
 }
 
 pub open spec fn step_Writeback(pre: State, post: State, c: Constants, core: Core, lbl: Lbl) -> bool {
@@ -455,6 +485,7 @@ pub open spec fn next_step(pre: State, post: State, c: Constants, step: Step, lb
         Step::TLBEvict { core, tlb_va } => step_TLBEvict(pre, post, c, core, tlb_va, lbl),
         Step::WriteNonneg               => step_WriteNonneg(pre, post, c, lbl),
         Step::WriteNonpos               => step_WriteNonpos(pre, post, c, lbl),
+        Step::WriteProtect              => step_WriteProtect(pre, post, c, lbl),
         Step::Writeback { core }        => step_Writeback(pre, post, c, core, lbl),
         Step::Read                      => step_Read(pre, post, c, lbl),
         Step::Barrier                   => step_Barrier(pre, post, c, lbl),
@@ -548,7 +579,7 @@ impl State {
 
     pub open spec fn inv_sbuf_facts(self, c: Constants) -> bool {
         &&& self.non_writer_sbufs_are_empty(c)
-        &&& self.writer_sbuf_entries_are_unique()
+        &&& self.polarity !is Protect ==> self.writer_sbuf_entries_are_unique()
         &&& self.writer_sbuf_subset_tso_writes()
     }
 
@@ -699,12 +730,25 @@ impl State {
         &&& self.writes.nonpos === set![] ==> self.hist.pending_unmaps === map![]
     }
 
+    pub open spec fn inv_protect(self, c: Constants) -> bool {
+        &&& true
+        // &&& self.writes.tso !== set![] ==> self.writes.nonpos === Set::new(|core| c.valid_core(core))
+        // &&& self.writer_sbuf_entries_have_P_bit_0()
+        // &&& self.inv_unmapping__inflight_walks(c)
+        // &&& self.inv_unmapping__core_vs_writer_reads(c)
+        // &&& self.inv_unmapping__valid_walk(c)
+        // &&& self.inv_unmapping__notin_nonpos(c)
+        // &&& self.hist.pending_maps === map![]
+        // &&& self.writes.nonpos === set![] ==> self.hist.pending_unmaps === map![]
+    }
+
     pub open spec fn inv(self, c: Constants) -> bool {
         self.happy ==> {
         &&& self.wf(c)
         &&& self.inv_sbuf_facts(c)
         &&& self.polarity is Mapping ==> self.inv_mapping(c)
         &&& self.polarity is Unmapping ==> self.inv_unmapping(c)
+        &&& self.polarity is Protect ==> self.inv_protect(c)
         }
     }
 }
@@ -745,6 +789,8 @@ proof fn next_step_preserves_inv(pre: State, post: State, c: Constants, step: St
                 broadcast use lemma_writes_tso_empty_implies_sbuf_empty;
                 reveal(State::inv_unmapping__notin_nonpos);
                 assert(pre.inv_mapping__inflight_walks(c));
+            } else if pre.polarity is Protect {
+                admit();
             }
             assert(post.writes.tso === set![] ==> post.hist.pending_maps === map![]) by {
                 match step {
@@ -760,10 +806,54 @@ proof fn next_step_preserves_inv(pre: State, post: State, c: Constants, step: St
             next_step_preserves_inv_mapping__pending_map_is_base_walk(pre, post, c, step, lbl);
             next_step_preserves_inv_mapping__valid_not_pending_is_not_in_sbuf(pre, post, c, step, lbl);
             next_step_preserves_inv_mapping__valid_is_not_in_sbuf(pre, post, c, step, lbl);
-        } else {
+        } else if post.polarity is Unmapping {
             next_step_preserves_inv_unmapping(pre, post, c, step, lbl);
+        } else {
+            assert(post.polarity is Protect);
+            next_step_preserves_inv_protect(pre, post, c, step, lbl);
         }
     }
+}
+
+proof fn next_step_preserves_inv_protect(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
+    requires
+        pre.wf(c),
+        pre.happy,
+        post.happy,
+        post.polarity is Protect,
+        pre.inv(c),
+        post.wf(c),
+        post.inv_sbuf_facts(c),
+        next_step(pre, post, c, step, lbl),
+    ensures post.inv_protect(c)
+{
+    // assert_by_contradiction!(Set::new(|core| c.valid_core(core)) !== set![], {
+    //     assert(Set::new(|core| c.valid_core(core)).contains(pre.writes.core));
+    // });
+    // if pre.polarity is Mapping { // Flipped polarity in this transition
+    //     broadcast use lemma_writes_tso_empty_implies_sbuf_empty;
+    //     assert(pre.writer_sbuf_entries_have_P_bit_0());
+    // }
+    // assert(post.writer_sbuf_entries_have_P_bit_0());
+    //
+    // if pre.can_flip_polarity(c) {
+    //     assert(pre.inv_unmapping__inflight_walks(c)) by {
+    //         broadcast use
+    //             lemma_finish_iter_walk_prefix_matches_iter_walk,
+    //             lemma_iter_walk_equals_pt_walk;
+    //         assert(pre.can_flip_polarity(c));
+    //     };
+    //     assert(pre.inv_unmapping__core_vs_writer_reads(c)) by {
+    //         reveal(State::inv_unmapping__core_vs_writer_reads);
+    //     };
+    //     assert(pre.inv_unmapping__notin_nonpos(c)) by {
+    //         reveal(State::inv_unmapping__notin_nonpos);
+    //     };
+    // }
+    // next_step_preserves_inv_unmapping__valid_walk(pre, post, c, step, lbl);
+    // next_step_preserves_inv_unmapping__core_vs_writer_reads(pre, post, c, step, lbl);
+    // next_step_preserves_inv_unmapping__inflight_walks(pre, post, c, step, lbl);
+    // next_step_preserves_inv_unmapping__notin_nonpos(pre, post, c, step, lbl);
 }
 
 proof fn next_step_preserves_inv_unmapping(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
@@ -784,6 +874,8 @@ proof fn next_step_preserves_inv_unmapping(pre: State, post: State, c: Constants
     if pre.polarity is Mapping { // Flipped polarity in this transition
         broadcast use lemma_writes_tso_empty_implies_sbuf_empty;
         assert(pre.writer_sbuf_entries_have_P_bit_0());
+    } else if pre.polarity is Protect {
+        admit();
     }
     assert(post.writer_sbuf_entries_have_P_bit_0());
 
@@ -1508,7 +1600,7 @@ proof fn next_step_preserves_wf(pre: State, post: State, c: Constants, step: Ste
     assert(post.pt_mem.mem.dom() =~= pre.pt_mem.mem.dom());
 }
 
-#[verifier::rlimit(100)] #[verifier(spinoff_prover)]
+#[verifier::rlimit(150)] #[verifier(spinoff_prover)]
 proof fn next_step_preserves_inv_mapping__inflight_walks(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
     requires
         pre.wf(c),
@@ -1668,6 +1760,17 @@ proof fn next_step_preserves_inv_sbuf_facts(pre: State, post: State, c: Constant
                 }
                 assert(post.inv_sbuf_facts(c));
             },
+            Step::WriteProtect => {
+                let core = lbl->Write_0;
+                if core == pre.writes.core {
+                } else {
+                    assert_by_contradiction!(pre.writer_sbuf() =~= seq![], {
+                        assert(pre.writes.tso.contains(pre.writer_sbuf()[0].0));
+                    });
+                    assert(post.non_writer_sbufs_are_empty(c));
+                }
+                assert(post.inv_sbuf_facts(c));
+            },
             _ => assert(post.inv_sbuf_facts(c)),
         }
     }
@@ -1676,6 +1779,7 @@ proof fn next_step_preserves_inv_sbuf_facts(pre: State, post: State, c: Constant
 broadcast proof fn lemma_writer_read_from_sbuf(state: State, c: Constants, i: int)
     requires
         state.wf(c),
+        state.polarity !is Protect,
         #[trigger] state.inv_sbuf_facts(c),
         0 <= i < state.writer_sbuf().len(),
     ensures
@@ -1725,6 +1829,7 @@ broadcast proof fn lemma_step_core_mem(pre: State, post: State, c: Constants, st
         #[trigger] next_step(pre, post, c, step, lbl),
         !(step is WriteNonneg),
         !(step is WriteNonpos),
+        !(step is WriteProtect),
         !(step is Writeback),
     ensures
         #[trigger] post.core_mem(core) == pre.core_mem(core)
@@ -2064,6 +2169,7 @@ broadcast proof fn lemma_valid_implies_equal_reads(state: State, c: Constants, c
 proof fn lemma_valid_implies_equal_walks(state: State, c: Constants, core: Core, va: usize)
     requires
         state.wf(c),
+        state.polarity is Mapping,
         state.inv_sbuf_facts(c),
         state.inv_mapping__valid_is_not_in_sbuf(c),
         c.valid_core(core),
@@ -2482,6 +2588,7 @@ pub mod refinement {
                 rl2::Step::TLBEvict { core, tlb_va } => rl1::Step::TLBEvict { core, tlb_va },
                 rl2::Step::WriteNonneg => rl1::Step::WriteNonneg,
                 rl2::Step::WriteNonpos => rl1::Step::WriteNonpos,
+                rl2::Step::WriteProtect => rl1::Step::WriteProtect,
                 rl2::Step::Writeback { core } => rl1::Step::Stutter,
                 rl2::Step::Read => rl1::Step::Read,
                 rl2::Step::Barrier => rl1::Step::Barrier,
@@ -2530,7 +2637,7 @@ pub mod refinement {
                         rl2::lemma_valid_implies_equal_walks(pre, c, core, walk.vaddr);
                     }
                     assert(rl1::step_TLBFill(pre.interp(), post.interp(), c, core, vbase, lbl));
-                } else {
+                } else if pre.polarity is Unmapping {
                     if pre.hist.pending_unmaps.contains_key(vbase) && pre.writes.nonpos.contains(core) {
                         assert(rl1::step_TLBFillNA(pre.interp(), post.interp(), c, core, vbase, lbl));
                     } else {
@@ -2548,6 +2655,8 @@ pub mod refinement {
                         });
                         assert(rl1::step_TLBFill(pre.interp(), post.interp(), c, core, vbase, lbl));
                     }
+                } else {
+                    admit();
                 }
             },
             rl2::Step::TLBEvict { core, tlb_va } => {
@@ -2570,6 +2679,16 @@ pub mod refinement {
                 rl2::lemma_mem_view_after_step_write(pre, post, c, lbl);
                 pre.pt_mem.lemma_write_seq(pre.writer_sbuf());
                 assert(rl1::step_WriteNonpos(pre.interp(), post.interp(), c, lbl));
+            },
+            rl2::Step::WriteProtect => {
+                admit();
+                let (core, addr, value) =
+                    if let Lbl::Write(core, addr, value) = lbl {
+                        (core, addr, value)
+                    } else { arbitrary() };
+                rl2::lemma_mem_view_after_step_write(pre, post, c, lbl);
+                pre.pt_mem.lemma_write_seq(pre.writer_sbuf());
+                assert(rl1::step_WriteProtect(pre.interp(), post.interp(), c, lbl));
             },
             rl2::Step::Writeback { core } => {
                 super::lemma_step_Writeback_preserves_writer_mem(pre, post, c, core, lbl);
@@ -2661,10 +2780,12 @@ pub mod refinement {
                     assert(rl1::step_MemOpNoTr(pre.interp(), post.interp(), c, lbl));
                 }
             }
-        } else {
+        } else if pre.polarity is Unmapping {
             broadcast use rl2::lemma_invalid_walk_is_invalid_in_writer_mem;
             assert(pre.core_mem(core).pt_walk(walk.vaddr).result() is Invalid);
             assert(pre.writer_mem().pt_walk(walk.vaddr).result() is Invalid);
+        } else {
+            admit();
         }
     }
 

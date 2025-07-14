@@ -110,16 +110,22 @@ impl State {
         self.core_mem(self.hist.writes.core)
     }
 
-    pub closed spec fn is_happy_writenonneg(self, c: Constants, core: Core, addr: usize, value: usize) -> bool {
+    pub closed spec fn is_happy_writenonneg(self, core: Core, addr: usize, value: usize) -> bool {
         &&& !self.hist.writes.tso.is_empty() ==> core == self.hist.writes.core
-        &&& !(self.hist.polarity is Mapping) ==> self.can_flip_polarity(c)
+        &&& self.hist.polarity !is Mapping ==> self.can_flip_polarity()
         &&& self.writer_mem().is_nonneg_write(addr, value)
     }
 
-    pub closed spec fn is_happy_writenonpos(self, c: Constants, core: Core, addr: usize, value: usize) -> bool {
+    pub closed spec fn is_happy_writenonpos(self, core: Core, addr: usize, value: usize) -> bool {
         &&& !self.hist.writes.tso.is_empty() ==> core == self.hist.writes.core
-        &&& !(self.hist.polarity is Unmapping) ==> self.can_flip_polarity(c)
+        &&& self.hist.polarity !is Unmapping ==> self.can_flip_polarity()
         &&& self.writer_mem().is_nonpos_write(addr, value)
+    }
+
+    pub closed spec fn is_happy_writeprotect(self, core: Core, addr: usize, value: usize) -> bool {
+        &&& !self.hist.writes.tso.is_empty() ==> core == self.hist.writes.core
+        &&& self.hist.polarity !is Protect ==> self.can_flip_polarity()
+        &&& self.writer_mem().is_prot_write(addr, value)
     }
 }
 
@@ -419,8 +425,9 @@ pub closed spec fn step_Write(pre: State, post: State, c: Constants, lbl: Lbl) -
     &&& post.walks == pre.walks
 
     &&& post.hist.happy == pre.hist.happy
-        && (pre.is_happy_writenonneg(c, core, addr, value)
-            || pre.is_happy_writenonpos(c, core, addr, value))
+        && (pre.is_happy_writenonneg(core, addr, value)
+            || pre.is_happy_writenonpos(core, addr, value)
+            || pre.is_happy_writeprotect(core, addr, value))
     &&& post.hist.walks == pre.hist.walks
     &&& post.hist.writes.tso == pre.hist.writes.tso.insert(addr)
     &&& post.hist.writes.nonpos ==
@@ -445,9 +452,9 @@ pub closed spec fn step_Write(pre: State, post: State, c: Constants, lbl: Lbl) -
                     ))
         } else { pre.hist.pending_unmaps }
     &&& post.hist.polarity ==
-            if pre.writer_mem().is_nonneg_write(addr, value) {
-                Polarity::Mapping
-            } else { Polarity::Unmapping }
+            if pre.writer_mem().is_nonneg_write(addr, value) { Polarity::Mapping }
+            else if pre.writer_mem().is_nonpos_write(addr, value) { Polarity::Unmapping }
+            else { Polarity::Protect }
 }
 
 pub closed spec fn step_Writeback(pre: State, post: State, c: Constants, core: Core, lbl: Lbl) -> bool {
@@ -600,7 +607,7 @@ impl State {
         }
     }
 
-    pub closed spec fn can_flip_polarity(self, c: Constants) -> bool {
+    pub closed spec fn can_flip_polarity(self) -> bool {
         &&& self.hist.writes.tso === set![]
         &&& self.hist.writes.nonpos === set![]
     }
@@ -639,7 +646,7 @@ pub mod refinement {
     use crate::spec_t::mmu::rl3;
     #[cfg(verus_keep_ghost)]
     use crate::spec_t::mmu::rl3::bit;
-    use crate::spec_t::mmu::translation::{ MASK_DIRTY_ACCESS, MASK_NEG_DIRTY_ACCESS };
+    use crate::spec_t::mmu::translation::{ MASK_DIRTY_ACCESS, MASK_NEG_DIRTY_ACCESS, MASK_NEG_PROT_FLAGS };
 
     impl rl3::State {
         pub closed spec fn interp(self) -> rl2::State {
@@ -658,6 +665,18 @@ pub mod refinement {
                 },
                 //polarity: self.hist.polarity,
             }
+        }
+
+        pub proof fn lemma_nonpos_xor_nonneg_xor_protect(self, addr: usize, value: usize)
+            requires self.writer_mem().is_prot_write(addr, value)
+            ensures
+                !self.writer_mem().is_nonpos_write(addr, value),
+                !self.writer_mem().is_nonneg_write(addr, value),
+        {
+            let v2 = self.writer_mem().read(addr);
+            assert((v2 & 1) != (value & 1) ==>
+                v2 & !(bit!(63usize) | bit!(2usize) | bit!(1usize)) !=
+                value & !(bit!(63usize) | bit!(2usize) | bit!(1usize))) by (bit_vector);
         }
     }
 
@@ -681,10 +700,12 @@ pub mod refinement {
                             if let Lbl::Write(core, addr, value) = lbl {
                                 (core, addr, value)
                             } else { arbitrary() };
-                        if pre.is_happy_writenonneg(c, core, addr, value) {
+                        if pre.is_happy_writenonneg(core, addr, value) {
                             rl2::Step::WriteNonneg
-                        } else if pre.is_happy_writenonpos(c, core, addr, value) {
+                        } else if pre.is_happy_writenonpos(core, addr, value) {
                             rl2::Step::WriteNonpos
+                        } else if pre.is_happy_writeprotect(core, addr, value) {
+                            rl2::Step::WriteProtect
                         } else {
                             rl2::Step::SadWrite
                         }
@@ -773,10 +794,13 @@ pub mod refinement {
                         if let Lbl::Write(core, addr, value) = lbl {
                             (core, addr, value)
                         } else { arbitrary() };
-                    if pre.is_happy_writenonneg(c, core, addr, value) {
+                    if pre.is_happy_writenonneg(core, addr, value) {
                         assert(rl2::step_WriteNonneg(pre.interp(), post.interp(), c, lbl));
-                    } else if pre.is_happy_writenonpos(c, core, addr, value) {
+                    } else if pre.is_happy_writenonpos(core, addr, value) {
                         assert(rl2::step_WriteNonpos(pre.interp(), post.interp(), c, lbl));
+                    } else if pre.is_happy_writeprotect(core, addr, value) {
+                        pre.lemma_nonpos_xor_nonneg_xor_protect(addr, value);
+                        assert(rl2::step_WriteProtect(pre.interp(), post.interp(), c, lbl));
                     } else {
                         assert(rl2::step_SadWrite(pre.interp(), post.interp(), c, lbl));
                     }
