@@ -340,11 +340,7 @@ pub open spec fn step_WriteNonneg(pre: State, post: State, c: Constants, lbl: Lb
             |vbase| post.writer_mem()@.contains_key(vbase) && !pre.writer_mem()@.contains_key(vbase),
             |vbase| post.writer_mem()@[vbase]
         ))
-    &&& post.hist.pending_unmaps == pre.hist.pending_unmaps.union_prefer_right(
-        Map::new(
-            |vbase| pre.writer_mem()@.contains_key(vbase) && !post.writer_mem()@.contains_key(vbase),
-            |vbase| pre.writer_mem()@[vbase]
-        ))
+    &&& post.hist.pending_unmaps == pre.hist.pending_unmaps
 }
 
 /// Write to core's local store buffer.
@@ -368,11 +364,7 @@ pub open spec fn step_WriteNonpos(pre: State, post: State, c: Constants, lbl: Lb
     &&& post.writes.nonpos == Set::new(|core| c.valid_core(core))
     &&& post.writes.core == core
     &&& post.polarity == Polarity::Unmapping
-    &&& post.hist.pending_maps == pre.hist.pending_maps.union_prefer_right(
-        Map::new(
-            |vbase| post.writer_mem()@.contains_key(vbase) && !pre.writer_mem()@.contains_key(vbase),
-            |vbase| post.writer_mem()@[vbase]
-        ))
+    &&& post.hist.pending_maps == pre.hist.pending_maps
     &&& post.hist.pending_unmaps == pre.hist.pending_unmaps.union_prefer_right(
         Map::new(
             |vbase| pre.writer_mem()@.contains_key(vbase) && !post.writer_mem()@.contains_key(vbase),
@@ -754,11 +746,6 @@ proof fn next_step_preserves_inv(pre: State, post: State, c: Constants, step: St
                 reveal(State::inv_unmapping__notin_nonpos);
                 assert(pre.inv_mapping__inflight_walks(c));
             }
-            assert(pre.writer_mem()@.submap_of(post.writer_mem()@)) by {
-                broadcast use lemma_mapping__pt_walk_valid_in_pre_unchanged;
-                reveal(PTMem::view);
-            };
-            assert(post.hist.pending_unmaps =~= map![]);
             assert(post.writes.tso === set![] ==> post.hist.pending_maps === map![]) by {
                 match step {
                     Step::WriteNonneg => {
@@ -794,11 +781,6 @@ proof fn next_step_preserves_inv_unmapping(pre: State, post: State, c: Constants
     assert_by_contradiction!(Set::new(|core| c.valid_core(core)) !== set![], {
         assert(Set::new(|core| c.valid_core(core)).contains(pre.writes.core));
     });
-    assert(post.writer_mem()@.submap_of(pre.writer_mem()@)) by {
-        broadcast use lemma_unmapping__pt_walk_valid_in_post_unchanged;
-        reveal(PTMem::view);
-    };
-    assert(post.hist.pending_maps =~= map![]);
     if pre.polarity is Mapping { // Flipped polarity in this transition
         broadcast use lemma_writes_tso_empty_implies_sbuf_empty;
         assert(pre.writer_sbuf_entries_have_P_bit_0());
@@ -895,31 +877,31 @@ proof fn next_step_preserves_inv_unmapping__valid_walk(pre: State, post: State, 
     }
 }
 
-broadcast proof fn lemma_mapping__pt_walk_valid_in_pre_unchanged(pre: State, post: State, c: Constants, step: Step, lbl: Lbl, va: usize)
-    requires
-        pre.happy,
-        post.happy,
-        post.polarity is Mapping,
-        pre.wf(c),
-        pre.inv_sbuf_facts(c),
-        #[trigger] pre.writer_mem().pt_walk(va).result() is Valid,
-        #[trigger] next_step(pre, post, c, step, lbl),
-    ensures
-        post.writer_mem().pt_walk(va).result() == pre.writer_mem().pt_walk(va).result()
-{
-    broadcast use group_ambient;
-    reveal(pt_mem::PTMem::view);
-    match step {
-        rl2::Step::WriteNonneg => {
-            lemma_mem_view_after_step_write(pre, post, c, lbl);
-        },
-        rl2::Step::Writeback { core } => {
-            lemma_step_Writeback_preserves_writer_mem(pre, post, c, core, lbl);
-        },
-        _ => {},
-    }
-    assert(bit!(0usize) == 1) by (bit_vector);
-}
+// broadcast proof fn lemma_mapping__pt_walk_valid_in_pre_unchanged(pre: State, post: State, c: Constants, step: Step, lbl: Lbl, va: usize)
+//     requires
+//         pre.happy,
+//         post.happy,
+//         post.polarity is Mapping,
+//         pre.wf(c),
+//         pre.inv_sbuf_facts(c),
+//         #[trigger] pre.writer_mem().pt_walk(va).result() is Valid,
+//         #[trigger] next_step(pre, post, c, step, lbl),
+//     ensures
+//         post.writer_mem().pt_walk(va).result() == pre.writer_mem().pt_walk(va).result()
+// {
+//     broadcast use group_ambient;
+//     reveal(pt_mem::PTMem::view);
+//     match step {
+//         rl2::Step::WriteNonneg => {
+//             lemma_mem_view_after_step_write(pre, post, c, lbl);
+//         },
+//         rl2::Step::Writeback { core } => {
+//             lemma_step_Writeback_preserves_writer_mem(pre, post, c, core, lbl);
+//         },
+//         _ => {},
+//     }
+//     assert(bit!(0usize) == 1) by (bit_vector);
+// }
 
 broadcast proof fn lemma_unmapping__pt_walk_valid_in_post_unchanged(pre: State, post: State, c: Constants, step: Step, lbl: Lbl, va: usize)
     requires
@@ -2576,10 +2558,6 @@ pub mod refinement {
                     } else { arbitrary() };
                 rl2::lemma_mem_view_after_step_write(pre, post, c, lbl);
                 pre.pt_mem.lemma_write_seq(pre.writer_sbuf());
-                assert(post.hist.pending_unmaps =~= pre.hist.pending_unmaps) by {
-                    broadcast use rl2::lemma_mapping__pt_walk_valid_in_pre_unchanged;
-                    reveal(pt_mem::PTMem::view);
-                };
                 assert(rl1::step_WriteNonneg(pre.interp(), post.interp(), c, lbl));
             },
             rl2::Step::WriteNonpos => {
@@ -2589,10 +2567,6 @@ pub mod refinement {
                     } else { arbitrary() };
                 rl2::lemma_mem_view_after_step_write(pre, post, c, lbl);
                 pre.pt_mem.lemma_write_seq(pre.writer_sbuf());
-                assert(post.hist.pending_maps =~= pre.hist.pending_maps) by {
-                    broadcast use rl2::lemma_unmapping__pt_walk_valid_in_post_unchanged;
-                    reveal(pt_mem::PTMem::view);
-                };
                 assert(rl1::step_WriteNonpos(pre.interp(), post.interp(), c, lbl));
             },
             rl2::Step::Writeback { core } => {

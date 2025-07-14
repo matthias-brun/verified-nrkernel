@@ -407,16 +407,22 @@ pub closed spec fn step_Write(pre: State, post: State, c: Constants, lbl: Lbl) -
             Set::new(|core| c.valid_core(core))
         } else { pre.hist.writes.nonpos }
     &&& post.hist.writes.core == core
-    &&& post.hist.pending_maps == pre.hist.pending_maps.union_prefer_right(
-        Map::new(
-            |vbase| post.writer_mem()@.contains_key(vbase) && !pre.writer_mem()@.contains_key(vbase),
-            |vbase| post.writer_mem()@[vbase]
-        ))
-    &&& post.hist.pending_unmaps == pre.hist.pending_unmaps.union_prefer_right(
-        Map::new(
-            |vbase| pre.writer_mem()@.contains_key(vbase) && !post.writer_mem()@.contains_key(vbase),
-            |vbase| pre.writer_mem()@[vbase]
-        ))
+    &&& post.hist.pending_maps
+        == if post.hist.polarity is Mapping {
+                pre.hist.pending_maps.union_prefer_right(
+                    Map::new(
+                        |vbase| post.writer_mem()@.contains_key(vbase) && !pre.writer_mem()@.contains_key(vbase),
+                        |vbase| post.writer_mem()@[vbase]
+                    ))
+        } else { pre.hist.pending_maps }
+    &&& post.hist.pending_unmaps
+        == if post.hist.polarity is Unmapping {
+                pre.hist.pending_unmaps.union_prefer_right(
+                    Map::new(
+                        |vbase| pre.writer_mem()@.contains_key(vbase) && !post.writer_mem()@.contains_key(vbase),
+                        |vbase| pre.writer_mem()@[vbase]
+                    ))
+        } else { pre.hist.pending_unmaps }
     &&& post.hist.polarity ==
             if pre.writer_mem().is_nonneg_write(addr, value) {
                 Polarity::Mapping
