@@ -57,13 +57,14 @@ pub enum Step {
 
 
 impl State {
-    pub open spec fn is_this_write_happy(self, core: Core, addr: usize, value: usize, pol: Polarity) -> bool {
+    pub open spec fn is_happy_writenonneg(self, core: Core, addr: usize, value: usize) -> bool {
         &&& !self.writes.tso.is_empty() ==> core == self.writes.core
-        &&& if pol is Mapping {
-                self.pt_mem.is_nonneg_write(addr, value)
-            } else {
-                self.pt_mem.is_nonpos_write(addr, value)
-            }
+        &&& self.pt_mem.is_nonneg_write(addr, value)
+    }
+
+    pub open spec fn is_happy_writenonpos(self, core: Core, addr: usize, value: usize) -> bool {
+        &&& !self.writes.tso.is_empty() ==> core == self.writes.core
+        &&& self.pt_mem.is_nonpos_write(addr, value)
     }
 
     pub open spec fn is_tso_read_deterministic(self, core: Core, addr: usize) -> bool {
@@ -244,7 +245,7 @@ pub open spec fn step_WriteNonneg(pre: State, post: State, c: Constants, lbl: Lb
     &&& c.valid_core(core)
     &&& c.in_ptmem_range(addr as nat, 8)
     &&& aligned(addr as nat, 8)
-    &&& pre.is_this_write_happy(core, addr, value, Polarity::Mapping)
+    &&& pre.is_happy_writenonneg(core, addr, value)
     &&& pre.polarity is Mapping || pre.can_flip_polarity(c)
 
     &&& post.happy      == pre.happy
@@ -270,7 +271,7 @@ pub open spec fn step_WriteNonpos(pre: State, post: State, c: Constants, lbl: Lb
     &&& c.valid_core(core)
     &&& c.in_ptmem_range(addr as nat, 8)
     &&& aligned(addr as nat, 8)
-    &&& pre.is_this_write_happy(core, addr, value, Polarity::Unmapping)
+    &&& pre.is_happy_writenonpos(core, addr, value)
     &&& pre.polarity is Unmapping || pre.can_flip_polarity(c)
 
     &&& post.happy      == pre.happy
@@ -327,10 +328,10 @@ pub open spec fn step_SadWrite(pre: State, post: State, c: Constants, lbl: Lbl) 
     // If we do a write without fulfilling the right conditions, we set happy to false.
     &&& lbl matches Lbl::Write(core, addr, value)
     &&& {
-    let polarity = if value & 1 == 1 { Polarity::Mapping } else { Polarity::Unmapping };
-    &&& !pre.is_this_write_happy(core, addr, value, polarity)
-    &&& !post.happy
+        ||| value & 1 == 1 && !pre.is_happy_writenonneg(core, addr, value)
+        ||| value & 1 == 0 && !pre.is_happy_writenonpos(core, addr, value)
     }
+    &&& !post.happy
 }
 
 pub open spec fn step_Sadness(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {

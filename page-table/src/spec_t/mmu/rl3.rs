@@ -109,14 +109,16 @@ impl State {
         self.core_mem(self.hist.writes.core)
     }
 
-    pub closed spec fn is_this_write_happy(self, c: Constants, core: Core, addr: usize, value: usize, pol: Polarity) -> bool {
+    pub closed spec fn is_happy_writenonneg(self, c: Constants, core: Core, addr: usize, value: usize) -> bool {
         &&& !self.hist.writes.tso.is_empty() ==> core == self.hist.writes.core
-        &&& pol != self.hist.polarity ==> self.can_flip_polarity(c)
-        &&& if pol is Mapping {
-                self.writer_mem().is_nonneg_write(addr, value)
-            } else {
-                self.writer_mem().is_nonpos_write(addr, value)
-            }
+        &&& self.hist.polarity !is Mapping ==> self.can_flip_polarity(c)
+        &&& self.writer_mem().is_nonneg_write(addr, value)
+    }
+
+    pub closed spec fn is_happy_writenonpos(self, c: Constants, core: Core, addr: usize, value: usize) -> bool {
+        &&& !self.hist.writes.tso.is_empty() ==> core == self.hist.writes.core
+        &&& self.hist.polarity !is Unmapping ==> self.can_flip_polarity(c)
+        &&& self.writer_mem().is_nonpos_write(addr, value)
     }
 }
 
@@ -380,7 +382,6 @@ pub closed spec fn step_TLBEvict(pre: State, post: State, c: Constants, core: Co
 // ---- TSO ----
 // Our modeling of TSO with store buffers is adapted from the one in the paper "A Better x86 Memory
 // Model: x86-TSO".
-// TODO: max physical size?
 /// Write to core's local store buffer.
 pub closed spec fn step_Write(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
     &&& lbl matches Lbl::Write(core, addr, value)
@@ -396,7 +397,9 @@ pub closed spec fn step_Write(pre: State, post: State, c: Constants, lbl: Lbl) -
     &&& post.cache == pre.cache
     &&& post.walks == pre.walks
 
-    &&& post.hist.happy == pre.hist.happy && pre.is_this_write_happy(c, core, addr, value, post.hist.polarity)
+    &&& post.hist.happy == pre.hist.happy
+        && (pre.is_happy_writenonneg(c, core, addr, value)
+            || pre.is_happy_writenonpos(c, core, addr, value))
     &&& post.hist.walks == pre.hist.walks
     &&& post.hist.writes.tso == pre.hist.writes.tso.insert(addr)
     &&& post.hist.writes.nonpos ==
@@ -649,16 +652,10 @@ pub mod refinement {
                             if let Lbl::Write(core, addr, value) = lbl {
                                 (core, addr, value)
                             } else { arbitrary() };
-                        let polarity =
-                            if pre.writer_mem().is_nonneg_write(addr, value) {
-                                Polarity::Mapping
-                            } else { Polarity::Unmapping };
-                        if pre.is_this_write_happy(c, core, addr, value, polarity) {
-                            if polarity is Mapping {
-                                rl2::Step::WriteNonneg
-                            } else {
-                                rl2::Step::WriteNonpos
-                            }
+                        if pre.is_happy_writenonneg(c, core, addr, value) {
+                            rl2::Step::WriteNonneg
+                        } else if pre.is_happy_writenonpos(c, core, addr, value) {
+                            rl2::Step::WriteNonpos
                         } else {
                             rl2::Step::SadWrite
                         }
@@ -744,13 +741,10 @@ pub mod refinement {
                         if let Lbl::Write(core, addr, value) = lbl {
                             (core, addr, value)
                         } else { arbitrary() };
-                    if pre.is_this_write_happy(c, core, addr, value, post.hist.polarity) {
-                        assert(pre.interp().is_this_write_happy(core, addr, value, post.interp().polarity));
-                        if pre.writer_mem().is_nonneg_write(addr, value) {
-                            assert(rl2::step_WriteNonneg(pre.interp(), post.interp(), c, lbl));
-                        } else {
-                            assert(rl2::step_WriteNonpos(pre.interp(), post.interp(), c, lbl));
-                        }
+                    if pre.is_happy_writenonneg(c, core, addr, value) {
+                        assert(rl2::step_WriteNonneg(pre.interp(), post.interp(), c, lbl));
+                    } else if pre.is_happy_writenonpos(c, core, addr, value) {
+                        assert(rl2::step_WriteNonpos(pre.interp(), post.interp(), c, lbl));
                     } else {
                         assert(rl2::step_SadWrite(pre.interp(), post.interp(), c, lbl));
                     }

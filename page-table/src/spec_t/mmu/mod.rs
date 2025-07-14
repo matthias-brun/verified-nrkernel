@@ -24,13 +24,8 @@ verus! {
 
 pub enum Polarity {
     Mapping,
-    Unmapping
-}
-
-impl Polarity {
-    pub open spec fn flip(self) -> Polarity {
-        if self is Mapping { Polarity::Unmapping } else { Polarity::Mapping }
-    }
+    Unmapping,
+    // Protect,
 }
 
 // $line_count$}$
