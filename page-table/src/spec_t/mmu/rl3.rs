@@ -47,6 +47,7 @@ pub struct History {
     pub writes: Writes,
     pub pending_maps: Map<usize, PTE>,
     pub pending_unmaps: Map<usize, PTE>,
+    pub pending_protects: Map<usize, Set<PTE>>,
     pub polarity: Polarity,
 }
 
@@ -162,6 +163,7 @@ pub closed spec fn step_Invlpg(pre: State, post: State, c: Constants, lbl: Lbl) 
             },
             pending_maps: if core == pre.hist.writes.core { map![] } else { pre.hist.pending_maps },
             pending_unmaps: if post.hist.writes.nonpos === set![] { map![] } else { pre.hist.pending_unmaps },
+            pending_protects: if post.hist.writes.nonpos === set![] { map![] } else { pre.hist.pending_protects },
             ..pre.hist
         },
         ..pre
@@ -451,6 +453,14 @@ pub closed spec fn step_Write(pre: State, post: State, c: Constants, lbl: Lbl) -
                         |vbase| pre.writer_mem()@[vbase]
                     ))
         } else { pre.hist.pending_unmaps }
+    &&& post.hist.pending_protects
+        == if post.hist.polarity is Protect {
+                pre.hist.pending_protects.union_prefer_right(
+                    Map::new(
+                        |vbase| pre.writer_mem()@.contains_key(vbase) && post.writer_mem()@[vbase] != pre.writer_mem()@[vbase],
+                        |vbase| pre.hist.pending_protects[vbase].insert(pre.writer_mem()@[vbase])
+                    ))
+        } else { pre.hist.pending_protects }
     &&& post.hist.polarity ==
             if pre.writer_mem().is_nonneg_write(addr, value) { Polarity::Mapping }
             else if pre.writer_mem().is_nonpos_write(addr, value) { Polarity::Unmapping }
@@ -543,6 +553,7 @@ pub closed spec fn init(pre: State, c: Constants) -> bool {
     &&& pre.hist.writes.nonpos === set![]
     &&& pre.hist.pending_maps === map![]
     &&& pre.hist.pending_unmaps === map![]
+    &&& pre.hist.pending_protects === map![]
     &&& pre.hist.polarity == Polarity::Mapping
 
     &&& c.valid_core(pre.hist.writes.core)
@@ -646,7 +657,7 @@ pub mod refinement {
     use crate::spec_t::mmu::rl3;
     #[cfg(verus_keep_ghost)]
     use crate::spec_t::mmu::rl3::bit;
-    use crate::spec_t::mmu::translation::{ MASK_DIRTY_ACCESS, MASK_NEG_DIRTY_ACCESS, MASK_NEG_PROT_FLAGS };
+    use crate::spec_t::mmu::translation::{ MASK_DIRTY_ACCESS, MASK_NEG_DIRTY_ACCESS };
 
     impl rl3::State {
         pub closed spec fn interp(self) -> rl2::State {
@@ -662,12 +673,13 @@ pub mod refinement {
                 hist: rl2::History {
                     pending_maps: self.hist.pending_maps,
                     pending_unmaps: self.hist.pending_unmaps,
+                    pending_protects: self.hist.pending_protects,
                 },
                 //polarity: self.hist.polarity,
             }
         }
 
-        pub proof fn lemma_nonpos_xor_nonneg_xor_protect(self, addr: usize, value: usize)
+        pub proof fn lemma_prot_write_not_nonpos_or_nonneg(self, addr: usize, value: usize)
             requires self.writer_mem().is_prot_write(addr, value)
             ensures
                 !self.writer_mem().is_nonpos_write(addr, value),
@@ -799,7 +811,7 @@ pub mod refinement {
                     } else if pre.is_happy_writenonpos(core, addr, value) {
                         assert(rl2::step_WriteNonpos(pre.interp(), post.interp(), c, lbl));
                     } else if pre.is_happy_writeprotect(core, addr, value) {
-                        pre.lemma_nonpos_xor_nonneg_xor_protect(addr, value);
+                        pre.lemma_prot_write_not_nonpos_or_nonneg(addr, value);
                         assert(rl2::step_WriteProtect(pre.interp(), post.interp(), c, lbl));
                     } else {
                         assert(rl2::step_SadWrite(pre.interp(), post.interp(), c, lbl));

@@ -25,8 +25,10 @@ pub struct State {
     /// Tracks the virtual addresses and entries for which we may see non-atomic results.
     /// If polarity is positive, translations may non-atomically fail.
     /// If polarity is negative, translations may non-atomically succeed.
+    /// If polarity is protect, translations may non-atomically have different permissions.
     pub pending_maps: Map<usize, PTE>,
     pub pending_unmaps: Map<usize, PTE>,
+    pub pending_protects: Map<usize, Set<PTE>>,
     pub polarity: Polarity,
 }
 
@@ -44,7 +46,9 @@ pub enum Step {
     TLBFill { core: Core, vaddr: usize },
     TLBEvict { core: Core, tlb_va: usize },
     // Non-atomic TLB fill after an unmap
-    TLBFillNA { core: Core, vaddr: usize },
+    TLBFillNA1 { core: Core, vaddr: usize },
+    // Non-atomic TLB fill after an mprotect
+    TLBFillNA2 { core: Core, vaddr: usize, pte: PTE },
     // TSO
     WriteNonneg,
     WriteNonpos,
@@ -113,6 +117,7 @@ pub open spec fn step_Invlpg(pre: State, post: State, c: Constants, lbl: Lbl) ->
         },
         pending_maps: if core == pre.writes.core { map![] } else { pre.pending_maps },
         pending_unmaps: if post.writes.nonpos === set![] { map![] } else { pre.pending_unmaps },
+        pending_protects: if post.writes.nonpos === set![] { map![] } else { pre.pending_protects },
         ..pre
     }
 }
@@ -191,6 +196,7 @@ pub open spec fn step_MemOpTLB(
     &&& post.writes == pre.writes
     &&& post.pending_maps == pre.pending_maps
     &&& post.pending_unmaps == pre.pending_unmaps
+    &&& post.pending_protects == pre.pending_protects
 }
 
 // ---- Non-atomic page table walks ----
@@ -223,8 +229,8 @@ pub open spec fn step_TLBEvict(pre: State, post: State, c: Constants, core: Core
     }
 }
 
-/// A TLB fill resulting from a non-atomic page table walk
-pub open spec fn step_TLBFillNA(pre: State, post: State, c: Constants, core: Core, vaddr: usize, lbl: Lbl) -> bool {
+/// A TLB fill resulting from a non-atomic page table walk, when unmapping
+pub open spec fn step_TLBFillNA1(pre: State, post: State, c: Constants, core: Core, vaddr: usize, lbl: Lbl) -> bool {
     let pte = pre.pending_unmaps[vaddr];
     &&& lbl is Tau
     &&& pre.happy
@@ -233,6 +239,23 @@ pub open spec fn step_TLBFillNA(pre: State, post: State, c: Constants, core: Cor
     &&& c.valid_core(core)
     &&& pre.writes.nonpos.contains(core)
     &&& pre.pending_unmaps.contains_key(vaddr)
+
+    &&& post == State {
+        tlbs: pre.tlbs.insert(core, pre.tlbs[core].insert(vaddr, pte)),
+        ..pre
+    }
+}
+
+/// A TLB fill resulting from a non-atomic page table walk, during mprotect
+pub open spec fn step_TLBFillNA2(pre: State, post: State, c: Constants, core: Core, vaddr: usize, pte: PTE, lbl: Lbl) -> bool {
+    &&& lbl is Tau
+    &&& pre.happy
+    &&& pre.polarity is Protect
+
+    &&& c.valid_core(core)
+    &&& pre.writes.nonpos.contains(core)
+    &&& pre.pending_protects.contains_key(vaddr)
+    &&& pre.pending_protects[vaddr].contains(pte)
 
     &&& post == State {
         tlbs: pre.tlbs.insert(core, pre.tlbs[core].insert(vaddr, pte)),
@@ -268,6 +291,7 @@ pub open spec fn step_WriteNonneg(pre: State, post: State, c: Constants, lbl: Lb
             |vbase| post.pt_mem@[vbase]
         ))
     &&& post.pending_unmaps == pre.pending_unmaps
+    &&& post.pending_protects == pre.pending_protects
 }
 
 pub open spec fn step_WriteNonpos(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
@@ -294,6 +318,7 @@ pub open spec fn step_WriteNonpos(pre: State, post: State, c: Constants, lbl: Lb
             |vbase| pre.pt_mem@.contains_key(vbase) && !post.pt_mem@.contains_key(vbase),
             |vbase| pre.pt_mem@[vbase]
         ))
+    &&& post.pending_protects == pre.pending_protects
 }
 
 pub open spec fn step_WriteProtect(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
@@ -316,6 +341,14 @@ pub open spec fn step_WriteProtect(pre: State, post: State, c: Constants, lbl: L
     &&& post.writes.nonpos == Set::new(|core| c.valid_core(core))
     &&& post.pending_maps == pre.pending_maps
     &&& post.pending_unmaps == pre.pending_unmaps
+    &&& post.pending_protects
+        == if post.polarity is Protect {
+                pre.pending_protects.union_prefer_right(
+                    Map::new(
+                        |vbase| pre.pt_mem@.contains_key(vbase) && post.pt_mem@[vbase] != pre.pt_mem@[vbase],
+                        |vbase| pre.pending_protects[vbase].insert(pre.pt_mem@[vbase])
+                    ))
+        } else { pre.pending_protects }
 }
 
 pub open spec fn step_Read(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
@@ -355,11 +388,11 @@ pub open spec fn step_Stutter(pre: State, post: State, c: Constants, lbl: Lbl) -
 pub open spec fn step_SadWrite(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
     // If we do a write without fulfilling the right conditions, we set happy to false.
     &&& lbl matches Lbl::Write(core, addr, value)
-    &&& {
-        ||| value & 1 == 1 && !pre.is_happy_writenonneg(core, addr, value)
-        ||| value & 1 == 0 && !pre.is_happy_writenonpos(core, addr, value)
-    }
+
     &&& !post.happy
+    &&& post.polarity is Mapping   ==> !pre.is_happy_writenonneg(core, addr, value)
+    &&& post.polarity is Unmapping ==> !pre.is_happy_writenonpos(core, addr, value)
+    &&& post.polarity is Protect   ==> !pre.is_happy_writeprotect(core, addr, value)
 }
 
 pub open spec fn step_Sadness(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
@@ -370,21 +403,22 @@ pub open spec fn step_Sadness(pre: State, post: State, c: Constants, lbl: Lbl) -
 
 pub open spec fn next_step(pre: State, post: State, c: Constants, step: Step, lbl: Lbl) -> bool {
     match step {
-        Step::Invlpg                    => step_Invlpg(pre, post, c, lbl),
-        Step::MemOpNoTr                 => step_MemOpNoTr(pre, post, c, lbl),
-        Step::MemOpNoTrNA { vbase }     => step_MemOpNoTrNA(pre, post, c, vbase, lbl),
-        Step::MemOpTLB { tlb_va }       => step_MemOpTLB(pre, post, c, tlb_va, lbl),
-        Step::TLBFill { core, vaddr }   => step_TLBFill(pre, post, c, core, vaddr, lbl),
-        Step::TLBEvict { core, tlb_va } => step_TLBEvict(pre, post, c, core, tlb_va, lbl),
-        Step::TLBFillNA { core, vaddr } => step_TLBFillNA(pre, post, c, core, vaddr, lbl),
-        Step::WriteNonneg               => step_WriteNonneg(pre, post, c, lbl),
-        Step::WriteNonpos               => step_WriteNonpos(pre, post, c, lbl),
-        Step::WriteProtect              => step_WriteProtect(pre, post, c, lbl),
-        Step::Read                      => step_Read(pre, post, c, lbl),
-        Step::Barrier                   => step_Barrier(pre, post, c, lbl),
-        Step::SadWrite                  => step_SadWrite(pre, post, c, lbl),
-        Step::Sadness                   => step_Sadness(pre, post, c, lbl),
-        Step::Stutter                   => step_Stutter(pre, post, c, lbl),
+        Step::Invlpg                          => step_Invlpg(pre, post, c, lbl),
+        Step::MemOpNoTr                       => step_MemOpNoTr(pre, post, c, lbl),
+        Step::MemOpNoTrNA { vbase }           => step_MemOpNoTrNA(pre, post, c, vbase, lbl),
+        Step::MemOpTLB { tlb_va }             => step_MemOpTLB(pre, post, c, tlb_va, lbl),
+        Step::TLBFill { core, vaddr }         => step_TLBFill(pre, post, c, core, vaddr, lbl),
+        Step::TLBEvict { core, tlb_va }       => step_TLBEvict(pre, post, c, core, tlb_va, lbl),
+        Step::TLBFillNA1 { core, vaddr }      => step_TLBFillNA1(pre, post, c, core, vaddr, lbl),
+        Step::TLBFillNA2 { core, vaddr, pte } => step_TLBFillNA2(pre, post, c, core, vaddr, pte, lbl),
+        Step::WriteNonneg                     => step_WriteNonneg(pre, post, c, lbl),
+        Step::WriteNonpos                     => step_WriteNonpos(pre, post, c, lbl),
+        Step::WriteProtect                    => step_WriteProtect(pre, post, c, lbl),
+        Step::Read                            => step_Read(pre, post, c, lbl),
+        Step::Barrier                         => step_Barrier(pre, post, c, lbl),
+        Step::SadWrite                        => step_SadWrite(pre, post, c, lbl),
+        Step::Sadness                         => step_Sadness(pre, post, c, lbl),
+        Step::Stutter                         => step_Stutter(pre, post, c, lbl),
     }
 }
 
@@ -399,6 +433,7 @@ pub open spec fn init(pre: State, c: Constants) -> bool {
     &&& pre.writes.nonpos === set![]
     &&& pre.pending_maps === map![]
     &&& pre.pending_unmaps === map![]
+    &&& pre.pending_protects === map![]
     &&& pre.polarity === Polarity::Mapping
 
     &&& c.valid_core(pre.writes.core)
