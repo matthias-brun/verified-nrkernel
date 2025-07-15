@@ -3,7 +3,9 @@
 
 use vstd::prelude::*;
 
-use crate::spec_t::mmu::translation::{ PDE, GPDE, l0_bits, l1_bits, l2_bits, l3_bits, MASK_NEG_PROT_FLAGS };
+use crate::spec_t::mmu::translation::{
+    PDE, GPDE, l0_bits, l1_bits, l2_bits, l3_bits, MASK_NEG_PROT_FLAGS, MASK_PROT_FLAGS
+};
 use crate::spec_t::mmu::defs::{ PTE, bitmask_inc, WORD_SIZE, bit };
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::defs::MAX_BASE;
@@ -69,7 +71,8 @@ impl PTMem {
     /// The RW/US/XD permission bits are in the same place for all mappings. Modifying these bits
     /// can only change permissions for existing entries but never add or remove entries.
     pub open spec fn is_prot_write(self, addr: usize, value: usize) -> bool {
-        value & MASK_NEG_PROT_FLAGS == self.read(addr) & MASK_NEG_PROT_FLAGS
+        &&& value & MASK_PROT_FLAGS     != self.read(addr) & MASK_PROT_FLAGS
+        &&& value & MASK_NEG_PROT_FLAGS == self.read(addr) & MASK_NEG_PROT_FLAGS
     }
 
     pub open spec fn pt_walk(self, vaddr: usize) -> Walk {

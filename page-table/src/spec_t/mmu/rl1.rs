@@ -390,9 +390,9 @@ pub open spec fn step_SadWrite(pre: State, post: State, c: Constants, lbl: Lbl) 
     &&& lbl matches Lbl::Write(core, addr, value)
 
     &&& !post.happy
-    &&& post.polarity is Mapping   ==> !pre.is_happy_writenonneg(core, addr, value)
-    &&& post.polarity is Unmapping ==> !pre.is_happy_writenonpos(core, addr, value)
-    &&& post.polarity is Protect   ==> !pre.is_happy_writeprotect(core, addr, value)
+    &&& pre.pt_mem.is_nonneg_write(addr, value) ==> !pre.is_happy_writenonneg(core, addr, value)
+    &&& pre.pt_mem.is_nonpos_write(addr, value) ==> !pre.is_happy_writenonpos(core, addr, value)
+    &&& pre.pt_mem.is_prot_write(addr, value)   ==> !pre.is_happy_writeprotect(core, addr, value)
 }
 
 pub open spec fn step_Sadness(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
