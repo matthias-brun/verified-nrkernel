@@ -302,8 +302,7 @@ pub proof fn next_step_preserves_inv_pending_maps(c: os::Constants, s1: os::Stat
             assert(rl1::next_step(s1.mmu@, s2.mmu@, c.common, mmu_step, mlbl));
             match mmu_step {
                 rl1::Step::WriteNonneg => {
-                    assert forall |vbase| s2.mmu@.pt_mem@.contains_key(vbase) implies s1.mmu@.pt_mem@.contains_key(vbase)
-                    by {
+                    assert forall |vbase| s2.mmu@.pt_mem@.contains_key(vbase) implies s1.mmu@.pt_mem@.contains_key(vbase) by {
                         assert(s2.interp_pt_mem().dom().contains(vbase as nat));
                         assert(s1.interp_pt_mem().dom().contains(vbase as nat));
                     }
@@ -311,6 +310,9 @@ pub proof fn next_step_preserves_inv_pending_maps(c: os::Constants, s1: os::Stat
                     assert(s2.inv_pending_maps(c));
                 }
                 rl1::Step::WriteNonpos => {
+                    assert(s2.inv_pending_maps(c));
+                }
+                rl1::Step::WriteProtect => {
                     assert(s2.inv_pending_maps(c));
                 }
                 _ => {
@@ -353,6 +355,9 @@ pub proof fn next_step_preserves_inv_pending_maps(c: os::Constants, s1: os::Stat
                     assert(s2.inv_pending_maps(c));
                 }
                 rl1::Step::WriteNonpos => {
+                    assert(s2.inv_pending_maps(c));
+                }
+                rl1::Step::WriteProtect => {
                     assert(s2.inv_pending_maps(c));
                 }
                 _ => {
