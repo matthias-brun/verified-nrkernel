@@ -37,6 +37,7 @@ pub struct State {
 pub struct History {
     pub pending_maps: Map<usize, PTE>,
     pub pending_unmaps: Map<usize, PTE>,
+    pub pending_protects: Map<usize, Set<PTE>>,
 }
 
 pub enum Step {
@@ -153,6 +154,7 @@ pub open spec fn step_Invlpg(pre: State, post: State, c: Constants, lbl: Lbl) ->
         hist: History {
             pending_maps: if core == pre.writes.core { map![] } else { pre.hist.pending_maps },
             pending_unmaps: if post.writes.nonpos === set![] { map![] } else { pre.hist.pending_unmaps },
+            pending_protects: if post.writes.nonpos === set![] { map![] } else { pre.hist.pending_protects },
             ..pre.hist
         },
         ..pre
@@ -256,6 +258,7 @@ pub open spec fn step_WalkInit(pre: State, post: State, c: Constants, core: Core
     &&& post.polarity == pre.polarity
     &&& post.hist.pending_maps == pre.hist.pending_maps
     &&& post.hist.pending_unmaps == pre.hist.pending_unmaps
+    &&& post.hist.pending_protects == pre.hist.pending_protects
 }
 
 pub open spec fn step_WalkStep(
@@ -285,6 +288,7 @@ pub open spec fn step_WalkStep(
     &&& post.polarity == pre.polarity
     &&& post.hist.pending_maps == pre.hist.pending_maps
     &&& post.hist.pending_unmaps == pre.hist.pending_unmaps
+    &&& post.hist.pending_protects == pre.hist.pending_protects
 }
 
 pub open spec fn step_TLBFill(pre: State, post: State, c: Constants, core: Core, walk: Walk, lbl: Lbl) -> bool {
@@ -347,6 +351,7 @@ pub open spec fn step_WriteNonneg(pre: State, post: State, c: Constants, lbl: Lb
             |vbase| post.writer_mem()@[vbase]
         ))
     &&& post.hist.pending_unmaps == pre.hist.pending_unmaps
+    &&& post.hist.pending_protects == pre.hist.pending_protects
 }
 
 /// Write to core's local store buffer.
@@ -376,6 +381,7 @@ pub open spec fn step_WriteNonpos(pre: State, post: State, c: Constants, lbl: Lb
             |vbase| pre.writer_mem()@.contains_key(vbase) && !post.writer_mem()@.contains_key(vbase),
             |vbase| pre.writer_mem()@[vbase]
         ))
+    &&& post.hist.pending_protects == pre.hist.pending_protects
 }
 
 pub open spec fn step_WriteProtect(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
@@ -400,6 +406,14 @@ pub open spec fn step_WriteProtect(pre: State, post: State, c: Constants, lbl: L
     &&& post.polarity == Polarity::Protect
     &&& post.hist.pending_maps == pre.hist.pending_maps
     &&& post.hist.pending_unmaps == pre.hist.pending_unmaps
+    &&& post.hist.pending_protects
+        == if post.polarity is Protect {
+                pre.hist.pending_protects.union_prefer_right(
+                    Map::new(
+                        |vbase| pre.writer_mem()@.contains_key(vbase) && post.writer_mem()@[vbase] != pre.writer_mem()@[vbase],
+                        |vbase| pre.hist.pending_protects[vbase].insert(pre.writer_mem()@[vbase])
+                    ))
+        } else { pre.hist.pending_protects }
 }
 
 pub open spec fn step_Writeback(pre: State, post: State, c: Constants, core: Core, lbl: Lbl) -> bool {
@@ -420,6 +434,7 @@ pub open spec fn step_Writeback(pre: State, post: State, c: Constants, core: Cor
     &&& post.polarity == pre.polarity
     &&& post.hist.pending_maps == pre.hist.pending_maps
     &&& post.hist.pending_unmaps == pre.hist.pending_unmaps
+    &&& post.hist.pending_protects == pre.hist.pending_protects
 }
 
 pub open spec fn step_Read(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
@@ -456,11 +471,11 @@ pub open spec fn step_Barrier(pre: State, post: State, c: Constants, lbl: Lbl) -
 pub open spec fn step_SadWrite(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
     // If we do a write without fulfilling the right conditions, we set happy to false.
     &&& lbl matches Lbl::Write(core, addr, value)
-    &&& {
-        ||| value & 1 == 1 && !pre.is_happy_writenonneg(core, addr, value)
-        ||| value & 1 == 0 && !pre.is_happy_writenonpos(core, addr, value)
-    }
+
     &&& !post.happy
+    &&& post.polarity is Mapping   ==> !pre.is_happy_writenonneg(core, addr, value)
+    &&& post.polarity is Unmapping ==> !pre.is_happy_writenonpos(core, addr, value)
+    &&& post.polarity is Protect   ==> !pre.is_happy_writeprotect(core, addr, value)
 }
 
 pub open spec fn step_Sadness(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
@@ -508,6 +523,7 @@ pub open spec fn init(pre: State, c: Constants) -> bool {
     &&& pre.writes.nonpos === set![]
     &&& pre.hist.pending_maps === map![]
     &&& pre.hist.pending_unmaps === map![]
+    &&& pre.hist.pending_protects === map![]
     &&& pre.polarity === Polarity::Mapping
     &&& c.valid_core(pre.writes.core)
 
@@ -716,6 +732,7 @@ impl State {
         &&& self.inv_mapping__inflight_walks(c)
         &&& self.inv_mapping__pending_map_is_base_walk(c)
         &&& self.hist.pending_unmaps === map![]
+        &&& self.hist.pending_protects === map![]
         &&& self.writes.tso === set![] ==> self.hist.pending_maps === map![]
     }
 
@@ -727,6 +744,7 @@ impl State {
         &&& self.inv_unmapping__valid_walk(c)
         &&& self.inv_unmapping__notin_nonpos(c)
         &&& self.hist.pending_maps === map![]
+        &&& self.hist.pending_protects === map![]
         &&& self.writes.nonpos === set![] ==> self.hist.pending_unmaps === map![]
     }
 
@@ -738,7 +756,8 @@ impl State {
         // &&& self.inv_unmapping__core_vs_writer_reads(c)
         // &&& self.inv_unmapping__valid_walk(c)
         // &&& self.inv_unmapping__notin_nonpos(c)
-        // &&& self.hist.pending_maps === map![]
+        &&& self.hist.pending_maps === map![]
+        &&& self.hist.pending_unmaps === map![]
         // &&& self.writes.nonpos === set![] ==> self.hist.pending_unmaps === map![]
     }
 
@@ -2547,6 +2566,7 @@ pub mod refinement {
                 writes: self.writes,
                 pending_maps: self.hist.pending_maps,
                 pending_unmaps: self.hist.pending_unmaps,
+                pending_protects: self.hist.pending_protects,
                 polarity: self.polarity,
             }
         }
@@ -2578,9 +2598,11 @@ pub mod refinement {
                 rl2::Step::TLBFill { core, walk } => {
                     let walk_na_res = rl2::walk_next(pre.core_mem(core), walk).result();
                     let vaddr = walk_na_res->Valid_vbase;
-                    //let pte = walk_na_res->Valid_pte;
+                    let pte = walk_na_res->Valid_pte;
                     if pre.hist.pending_unmaps.contains_key(vaddr) && pre.writes.nonpos.contains(core) {
-                        rl1::Step::TLBFillNA { core, vaddr }
+                        rl1::Step::TLBFillNA1 { core, vaddr }
+                    } else if pre.hist.pending_protects.contains_key(vaddr) && pre.writes.nonpos.contains(core) {
+                        rl1::Step::TLBFillNA2 { core, vaddr, pte }
                     } else {
                         rl1::Step::TLBFill { core, vaddr }
                     }
@@ -2639,7 +2661,7 @@ pub mod refinement {
                     assert(rl1::step_TLBFill(pre.interp(), post.interp(), c, core, vbase, lbl));
                 } else if pre.polarity is Unmapping {
                     if pre.hist.pending_unmaps.contains_key(vbase) && pre.writes.nonpos.contains(core) {
-                        assert(rl1::step_TLBFillNA(pre.interp(), post.interp(), c, core, vbase, lbl));
+                        assert(rl1::step_TLBFillNA1(pre.interp(), post.interp(), c, core, vbase, lbl));
                     } else {
                         assert_by_contradiction!(walk_a == walk_na, {
                             broadcast use
@@ -2656,7 +2678,26 @@ pub mod refinement {
                         assert(rl1::step_TLBFill(pre.interp(), post.interp(), c, core, vbase, lbl));
                     }
                 } else {
-                    admit();
+                    assert(pre.polarity is Protect);
+                    assume(pre.hist.pending_unmaps === map![]);
+                    if pre.hist.pending_protects.contains_key(vbase) && pre.writes.nonpos.contains(core) {
+                        assume(pre.hist.pending_protects[vbase].contains(pte));
+                        assert(rl1::step_TLBFillNA2(pre.interp(), post.interp(), c, core, vbase, pte, lbl));
+                    } else {
+                        // assert_by_contradiction!(walk_a == walk_na, {
+                        //     broadcast use
+                        //         rl2::lemma_finish_iter_walk_prefix_matches_iter_walk,
+                        //         rl2::lemma_iter_walk_equals_pt_walk,
+                        //         rl2::lemma_writes_tso_empty_implies_sbuf_empty;
+                        //     reveal(rl2::State::inv_unmapping__notin_nonpos);
+                        //     assert(rl2::is_iter_walk_prefix(pre.core_mem(core), walk));
+                        //     assert(walk_na == rl2::finish_iter_walk(pre.core_mem(core), walk));
+                        //     assert(pre.writes.tso === set![]);
+                        //     assert(pre.sbuf[pre.writes.core] === seq![]);
+                        //     assert(pre.writer_mem() == pre.core_mem(core));
+                        // });
+                        assume(rl1::step_TLBFill(pre.interp(), post.interp(), c, core, vbase, lbl));
+                    }
                 }
             },
             rl2::Step::TLBEvict { core, tlb_va } => {
