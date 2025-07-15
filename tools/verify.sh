@@ -7,4 +7,4 @@ source tools/activate.sh
 set -x
 
 # run verus
-verus --crate-type=lib $* page-table/src/lib.rs
+verus --crate-type=lib  --rlimit 50 $* page-table/src/lib.rs

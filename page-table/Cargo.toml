@@ -15,6 +15,7 @@ crate-type = [ "staticlib" ]
 [features]
 impl = []
 noreclaim = []
+unrolled = []
 linuxmodule = []
 default = ["impl"]
 

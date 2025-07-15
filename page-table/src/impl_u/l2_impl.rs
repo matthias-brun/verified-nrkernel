@@ -1328,7 +1328,8 @@ pub open spec fn accepted_mapping(vaddr: nat, pte: PTE, layer: nat, base: nat) -
 }
 
 #[verifier(spinoff_prover)]
-fn map_frame_aux(
+#[cfg(feature = "unrolled")]
+fn pt_map_frame(
     Tracked(tok): Tracked<&mut WrappedMapToken>,
     Ghost(pt): Ghost<PTDir>,
     layer: usize,
@@ -1342,6 +1343,920 @@ fn map_frame_aux(
         old(tok).inv(),
         !old(tok)@.change_made,
         old(tok)@.args == (OpArgs::Map { base: vaddr, pte: pte@ }),
+        inv_at(old(tok)@, pt, layer as nat, ptr),
+        layer == 3,
+        no_empty_directories(old(tok)@, pt, layer as nat, ptr),
+        aligned(base as nat, x86_arch_spec.entry_size(layer as nat)),
+        accepted_mapping(vaddr as nat, pte@, layer as nat, base as nat),
+        base <= vaddr < MAX_BASE,
+        candidate_mapping_overlaps_existing_vmem(interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp(), vaddr as nat, pte@)
+            <==> candidate_mapping_overlaps_existing_vmem(interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])), vaddr as nat, pte@),
+        forall|tok_new, pt_new, new_regions|
+           #[trigger] map_builder_pre(old(tok)@, pt, tok_new, pt_new, layer as nat, ptr, new_regions)
+               ==> {
+                   &&& inv(tok_new, rebuild_root_pt(pt_new, new_regions))
+                   &&& interp_at(tok_new, pt_new, layer as nat, ptr, base as nat).interp()
+                           == interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp()
+                        ==> interp_to_l0(tok_new, rebuild_root_pt(pt_new, new_regions))
+                                == interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![]))
+                   &&& interp_at(tok_new, pt_new, layer as nat, ptr, base as nat).interp()
+                           === interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp().insert(vaddr as nat, pte@)
+                        ==> interp_to_l0(tok_new, rebuild_root_pt(pt_new, new_regions))
+                                === interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])).insert(vaddr as nat, pte@)
+        }
+    ensures
+        tok.inv(),
+        tok@.pt_mem.pml4 == old(tok)@.pt_mem.pml4,
+        match res {
+            Ok(resv) => {
+                let (pt_res, new_regions) = resv@;
+                // We return the regions that we added
+                &&& tok@.regions.dom() === old(tok)@.regions.dom().union(new_regions)
+                &&& pt_res.used_regions === pt.used_regions.union(new_regions)
+                // and only those we added
+                &&& new_regions.disjoint(old(tok)@.regions.dom())
+                &&& (forall|r: MemRegion| new_regions.contains(r) ==> !(#[trigger] pt.used_regions.contains(r)))
+                // Invariant preserved
+                &&& inv_at(tok@, pt_res, layer as nat, ptr)
+                &&& !empty_at(tok@, pt_res, layer as nat, ptr)
+                &&& no_empty_directories(tok@, pt_res, layer as nat, ptr)
+                // We only touch already allocated regions if they're in pt.used_regions
+                &&& (forall|r: MemRegion| !(#[trigger] pt.used_regions.contains(r)) && !new_regions.contains(r)
+                    ==> tok@.regions[r] === old(tok)@.regions[r])
+                &&& pt_res.region === pt.region
+                &&& !candidate_mapping_overlaps_existing_vmem(interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])), vaddr as nat, pte@)
+                &&& tok@.change_made
+                &&& tok@.result === Ok(())
+            },
+            Err(e) => {
+                // If error, unchanged
+                &&& tok@ === old(tok)@
+                &&& candidate_mapping_overlaps_existing_vmem(interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])), vaddr as nat, pte@)
+                &&& candidate_mapping_overlaps_existing_vmem(interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp(), vaddr as nat, pte@)
+            },
+        },
+    // decreases X86_NUM_LAYERS - layer
+{
+    proof {
+        broadcast use
+            lemma_union_empty,
+            lemma_inv_implies_interp_inv;
+        lemma_bitvector_facts_simple();
+        lemma_interp_at_facts(tok@, pt, layer as nat, ptr, base as nat);
+        lemma_x86_arch_spec_inv();
+    }
+    let idx: usize = x86_arch_exec.index_for_vaddr(layer, base, vaddr);
+    proof {
+        assert({
+            &&& between(vaddr as nat, x86_arch_spec.entry_base(layer as nat, base as nat, idx as nat), x86_arch_spec.next_entry_base(layer as nat, base as nat, idx as nat))
+            &&& aligned(vaddr as nat, x86_arch_spec.entry_size(layer as nat)) ==> vaddr == x86_arch_spec.entry_base(layer as nat, base as nat, idx as nat)
+            &&& idx < X86_NUM_ENTRIES }) by
+        {
+            let es = x86_arch_spec.entry_size(layer as nat);
+            indexing::lemma_index_from_base_and_addr(base as nat, vaddr as nat, es, X86_NUM_ENTRIES as nat);
+        };
+        lemma_interp_at_aux_facts(old(tok)@, pt, layer as nat, ptr, base as nat, seq![]);
+    }
+    let entry = entry_at(Tracked(tok), Ghost(pt), layer, ptr, idx);
+    let entry_base: usize = x86_arch_exec.entry_base(layer, base, idx);
+    proof {
+        indexing::lemma_entry_base_from_index(base as nat, idx as nat, x86_arch_spec.entry_size(layer as nat));
+    }
+    if entry.is_present() {
+        if entry.is_dir(layer) {
+            // we cannot have a directory in this layer
+            assert(false);
+            Err(())
+        } else {
+            assert(candidate_mapping_overlaps_existing_vmem(interp_at(tok@, pt, layer as nat, ptr, base as nat).interp(), vaddr as nat, pte@)) by {
+                let interp_now = interp_at(tok@, pt, layer as nat, ptr, base as nat);
+                let interp_entry = interp_at_entry(tok@, pt, layer as nat, ptr, base as nat, idx as nat);
+                interp_now.lemma_interp_of_entry_contains_mapping_implies_interp_contains_mapping(idx as nat);
+                assert(interp_entry is Page);
+                let ghost ppte = interp_entry->Page_0;
+                assert(interp_entry.interp(entry_base as nat).contains_pair(entry_base as nat, ppte));
+                assert(overlap(
+                        MemRegion { base: vaddr as nat, size: pte@.frame.size },
+                        MemRegion { base: entry_base as nat, size: ppte.frame.size },
+                ));
+                assert(interp_now.interp().contains_pair(entry_base as nat, ppte));
+            };
+            assert(candidate_mapping_overlaps_existing_vmem(interp_to_l0(tok@, rebuild_root_pt(pt, set![])), vaddr as nat, pte@));
+            Err(())
+        }
+    } else {
+        assert(x86_arch_spec.entry_size(layer as nat) == pte.frame.size);
+        let ghost root_pt = rebuild_root_pt(pt, set![]);
+
+        proof {
+            assert_by_contradiction!(layer > 0, {
+                let iprime = choose|i: nat| 0 < i && i < X86_NUM_LAYERS && #[trigger] x86_arch_spec.entry_size(i) == pte.frame.size;
+                //assert(x86_arch_spec.entry_size(0) == pte.frame.size);
+                //assert(x86_arch_spec.contains_entry_size_at_index_atleast(pte.frame.size as nat, 1));
+                assert forall|i: nat| 0 < i < X86_NUM_LAYERS implies
+                    x86_arch_spec.entry_size(0) >= #[trigger] x86_arch_spec.entry_size(i)
+                by {
+                    x86_arch_spec.lemma_entry_sizes_increase(0, i);
+                };
+                assert(false);
+            });
+            assert(addr_is_zero_padded(layer as nat, pte.frame.base, true)) by {
+                lemma_aligned_addr_mask_facts(pte.frame.base);
+            };
+            assert(pte.frame.base & MASK_ADDR == pte.frame.base) by {
+                lemma_aligned_addr_mask_facts(pte.frame.base);
+            };
+        }
+
+        // Nothing is mapped here, so there are no overlapping mappings
+        assert(!candidate_mapping_overlaps_existing_vmem(interp_to_l0(old(tok)@, root_pt), vaddr as nat, pte@)) by {
+            assert_by_contradiction!(!candidate_mapping_overlaps_existing_vmem(interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp(), vaddr as nat, pte@), {
+                let interp_old = interp_at(old(tok)@, pt, layer as nat, ptr, base as nat);
+                let interp_entry_old = interp_at_entry(old(tok)@, pt, layer as nat, ptr, base as nat, idx as nat);
+                let b = choose|b: nat| #![auto] {
+                    &&& interp_old.interp().contains_key(b)
+                    &&& overlap(
+                        MemRegion { base: vaddr as nat, size: pte@.frame.size },
+                        MemRegion { base: b, size: interp_old.interp()[b].frame.size },
+                    )
+                };
+                let ppte = interp_old.interp()[b];
+                assert(interp_old.interp().contains_pair(b, ppte));
+
+                interp_old.lemma_interp_contains_implies_interp_of_entry_contains();
+                let i = choose|i: nat| #![auto] i < interp_old.num_entries() && interp_old.interp_of_entry(i).contains_pair(b, ppte);
+                interp_old.lemma_interp_of_entry_between(i, b, ppte);
+                assert(i == idx) by (nonlinear_arith)
+                    requires
+                        overlap(
+                            MemRegion { base: vaddr as nat, size: pte@.frame.size },
+                            MemRegion { base: b, size: ppte.frame.size },
+                        ),
+                        x86_arch_spec.entry_base(layer as nat, base as nat, i as nat) <= b < x86_arch_spec.next_entry_base(layer as nat, base as nat, i as nat),
+                        b + ppte.frame.size <= x86_arch_spec.next_entry_base(layer as nat, base as nat, i as nat),
+                        x86_arch_spec.entry_base(layer as nat, base as nat, idx as nat) == vaddr,
+                        vaddr + pte@.frame.size == x86_arch_spec.next_entry_base(layer as nat, base as nat, idx as nat),
+                {};
+            });
+        };
+
+
+        let new_page_entry = PDE::new_page_entry(layer, pte);
+        let ghost pwtok = tok@;
+        // This is the token state we'll have after the write happened
+        let ghost tok_after_write = tok@.write(idx, new_page_entry.entry, pt.region, true);
+
+        proof {
+            lemma_bitvector_facts();
+            assert(new_page_entry.entry & 1 == 1);
+            assert(tok@.read(idx, pt.region) & 1 == 0);
+
+
+            // And that state will satisfy the invariant
+            assert(inv_at(tok_after_write, pt, layer as nat, ptr)) by {
+                reveal(ghost_pt_used_regions_pairwise_disjoint);
+                lemma_bitvector_facts();
+                assert(tok_after_write.regions[pt.region] === pwtok.regions[pt.region].update(idx as int, new_page_entry.entry));
+
+                assert forall|i: nat| #![auto] i < X86_NUM_ENTRIES implies
+                    entry_at_spec(tok_after_write, pt, layer as nat, ptr, i)@
+                    == if i == idx { new_page_entry@ } else { entry_at_spec(old(tok)@, pt, layer as nat, ptr, i)@ } by { };
+
+                lemma_directories_obey_invariant_at_framing(old(tok)@, pt, tok_after_write, pt, layer as nat, ptr, idx as nat);
+            }
+
+            assert(tok_after_write.regions.dom() == tok@.regions.dom().union(set![]));
+            assert(map_builder_pre(tok@, pt, tok_after_write, pt, layer as nat, ptr, set![]));
+
+            assert(interp_to_l0(tok_after_write, rebuild_root_pt(pt, set![]))
+                        === interp_to_l0(tok@, rebuild_root_pt(pt, set![])).insert(vaddr as nat, pte@))
+            by {
+                let idx = idx as nat;
+                let base = base as nat;
+                let vaddr = vaddr as nat;
+                let pte = pte@;
+                let pre_interp = interp_at(tok@, pt, layer as nat, ptr, base);
+                let post_interp = interp_at(tok_after_write, pt, layer as nat, ptr, base);
+                assert(interp_at_entry(tok_after_write, pt, layer as nat, ptr, base, idx) === l1::NodeEntry::Page(pte));
+                assert(pre_interp.inv());
+                assert(post_interp.inv());
+                assert_seqs_equal!(post_interp.entries == pre_interp.entries.update(idx as int, l1::NodeEntry::Page(pte)), j => {
+                    lemma_interp_at_facts(tok@, pt, layer as nat, ptr, base as nat);
+                    lemma_interp_at_facts(tok_after_write, pt, layer as nat, ptr, base as nat);
+                    if j == idx {
+                    } else {
+                        broadcast use lemma_interp_at_entry_changed_tok;
+                        assert(interp_at_entry(tok_after_write, pt, layer as nat, ptr, base, j as nat)
+                            == interp_at_entry(tok@, pt, layer as nat, ptr, base, j as nat));
+                    }
+                });
+                assert(pre_interp.interp_of_entry(idx) =~= map![]);
+                let entry_base = x86_arch_spec.entry_base(layer as nat, base, idx);
+                assert(post_interp.interp_of_entry(idx) =~= map![entry_base => pte]);
+                assert(pre_interp.update(idx, l1::NodeEntry::Page(pte)).interp_of_entry(idx)
+                        == l1::NodeEntry::Page(pte).interp(entry_base));
+                assert(pre_interp.interp_of_entry(idx).insert(vaddr, pte)
+                    == pre_interp.update(idx, l1::NodeEntry::Page(pte)).interp_of_entry(idx));
+                pre_interp.lemma_interp_of_entry_insert_page_implies_interp_insert_page(idx, vaddr, pte);
+                assert(pre_interp.interp().insert(vaddr, pte) == pre_interp.update(idx, l1::NodeEntry::Page(pte)).interp());
+                assert(post_interp.interp() === pre_interp.interp().insert(vaddr as nat, pte));
+            };
+
+
+            assert(inv(old(tok)@, root_pt)) by {
+                assert(map_builder_pre(old(tok)@, pt, old(tok)@, pt, layer as nat, ptr, set![]));
+            };
+            assert(inv(tok_after_write, root_pt));
+
+            assert(inv(old(tok)@, root_pt));
+            assert(inv(tok_after_write, root_pt));
+
+            assert(interp_to_l0(tok_after_write, root_pt) == interp_to_l0(tok@, root_pt).insert(vaddr as nat, pte@));
+        }
+
+        WrappedMapToken::write_change(Tracked(tok), ptr, idx, new_page_entry.entry, Ghost(pt.region), Ghost(root_pt));
+
+        assert(no_empty_directories(tok@, pt, layer as nat, ptr)) by {
+            lemma_no_empty_directories_framing(old(tok)@, pt, tok@, pt, layer as nat, ptr, base as nat, idx as nat);
+        };
+
+        // posts
+        assert(forall|r: MemRegion| !pt.used_regions.contains(r) ==> #[trigger] tok@.regions[r] === old(tok)@.regions[r]);
+        assert(tok@.regions.dom() =~= old(tok)@.regions.dom().union(set![]));
+        assert(pt.used_regions.union(set![]) =~= pt.used_regions);
+        assert(!empty_at(tok@, pt, layer as nat, ptr)) by {
+            reveal(ghost_pt_used_regions_pairwise_disjoint);
+        };
+
+        Ok(Ghost((pt, set![])))
+    }
+}
+
+
+#[verifier(spinoff_prover)]
+#[cfg(feature = "unrolled")]
+fn pmd_map_frame(
+    Tracked(tok): Tracked<&mut WrappedMapToken>,
+    Ghost(pt): Ghost<PTDir>,
+    layer: usize,
+    ptr: usize,
+    base: usize,
+    vaddr: usize,
+    pte: PageTableEntryExec,
+    Ghost(rebuild_root_pt): Ghost<spec_fn(PTDir, Set<MemRegion>) -> PTDir>,
+) -> (res: Result<Ghost<(PTDir,Set<MemRegion>)>,()>)
+    requires
+        old(tok).inv(),
+        !old(tok)@.change_made,
+        old(tok)@.args == (OpArgs::Map { base: vaddr, pte: pte@ }),
+        inv_at(old(tok)@, pt, layer as nat, ptr),
+        layer == 2,
+        no_empty_directories(old(tok)@, pt, layer as nat, ptr),
+        aligned(base as nat, x86_arch_spec.entry_size(layer as nat)),
+        accepted_mapping(vaddr as nat, pte@, layer as nat, base as nat),
+        base <= vaddr < MAX_BASE,
+        candidate_mapping_overlaps_existing_vmem(interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp(), vaddr as nat, pte@)
+            <==> candidate_mapping_overlaps_existing_vmem(interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])), vaddr as nat, pte@),
+        forall|tok_new, pt_new, new_regions|
+           #[trigger] map_builder_pre(old(tok)@, pt, tok_new, pt_new, layer as nat, ptr, new_regions)
+               ==> {
+                   &&& inv(tok_new, rebuild_root_pt(pt_new, new_regions))
+                   &&& interp_at(tok_new, pt_new, layer as nat, ptr, base as nat).interp()
+                           == interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp()
+                        ==> interp_to_l0(tok_new, rebuild_root_pt(pt_new, new_regions))
+                                == interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![]))
+                   &&& interp_at(tok_new, pt_new, layer as nat, ptr, base as nat).interp()
+                           === interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp().insert(vaddr as nat, pte@)
+                        ==> interp_to_l0(tok_new, rebuild_root_pt(pt_new, new_regions))
+                                === interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])).insert(vaddr as nat, pte@)
+        }
+    ensures
+        tok.inv(),
+        tok@.pt_mem.pml4 == old(tok)@.pt_mem.pml4,
+        match res {
+            Ok(resv) => {
+                let (pt_res, new_regions) = resv@;
+                // We return the regions that we added
+                &&& tok@.regions.dom() === old(tok)@.regions.dom().union(new_regions)
+                &&& pt_res.used_regions === pt.used_regions.union(new_regions)
+                // and only those we added
+                &&& new_regions.disjoint(old(tok)@.regions.dom())
+                &&& (forall|r: MemRegion| new_regions.contains(r) ==> !(#[trigger] pt.used_regions.contains(r)))
+                // Invariant preserved
+                &&& inv_at(tok@, pt_res, layer as nat, ptr)
+                &&& !empty_at(tok@, pt_res, layer as nat, ptr)
+                &&& no_empty_directories(tok@, pt_res, layer as nat, ptr)
+                // We only touch already allocated regions if they're in pt.used_regions
+                &&& (forall|r: MemRegion| !(#[trigger] pt.used_regions.contains(r)) && !new_regions.contains(r)
+                    ==> tok@.regions[r] === old(tok)@.regions[r])
+                &&& pt_res.region === pt.region
+                &&& !candidate_mapping_overlaps_existing_vmem(interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])), vaddr as nat, pte@)
+                &&& tok@.change_made
+                &&& tok@.result === Ok(())
+            },
+            Err(e) => {
+                // If error, unchanged
+                &&& tok@ === old(tok)@
+                &&& candidate_mapping_overlaps_existing_vmem(interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])), vaddr as nat, pte@)
+                &&& candidate_mapping_overlaps_existing_vmem(interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp(), vaddr as nat, pte@)
+            },
+        },
+    // decreases X86_NUM_LAYERS - layer
+{
+    proof {
+        broadcast use
+            lemma_union_empty,
+            lemma_inv_implies_interp_inv;
+        lemma_bitvector_facts_simple();
+        lemma_interp_at_facts(tok@, pt, layer as nat, ptr, base as nat);
+        lemma_x86_arch_spec_inv();
+    }
+    let idx: usize = x86_arch_exec.index_for_vaddr(layer, base, vaddr);
+    proof {
+        assert({
+            &&& between(vaddr as nat, x86_arch_spec.entry_base(layer as nat, base as nat, idx as nat), x86_arch_spec.next_entry_base(layer as nat, base as nat, idx as nat))
+            &&& aligned(vaddr as nat, x86_arch_spec.entry_size(layer as nat)) ==> vaddr == x86_arch_spec.entry_base(layer as nat, base as nat, idx as nat)
+            &&& idx < X86_NUM_ENTRIES }) by
+        {
+            let es = x86_arch_spec.entry_size(layer as nat);
+            indexing::lemma_index_from_base_and_addr(base as nat, vaddr as nat, es, X86_NUM_ENTRIES as nat);
+        };
+        lemma_interp_at_aux_facts(old(tok)@, pt, layer as nat, ptr, base as nat, seq![]);
+    }
+    let entry = entry_at(Tracked(tok), Ghost(pt), layer, ptr, idx);
+    let entry_base: usize = x86_arch_exec.entry_base(layer, base, idx);
+    proof {
+        indexing::lemma_entry_base_from_index(base as nat, idx as nat, x86_arch_spec.entry_size(layer as nat));
+    }
+    if entry.is_present() {
+        if entry.is_dir(layer) {
+            if x86_arch_exec.entry_size(layer) == pte.frame.size {
+                // A directory is mapped here. We know that mapped directories are non-empty so
+                // there must be an overlapping mapping and this operation should fail.
+                assert(candidate_mapping_overlaps_existing_vmem(interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp(), vaddr as nat, pte@)) by {
+                    let ghost dir_pt = pt.entries[idx as int]->Some_0;
+                    let dir_addr = entry@->Directory_addr;
+                    let interp_old = interp_at(old(tok)@, pt, layer as nat, ptr, base as nat);
+                    let interp_entry = interp_at(old(tok)@, dir_pt, layer as nat + 1, dir_addr, entry_base as nat);
+                    assert(!empty_at(old(tok)@, dir_pt, layer as nat + 1, dir_addr));
+                    lemma_no_empty_directories_implies_interp_at_no_empty_directories(old(tok)@, pt, layer as nat, ptr, base as nat);
+                    interp_entry.lemma_nonempty_implies_interp_contains();
+                    let (b, ppte): (nat, PTE) =
+                        choose|b, ppte| #[trigger] interp_entry.interp().contains_pair(b, ppte)
+                            && interp_entry.arch.contains_entry_size_at_index_atleast(ppte.frame.size as nat, interp_entry.layer);
+                    assert(interp_entry.interp().contains_pair(b, ppte));
+                    lemma_interp_at_aux_facts(old(tok)@, dir_pt, layer as nat + 1, dir_addr, entry_base as nat, seq![]);
+                    interp_old.lemma_interp_of_entry_between(idx as nat, b, ppte);
+
+                    assert(interp_old.interp().contains_pair(b, ppte)) by {
+                        interp_old.lemma_interp_of_entry_contains_mapping_implies_interp_contains_mapping(idx as nat);
+                    };
+                    assert(x86_arch_spec.contains_entry_size_at_index_atleast(ppte.frame.size, layer as nat));
+                    assert(overlap(
+                            MemRegion { base: b, size: ppte.frame.size },
+                            MemRegion { base: vaddr as nat, size: pte@.frame.size },
+                        )) by (nonlinear_arith)
+                        requires
+                            x86_arch_spec.contains_entry_size_at_index_atleast(ppte.frame.size, layer as nat),
+                            pte@.frame.size == x86_arch_spec.entry_size(layer as nat),
+                            vaddr == x86_arch_spec.entry_base(layer as nat, base as nat, idx as nat),
+                            x86_arch_spec.entry_base(layer as nat, base as nat, idx as nat) <= b,
+                            b + ppte.frame.size <= x86_arch_spec.next_entry_base(layer as nat, base as nat, idx as nat);
+                };
+                assert(candidate_mapping_overlaps_existing_vmem(interp_to_l0(tok@, rebuild_root_pt(pt, set![])), vaddr as nat, pte@));
+                Err(())
+            } else {
+                let dir_addr = entry.address();
+                assert(pt.entries[idx as int] is Some);
+                let ghost dir_pt = pt.entries[idx as int]->Some_0;
+                assert(directories_obey_invariant_at(tok@, pt, layer as nat, ptr));
+
+                let ghost rebuild_root_pt_inner = |pt_new_inner: PTDir, new_regions: Set<MemRegion>| {
+                    let pt_new = PTDir {
+                        entries: pt.entries.update(idx as int, Some(pt_new_inner)),
+                        used_regions: pt.used_regions.union(new_regions),
+                        ..pt
+                    };
+                    rebuild_root_pt(pt_new, new_regions)
+                };
+
+                assert(pt.entries =~= PTDir {
+                    entries: pt.entries.update(idx as int, Some(dir_pt)),
+                    used_regions: pt.used_regions.union(set![]),
+                    ..pt
+                }.entries);
+                assert(forall|s: Set<MemRegion>| s.union(set![]) =~= s);
+                assert(rebuild_root_pt_inner(dir_pt, set![]) == rebuild_root_pt(pt, set![]));
+
+
+                assert forall|tok_new, pt_new_inner, new_regions|
+                   #[trigger] map_builder_pre(tok@, dir_pt, tok_new, pt_new_inner, layer as nat + 1, dir_addr, new_regions)
+                   implies {
+                       &&& inv(tok_new, rebuild_root_pt_inner(pt_new_inner, new_regions))
+                       &&& interp_at(tok_new, pt_new_inner, layer as nat + 1, dir_addr, entry_base as nat).interp()
+                               == interp_at(tok@, dir_pt, layer as nat + 1, dir_addr, entry_base as nat).interp()
+                            ==> interp_to_l0(tok_new, rebuild_root_pt_inner(pt_new_inner, new_regions))
+                                    == interp_to_l0(tok@, rebuild_root_pt_inner(dir_pt, set![]))
+                       &&& interp_at(tok_new, pt_new_inner, layer as nat + 1, dir_addr, entry_base as nat).interp()
+                               === interp_at(tok@, dir_pt, layer as nat + 1, dir_addr, entry_base as nat).interp().insert(vaddr as nat, pte@)
+                            ==> interp_to_l0(tok_new, rebuild_root_pt_inner(pt_new_inner, new_regions))
+                                    === interp_to_l0(tok@, rebuild_root_pt_inner(dir_pt, set![])).insert(vaddr as nat, pte@)
+                       }
+                by {
+                    //assert(pt_new_inner.used_regions === dir_pt.used_regions.union(new_regions));
+                    assert(inv_at(tok_new, pt_new_inner, (layer + 1) as nat, dir_addr));
+                    //assert(Ok(interp_at(tok_new, pt_new_inner, (layer + 1) as nat, dir_addr, entry_base as nat))
+                    //       === interp_at(old(tok_new)@, dir_pt, (layer + 1) as nat, dir_addr, entry_base as nat).map_frame(vaddr as nat, pte@));
+                    let ghost pt_new =
+                        PTDir {
+                            region: pt.region,
+                            entries: pt.entries.update(idx as int, Some(pt_new_inner)),
+                            used_regions: pt.used_regions.union(new_regions),
+                        };
+
+                    assert(!new_regions.contains(pt_new.region));
+                    assert(!pt_new_inner.used_regions.contains(pt_new.region));
+
+                    // None of the entries at this level change
+                    assert forall|i: nat| i < X86_NUM_ENTRIES implies
+                        #[trigger] entry_at_spec(tok_new, pt_new, layer as nat, ptr, i) == entry_at_spec(old(tok)@, pt, layer as nat, ptr, i) by { };
+
+                    assert(inv_at(tok_new, pt_new, layer as nat, ptr)) by {
+                        reveal(ghost_pt_used_regions_pairwise_disjoint);
+                        lemma_directories_obey_invariant_at_framing(tok@, pt, tok_new, pt_new, layer as nat, ptr, idx as nat);
+                    };
+
+                    assert(inv_at(tok@, pt, layer as nat, ptr));
+                    assert(tok@ == old(tok)@);
+
+                    assert forall|r| !(pt.used_regions.contains(r)) && !(new_regions.contains(r)) implies #[trigger] tok_new.regions[r] === tok@.regions[r] by {
+                        assert(!dir_pt.used_regions.contains(r));
+                        if tok_new.regions.contains_key(r) {
+                            assert(tok_new.regions[r] == tok@.regions[r]);
+                        } else {
+                            assert(!tok@.regions.contains_key(r));
+                        }
+                    }
+
+                    assert(map_builder_pre(tok@, pt, tok_new, pt_new, layer as nat, ptr, new_regions));
+                    assert(inv(tok_new, rebuild_root_pt(pt_new, new_regions)));
+
+                    // Prove the first interp property for the new builder
+                    if interp_at(tok_new, pt_new_inner, layer as nat + 1, dir_addr, entry_base as nat).interp()
+                           == interp_at(tok@, dir_pt, layer as nat + 1, dir_addr, entry_base as nat).interp()
+                    {
+                        assert(interp_at(tok_new, pt_new, layer as nat, ptr, base as nat).interp()
+                                == interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp())
+                        by {
+                            lemma_interp_at_aux_facts(tok_new, pt_new, layer as nat, ptr, base as nat, seq![]);
+                            assert forall|i: nat| i < X86_NUM_ENTRIES && i != idx implies
+                                    interp_at(tok_new, pt_new, layer as nat, ptr, base as nat).entries[i as int]
+                                    === #[trigger] interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).entries[i as int]
+                            by {
+                                reveal(ghost_pt_used_regions_pairwise_disjoint);
+                                lemma_interp_at_entry_changed_tok(old(tok)@, pt, tok_new, pt_new, layer as nat, ptr, base as nat, i);
+                            };
+                            interp_at(tok_new, pt_new, layer as nat, ptr, base as nat)
+                                .lemma_entries_interp_equal_implies_interp_equal(
+                                    interp_at(old(tok)@, pt, layer as nat, ptr, base as nat)
+                                );
+                        };
+                        assert(interp_to_l0(tok_new, rebuild_root_pt_inner(pt_new_inner, new_regions)) == interp_to_l0(tok@, rebuild_root_pt_inner(dir_pt, set![])));
+                    }
+
+                    let interp_now_inner = interp_at(tok@, dir_pt, layer as nat + 1, dir_addr, entry_base as nat);
+                    let interp_new_inner = interp_at(tok_new, pt_new_inner, layer as nat + 1, dir_addr, entry_base as nat);
+                    let interp_new = interp_at(tok_new, pt_new, layer as nat, ptr, base as nat);
+                    //let interp_now = interp_at(tok_new, pt_new, layer as nat, ptr, base as nat);
+                    let interp_old = interp_at(old(tok)@, pt, layer as nat, ptr, base as nat);
+                    // Prove the second interp property for the new builder
+                    if interp_new_inner.interp() === interp_now_inner.interp().insert(vaddr as nat, pte@) {
+                        lemma_interp_at_aux_facts(tok_new, pt_new, layer as nat, ptr, base as nat, seq![]);
+                        assert(interp_new.interp() === interp_old.interp().insert(vaddr as nat, pte@)) by {
+                            assert forall|i: nat| i < X86_NUM_ENTRIES && i != idx implies
+                                interp_at(tok_new, pt_new, layer as nat, ptr, base as nat).entries[i as int]
+                                === #[trigger] interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).entries[i as int]
+                            by {
+                                reveal(ghost_pt_used_regions_pairwise_disjoint);
+                                lemma_interp_at_entry_changed_tok(old(tok)@, pt, tok_new, pt_new, layer as nat, ptr, base as nat, i);
+                            };
+                            assert(interp_new.entries[idx as int].interp(entry_base as nat)
+                                === interp_old.entries[idx as int].interp(entry_base as nat).insert(vaddr as nat, pte@));
+                            assert(interp_new.entries == interp_old.entries.update(idx as int, l1::NodeEntry::Directory(interp_new_inner)));
+
+                            interp_old.lemma_interp_entries_insert_implies_interp_insert(idx as nat, vaddr as nat, l1::NodeEntry::Directory(interp_new_inner), pte@);
+                        };
+                        assert(interp_to_l0(tok_new, rebuild_root_pt_inner(pt_new_inner, new_regions))
+                            === interp_to_l0(tok@, rebuild_root_pt_inner(dir_pt, set![])).insert(vaddr as nat, pte@));
+                    }
+                };
+
+                assert(candidate_mapping_overlaps_existing_vmem(interp_at(tok@, dir_pt, layer as nat + 1, dir_addr, entry_base as nat).interp(), vaddr as nat, pte@)
+                    <==> candidate_mapping_overlaps_existing_vmem(interp_to_l0(tok@, rebuild_root_pt_inner(dir_pt, set![])), vaddr as nat, pte@))
+                by {
+                    let interp_now_inner = interp_at(tok@, dir_pt, layer as nat + 1, dir_addr, entry_base as nat);
+                    let interp_now_outer = interp_at(tok@, pt, layer as nat, ptr, base as nat);
+                    assert(interp_to_l0(tok@, rebuild_root_pt_inner(dir_pt, set![])) == interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])));
+                    assert(candidate_mapping_overlaps_existing_vmem(interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp(), vaddr as nat, pte@)
+                        <==> candidate_mapping_overlaps_existing_vmem(interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])), vaddr as nat, pte@));
+                    if candidate_mapping_overlaps_existing_vmem(interp_now_outer.interp(), vaddr as nat, pte@) {
+                        let b = choose|b: nat| #![auto] {
+                            &&& interp_now_outer.interp().contains_key(b)
+                            &&& overlap(
+                                MemRegion { base: vaddr as nat, size: pte@.frame.size },
+                                MemRegion { base: b, size: interp_now_outer.interp()[b].frame.size },
+                            )
+                        };
+                        let ppte = interp_now_outer.interp()[b];
+                        assert(interp_now_outer.interp().contains_pair(b, ppte));
+                        interp_now_outer.lemma_interp_contains_implies_interp_of_entry_contains_at_index(b, ppte);
+                        let i = interp_now_outer.index_for_vaddr(b);
+                        interp_now_outer.lemma_interp_aux_between(0, b, ppte);
+                        indexing::lemma_index_from_base_and_addr(base as nat, b, x86_arch_spec.entry_size(layer as nat), X86_NUM_ENTRIES as nat);
+                        interp_now_outer.lemma_interp_of_entry_between(i, b, ppte);
+                        assert(i == idx) by (nonlinear_arith)
+                            requires
+                                overlap(
+                                    MemRegion { base: vaddr as nat, size: pte@.frame.size },
+                                    MemRegion { base: b, size: ppte.frame.size },
+                                ),
+                                idx == x86_arch_spec.index_for_vaddr(layer as nat, base as nat, vaddr as nat),
+                                i == x86_arch_spec.index_for_vaddr(layer as nat, base as nat, b),
+                                x86_arch_spec.entry_base(layer as nat, base as nat, i as nat) <= b < x86_arch_spec.next_entry_base(layer as nat, base as nat, i as nat),
+                                x86_arch_spec.entry_base(layer as nat, base as nat, i as nat) < b + ppte.frame.size <= x86_arch_spec.next_entry_base(layer as nat, base as nat, i as nat),
+                                aligned(base as nat, x86_arch_spec.entry_size(layer as nat)),
+                                aligned(vaddr as nat, pte.frame.size as nat),
+                                x86_arch_spec.contains_entry_size_at_index_atleast(pte.frame.size as nat, layer as nat),
+                        {};
+
+                        assert(interp_now_inner.interp().contains_pair(b, ppte));
+                        assert(candidate_mapping_overlaps_existing_vmem(interp_now_inner.interp(), vaddr as nat, pte@));
+                    }
+                    if !candidate_mapping_overlaps_existing_vmem(interp_now_outer.interp(), vaddr as nat, pte@) {
+                        assert forall|base, pte| interp_now_inner.interp().contains_pair(base, pte)
+                                implies interp_now_outer.interp().contains_pair(base, pte)
+                        by {
+                            interp_now_outer.lemma_interp_of_entry_contains_mapping_implies_interp_contains_mapping(idx as nat);
+                        };
+                        assert_by_contradiction!(!candidate_mapping_overlaps_existing_vmem(interp_now_inner.interp(), vaddr as nat, pte@), {
+                            let b = choose|b: nat| #![auto] {
+                                &&& interp_now_inner.interp().contains_key(b)
+                                &&& overlap(
+                                        MemRegion { base: vaddr as nat, size: pte@.frame.size },
+                                        MemRegion { base: b, size: interp_now_inner.interp()[b].frame.size },
+                                    )
+                            };
+                            assert(interp_now_inner.interp().contains_pair(b, interp_now_inner.interp()[b]));
+                            assert(candidate_mapping_overlaps_existing_vmem(interp_now_outer.interp(), vaddr as nat, pte@));
+                        });
+                    }
+                };
+
+
+
+                assert(aligned(entry_base as nat, x86_arch_spec.entry_size((layer + 1) as nat))) by (nonlinear_arith)
+                    requires
+                        layer < 3,
+                        aligned(base as nat, x86_arch_spec.entry_size(layer as nat)),
+                        entry_base == x86_arch_spec.entry_base(layer as nat, base as nat, idx as nat);
+                assert(accepted_mapping(vaddr as nat, pte@, (layer + 1) as nat, entry_base as nat)) by {
+                    assert(vaddr + pte.frame.size <= x86_arch_spec.next_entry_base(layer as nat, base as nat, idx as nat)) by (nonlinear_arith)
+                        requires
+                            aligned(base as nat, x86_arch_spec.entry_size(layer as nat)),
+                            aligned(vaddr as nat, pte.frame.size as nat),
+                            x86_arch_spec.contains_entry_size_at_index_atleast(pte.frame.size as nat, layer as nat),
+                            idx == x86_arch_spec.index_for_vaddr(layer as nat, base as nat, vaddr as nat),
+                    {};
+                };
+                match pt_map_frame(Tracked(tok), Ghost(dir_pt), layer + 1, dir_addr, entry_base, vaddr, pte, Ghost(rebuild_root_pt_inner)) {
+                    Ok(rec_res) => {
+                        let ghost dir_pt_res = rec_res@.0;
+                        let ghost new_regions = rec_res@.1;
+
+                        assert(dir_pt_res.used_regions === dir_pt.used_regions.union(new_regions));
+                        assert(inv_at(tok@, dir_pt_res, (layer + 1) as nat, dir_addr));
+                        let ghost pt_res =
+                            PTDir {
+                                region: pt.region,
+                                entries: pt.entries.update(idx as int, Some(dir_pt_res)),
+                                used_regions: pt.used_regions.union(new_regions),
+                            };
+
+                        assert(!new_regions.contains(pt_res.region));
+                        assert(!dir_pt_res.used_regions.contains(pt_res.region));
+
+                        // None of the entries at this level change
+                        assert forall|i: nat| i < X86_NUM_ENTRIES implies
+                            entry_at_spec(tok@, pt_res, layer as nat, ptr, i) == entry_at_spec(old(tok)@, pt, layer as nat, ptr, i)
+                        by {
+                            reveal(ghost_pt_used_regions_pairwise_disjoint);
+                        };
+
+                        assert(inv_at(tok@, pt_res, layer as nat, ptr)) by {
+                            reveal(ghost_pt_used_regions_pairwise_disjoint);
+                            lemma_directories_obey_invariant_at_framing(old(tok)@, pt, tok@, pt_res, layer as nat, ptr, idx as nat);
+                        };
+
+                        // posts
+                        assert forall|r: MemRegion| !pt.used_regions.contains(r) && !new_regions.contains(r)
+                           implies #[trigger] tok@.regions[r] === old(tok)@.regions[r]
+                           by { assert(!dir_pt.used_regions.contains(r)); };
+                        assert(tok@.regions.dom() === old(tok)@.regions.dom().union(new_regions));
+                        assert(pt_res.used_regions === pt.used_regions.union(new_regions));
+                        assert(pt_res.region === pt.region);
+                        assert(!empty_at(tok@, pt_res, layer as nat, ptr));
+                        assert(no_empty_directories(tok@, pt_res, layer as nat, ptr)) by {
+                            reveal(ghost_pt_used_regions_pairwise_disjoint);
+                            lemma_no_empty_directories_framing(old(tok)@, pt, tok@, pt_res, layer as nat, ptr, base as nat, idx as nat);
+                        };
+                        assert(!empty_at(tok@, pt_res, layer as nat, ptr)) by {
+                            reveal(ghost_pt_used_regions_pairwise_disjoint);
+                        };
+
+                        Ok(Ghost((pt_res,new_regions)))
+                    },
+                    Err(e) => Err(e),
+                }
+            }
+        } else {
+            assert(candidate_mapping_overlaps_existing_vmem(interp_at(tok@, pt, layer as nat, ptr, base as nat).interp(), vaddr as nat, pte@)) by {
+                let interp_now = interp_at(tok@, pt, layer as nat, ptr, base as nat);
+                let interp_entry = interp_at_entry(tok@, pt, layer as nat, ptr, base as nat, idx as nat);
+                interp_now.lemma_interp_of_entry_contains_mapping_implies_interp_contains_mapping(idx as nat);
+                assert(interp_entry is Page);
+                let ghost ppte = interp_entry->Page_0;
+                assert(interp_entry.interp(entry_base as nat).contains_pair(entry_base as nat, ppte));
+                assert(overlap(
+                        MemRegion { base: vaddr as nat, size: pte@.frame.size },
+                        MemRegion { base: entry_base as nat, size: ppte.frame.size },
+                ));
+                assert(interp_now.interp().contains_pair(entry_base as nat, ppte));
+            };
+            assert(candidate_mapping_overlaps_existing_vmem(interp_to_l0(tok@, rebuild_root_pt(pt, set![])), vaddr as nat, pte@));
+            Err(())
+        }
+    } else {
+        if x86_arch_exec.entry_size(layer) == pte.frame.size {
+            let ghost root_pt = rebuild_root_pt(pt, set![]);
+
+            proof {
+                assert_by_contradiction!(layer > 0, {
+                    let iprime = choose|i: nat| 0 < i && i < X86_NUM_LAYERS && #[trigger] x86_arch_spec.entry_size(i) == pte.frame.size;
+                    //assert(x86_arch_spec.entry_size(0) == pte.frame.size);
+                    //assert(x86_arch_spec.contains_entry_size_at_index_atleast(pte.frame.size as nat, 1));
+                    assert forall|i: nat| 0 < i < X86_NUM_LAYERS implies
+                        x86_arch_spec.entry_size(0) >= #[trigger] x86_arch_spec.entry_size(i)
+                    by {
+                        x86_arch_spec.lemma_entry_sizes_increase(0, i);
+                    };
+                    assert(false);
+                });
+                assert(addr_is_zero_padded(layer as nat, pte.frame.base, true)) by {
+                    lemma_aligned_addr_mask_facts(pte.frame.base);
+                };
+                assert(pte.frame.base & MASK_ADDR == pte.frame.base) by {
+                    lemma_aligned_addr_mask_facts(pte.frame.base);
+                };
+            }
+
+            // Nothing is mapped here, so there are no overlapping mappings
+            assert(!candidate_mapping_overlaps_existing_vmem(interp_to_l0(old(tok)@, root_pt), vaddr as nat, pte@)) by {
+                assert_by_contradiction!(!candidate_mapping_overlaps_existing_vmem(interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp(), vaddr as nat, pte@), {
+                    let interp_old = interp_at(old(tok)@, pt, layer as nat, ptr, base as nat);
+                    let interp_entry_old = interp_at_entry(old(tok)@, pt, layer as nat, ptr, base as nat, idx as nat);
+                    let b = choose|b: nat| #![auto] {
+                        &&& interp_old.interp().contains_key(b)
+                        &&& overlap(
+                            MemRegion { base: vaddr as nat, size: pte@.frame.size },
+                            MemRegion { base: b, size: interp_old.interp()[b].frame.size },
+                        )
+                    };
+                    let ppte = interp_old.interp()[b];
+                    assert(interp_old.interp().contains_pair(b, ppte));
+
+                    interp_old.lemma_interp_contains_implies_interp_of_entry_contains();
+                    let i = choose|i: nat| #![auto] i < interp_old.num_entries() && interp_old.interp_of_entry(i).contains_pair(b, ppte);
+                    interp_old.lemma_interp_of_entry_between(i, b, ppte);
+                    assert(i == idx) by (nonlinear_arith)
+                        requires
+                            overlap(
+                                MemRegion { base: vaddr as nat, size: pte@.frame.size },
+                                MemRegion { base: b, size: ppte.frame.size },
+                            ),
+                            x86_arch_spec.entry_base(layer as nat, base as nat, i as nat) <= b < x86_arch_spec.next_entry_base(layer as nat, base as nat, i as nat),
+                            b + ppte.frame.size <= x86_arch_spec.next_entry_base(layer as nat, base as nat, i as nat),
+                            x86_arch_spec.entry_base(layer as nat, base as nat, idx as nat) == vaddr,
+                            vaddr + pte@.frame.size == x86_arch_spec.next_entry_base(layer as nat, base as nat, idx as nat),
+                    {};
+                });
+            };
+
+
+            let new_page_entry = PDE::new_page_entry(layer, pte);
+            let ghost pwtok = tok@;
+            // This is the token state we'll have after the write happened
+            let ghost tok_after_write = tok@.write(idx, new_page_entry.entry, pt.region, true);
+
+            proof {
+                lemma_bitvector_facts();
+                assert(new_page_entry.entry & 1 == 1);
+                assert(tok@.read(idx, pt.region) & 1 == 0);
+
+
+                // And that state will satisfy the invariant
+                assert(inv_at(tok_after_write, pt, layer as nat, ptr)) by {
+                    reveal(ghost_pt_used_regions_pairwise_disjoint);
+                    lemma_bitvector_facts();
+                    assert(tok_after_write.regions[pt.region] === pwtok.regions[pt.region].update(idx as int, new_page_entry.entry));
+
+                    assert forall|i: nat| #![auto] i < X86_NUM_ENTRIES implies
+                        entry_at_spec(tok_after_write, pt, layer as nat, ptr, i)@
+                        == if i == idx { new_page_entry@ } else { entry_at_spec(old(tok)@, pt, layer as nat, ptr, i)@ } by { };
+
+                    lemma_directories_obey_invariant_at_framing(old(tok)@, pt, tok_after_write, pt, layer as nat, ptr, idx as nat);
+                }
+
+                assert(tok_after_write.regions.dom() == tok@.regions.dom().union(set![]));
+                assert(map_builder_pre(tok@, pt, tok_after_write, pt, layer as nat, ptr, set![]));
+
+                assert(interp_to_l0(tok_after_write, rebuild_root_pt(pt, set![]))
+                            === interp_to_l0(tok@, rebuild_root_pt(pt, set![])).insert(vaddr as nat, pte@))
+                by {
+                    let idx = idx as nat;
+                    let base = base as nat;
+                    let vaddr = vaddr as nat;
+                    let pte = pte@;
+                    let pre_interp = interp_at(tok@, pt, layer as nat, ptr, base);
+                    let post_interp = interp_at(tok_after_write, pt, layer as nat, ptr, base);
+                    assert(interp_at_entry(tok_after_write, pt, layer as nat, ptr, base, idx) === l1::NodeEntry::Page(pte));
+                    assert(pre_interp.inv());
+                    assert(post_interp.inv());
+                    assert_seqs_equal!(post_interp.entries == pre_interp.entries.update(idx as int, l1::NodeEntry::Page(pte)), j => {
+                        lemma_interp_at_facts(tok@, pt, layer as nat, ptr, base as nat);
+                        lemma_interp_at_facts(tok_after_write, pt, layer as nat, ptr, base as nat);
+                        if j == idx {
+                        } else {
+                            broadcast use lemma_interp_at_entry_changed_tok;
+                            assert(interp_at_entry(tok_after_write, pt, layer as nat, ptr, base, j as nat)
+                                == interp_at_entry(tok@, pt, layer as nat, ptr, base, j as nat));
+                        }
+                    });
+                    assert(pre_interp.interp_of_entry(idx) =~= map![]);
+                    let entry_base = x86_arch_spec.entry_base(layer as nat, base, idx);
+                    assert(post_interp.interp_of_entry(idx) =~= map![entry_base => pte]);
+                    assert(pre_interp.update(idx, l1::NodeEntry::Page(pte)).interp_of_entry(idx)
+                            == l1::NodeEntry::Page(pte).interp(entry_base));
+                    assert(pre_interp.interp_of_entry(idx).insert(vaddr, pte)
+                        == pre_interp.update(idx, l1::NodeEntry::Page(pte)).interp_of_entry(idx));
+                    pre_interp.lemma_interp_of_entry_insert_page_implies_interp_insert_page(idx, vaddr, pte);
+                    assert(pre_interp.interp().insert(vaddr, pte) == pre_interp.update(idx, l1::NodeEntry::Page(pte)).interp());
+                    assert(post_interp.interp() === pre_interp.interp().insert(vaddr as nat, pte));
+                };
+
+
+                assert(inv(old(tok)@, root_pt)) by {
+                    assert(map_builder_pre(old(tok)@, pt, old(tok)@, pt, layer as nat, ptr, set![]));
+                };
+                assert(inv(tok_after_write, root_pt));
+
+                assert(inv(old(tok)@, root_pt));
+                assert(inv(tok_after_write, root_pt));
+
+                assert(interp_to_l0(tok_after_write, root_pt) == interp_to_l0(tok@, root_pt).insert(vaddr as nat, pte@));
+            }
+
+            WrappedMapToken::write_change(Tracked(tok), ptr, idx, new_page_entry.entry, Ghost(pt.region), Ghost(root_pt));
+
+            assert(no_empty_directories(tok@, pt, layer as nat, ptr)) by {
+                lemma_no_empty_directories_framing(old(tok)@, pt, tok@, pt, layer as nat, ptr, base as nat, idx as nat);
+            };
+
+            // posts
+            assert(forall|r: MemRegion| !pt.used_regions.contains(r) ==> #[trigger] tok@.regions[r] === old(tok)@.regions[r]);
+            assert(tok@.regions.dom() =~= old(tok)@.regions.dom().union(set![]));
+            assert(pt.used_regions.union(set![]) =~= pt.used_regions);
+            assert(!empty_at(tok@, pt, layer as nat, ptr)) by {
+                reveal(ghost_pt_used_regions_pairwise_disjoint);
+            };
+
+            Ok(Ghost((pt, set![])))
+        } else {
+            let (Ghost(pt_with_empty), new_dir_region, new_dir_entry, Ghost(rebuild_root_pt_inner))
+                = insert_empty_directory(Tracked(tok), Ghost(pt), layer, ptr, base, idx, vaddr, pte, Ghost(rebuild_root_pt));
+            let ghost tok_with_empty = tok@;
+            let ghost new_dir_pt = pt_with_empty.entries[idx as int]->Some_0;
+            let new_dir_addr = new_dir_region.base;
+            assert(inv_at(tok_with_empty, pt_with_empty, layer as nat, ptr));
+
+            assert(aligned(entry_base as nat, x86_arch_spec.entry_size((layer + 1) as nat))) by (nonlinear_arith)
+                requires
+                    layer < 3,
+                    aligned(base as nat, x86_arch_spec.entry_size(layer as nat)),
+                    entry_base == x86_arch_spec.entry_base(layer as nat, base as nat, idx as nat);
+            assert(accepted_mapping(vaddr as nat, pte@, (layer + 1) as nat, entry_base as nat)) by {
+                assert(vaddr + pte.frame.size <= x86_arch_spec.next_entry_base(layer as nat, base as nat, idx as nat)) by (nonlinear_arith)
+                    requires
+                        aligned(base as nat, x86_arch_spec.entry_size(layer as nat)),
+                        aligned(vaddr as nat, pte.frame.size as nat),
+                        x86_arch_spec.contains_entry_size_at_index_atleast(pte.frame.size as nat, layer as nat),
+                        idx == x86_arch_spec.index_for_vaddr(layer as nat, base as nat, vaddr as nat),
+                {}
+            };
+
+            match pt_map_frame(Tracked(tok), Ghost(new_dir_pt), layer + 1, new_dir_addr, entry_base, vaddr, pte, Ghost(rebuild_root_pt_inner)) {
+                Ok(rec_res) => {
+                    assert(!candidate_mapping_overlaps_existing_vmem(interp_to_l0(tok_with_empty, rebuild_root_pt_inner(new_dir_pt, set![])), vaddr as nat, pte@));
+                    //let ghost dir_new_regions = rec_res@.1;
+                    let ghost pt_final =
+                        PTDir {
+                            region:       pt_with_empty.region,
+                            entries:      pt_with_empty.entries.update(idx as int, Some(rec_res@.0)),
+                            used_regions: pt_with_empty.used_regions.union(rec_res@.1),
+                        };
+                    let ghost new_regions = rec_res@.1.insert(new_dir_region@);
+                    proof {
+                        //assert(!dir_new_regions.contains(pt_final.region));
+                        assert(!new_dir_pt.used_regions.contains(pt_final.region)) by {
+                            reveal(ghost_pt_used_regions_pairwise_disjoint);
+                        };
+
+                        assert forall|i: nat| i < X86_NUM_ENTRIES implies
+                            #[trigger] entry_at_spec(tok@, pt_final, layer as nat, ptr, i)
+                            == if i == idx { new_dir_entry } else { entry_at_spec(tok_with_empty, pt_with_empty, layer as nat, ptr, i) }
+                        by {
+                            reveal(ghost_pt_used_regions_pairwise_disjoint);
+                        };
+                        assert(inv_at(tok@, pt_final, layer as nat, ptr)) by {
+                            reveal(ghost_pt_used_regions_pairwise_disjoint);
+                            lemma_directories_obey_invariant_at_framing(tok_with_empty, pt_with_empty, tok@, pt_final, layer as nat, ptr, idx as nat);
+                        };
+
+                        // From insert_empty_directory's post
+                        assert(interp_to_l0(tok_with_empty, rebuild_root_pt_inner(new_dir_pt, set![])) == interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])));
+                        assert(!candidate_mapping_overlaps_existing_vmem(interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])), vaddr as nat, pte@));
+
+                        assert(no_empty_directories(tok@, pt_final, layer as nat, ptr)) by {
+                            reveal(ghost_pt_used_regions_pairwise_disjoint);
+                            lemma_no_empty_directories_framing(old(tok)@, pt, tok@, pt_final, layer as nat, ptr, base as nat, idx as nat);
+                        };
+                        // posts
+                        assert(pt_final.region === pt.region);
+                        assert(pt_final.used_regions =~= pt.used_regions.union(new_regions));
+                        assert(tok@.regions.dom() =~= old(tok)@.regions.dom().union(new_regions));
+                        assert forall|r: MemRegion|
+                            !(#[trigger] pt.used_regions.contains(r))
+                            && !new_regions.contains(r)
+                            implies tok@.regions[r] === old(tok)@.regions[r] by
+                        {
+                            assert(r !== new_dir_region@);
+                            assert(!pt_with_empty.used_regions.contains(r));
+                            assert(!new_dir_pt.used_regions.contains(r));
+                            assert(tok@.regions[r] === tok_with_empty.regions[r]);
+                        };
+                        assert(forall|r: MemRegion| new_regions.contains(r) ==> !(#[trigger] pt.used_regions.contains(r)));
+                        assert(!empty_at(tok@, pt_final, layer as nat, ptr)) by {
+                            reveal(ghost_pt_used_regions_pairwise_disjoint);
+                        };
+                    }
+                    Ok(Ghost((pt_final, new_regions)))
+                },
+                Err(e) => {
+                    proof {
+                        lemma_interp_at_aux_facts(tok_with_empty, pt_with_empty, layer as nat, ptr, base as nat, seq![]);
+                        let interp_new_dir = interp_at(tok_with_empty, new_dir_pt, layer as nat + 1, new_dir_addr, entry_base as nat);
+                        let interp_outer = interp_at(tok_with_empty, pt_with_empty, layer as nat, ptr, base as nat);
+                        assert(candidate_mapping_overlaps_existing_vmem(interp_new_dir.interp(), vaddr as nat, pte@));
+                        interp_new_dir.lemma_empty_implies_interp_empty();
+                        assert(interp_new_dir.interp() =~= map![]);
+                        interp_outer.lemma_interp_of_entry_contains_mapping_implies_interp_contains_mapping(idx as nat);
+                        assert(false); // We always successfully insert into an empty directory
+                    }
+                    Err(e)
+                },
+            }
+        }
+    }
+}
+
+
+
+#[verifier(spinoff_prover)]
+#[cfg(feature = "unrolled")]
+fn pud_map_frame(
+    Tracked(tok): Tracked<&mut WrappedMapToken>,
+    Ghost(pt): Ghost<PTDir>,
+    layer: usize,
+    ptr: usize,
+    base: usize,
+    vaddr: usize,
+    pte: PageTableEntryExec,
+    Ghost(rebuild_root_pt): Ghost<spec_fn(PTDir, Set<MemRegion>) -> PTDir>,
+) -> (res: Result<Ghost<(PTDir,Set<MemRegion>)>,()>)
+    requires
+        old(tok).inv(),
+        !old(tok)@.change_made,
+        old(tok)@.args == (OpArgs::Map { base: vaddr, pte: pte@ }),
+        layer == 1,
         inv_at(old(tok)@, pt, layer as nat, ptr),
         no_empty_directories(old(tok)@, pt, layer as nat, ptr),
         aligned(base as nat, x86_arch_spec.entry_size(layer as nat)),
@@ -1522,7 +2437,1120 @@ fn map_frame_aux(
                     assert(tok@ == old(tok)@);
 
                     assert forall|r| !(pt.used_regions.contains(r)) && !(new_regions.contains(r)) implies #[trigger] tok_new.regions[r] === tok@.regions[r] by {
-                        assert(!dir_pt.used_regions.contains(r)); 
+                        assert(!dir_pt.used_regions.contains(r));
+                        if tok_new.regions.contains_key(r) {
+                            assert(tok_new.regions[r] == tok@.regions[r]);
+                        } else {
+                            assert(!tok@.regions.contains_key(r));
+                        }
+                    }
+
+                    assert(map_builder_pre(tok@, pt, tok_new, pt_new, layer as nat, ptr, new_regions));
+                    assert(inv(tok_new, rebuild_root_pt(pt_new, new_regions)));
+
+                    // Prove the first interp property for the new builder
+                    if interp_at(tok_new, pt_new_inner, layer as nat + 1, dir_addr, entry_base as nat).interp()
+                           == interp_at(tok@, dir_pt, layer as nat + 1, dir_addr, entry_base as nat).interp()
+                    {
+                        assert(interp_at(tok_new, pt_new, layer as nat, ptr, base as nat).interp()
+                                == interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp())
+                        by {
+                            lemma_interp_at_aux_facts(tok_new, pt_new, layer as nat, ptr, base as nat, seq![]);
+                            assert forall|i: nat| i < X86_NUM_ENTRIES && i != idx implies
+                                    interp_at(tok_new, pt_new, layer as nat, ptr, base as nat).entries[i as int]
+                                    === #[trigger] interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).entries[i as int]
+                            by {
+                                reveal(ghost_pt_used_regions_pairwise_disjoint);
+                                lemma_interp_at_entry_changed_tok(old(tok)@, pt, tok_new, pt_new, layer as nat, ptr, base as nat, i);
+                            };
+                            interp_at(tok_new, pt_new, layer as nat, ptr, base as nat)
+                                .lemma_entries_interp_equal_implies_interp_equal(
+                                    interp_at(old(tok)@, pt, layer as nat, ptr, base as nat)
+                                );
+                        };
+                        assert(interp_to_l0(tok_new, rebuild_root_pt_inner(pt_new_inner, new_regions)) == interp_to_l0(tok@, rebuild_root_pt_inner(dir_pt, set![])));
+                    }
+
+                    let interp_now_inner = interp_at(tok@, dir_pt, layer as nat + 1, dir_addr, entry_base as nat);
+                    let interp_new_inner = interp_at(tok_new, pt_new_inner, layer as nat + 1, dir_addr, entry_base as nat);
+                    let interp_new = interp_at(tok_new, pt_new, layer as nat, ptr, base as nat);
+                    //let interp_now = interp_at(tok_new, pt_new, layer as nat, ptr, base as nat);
+                    let interp_old = interp_at(old(tok)@, pt, layer as nat, ptr, base as nat);
+                    // Prove the second interp property for the new builder
+                    if interp_new_inner.interp() === interp_now_inner.interp().insert(vaddr as nat, pte@) {
+                        lemma_interp_at_aux_facts(tok_new, pt_new, layer as nat, ptr, base as nat, seq![]);
+                        assert(interp_new.interp() === interp_old.interp().insert(vaddr as nat, pte@)) by {
+                            assert forall|i: nat| i < X86_NUM_ENTRIES && i != idx implies
+                                interp_at(tok_new, pt_new, layer as nat, ptr, base as nat).entries[i as int]
+                                === #[trigger] interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).entries[i as int]
+                            by {
+                                reveal(ghost_pt_used_regions_pairwise_disjoint);
+                                lemma_interp_at_entry_changed_tok(old(tok)@, pt, tok_new, pt_new, layer as nat, ptr, base as nat, i);
+                            };
+                            assert(interp_new.entries[idx as int].interp(entry_base as nat)
+                                === interp_old.entries[idx as int].interp(entry_base as nat).insert(vaddr as nat, pte@));
+                            assert(interp_new.entries == interp_old.entries.update(idx as int, l1::NodeEntry::Directory(interp_new_inner)));
+
+                            interp_old.lemma_interp_entries_insert_implies_interp_insert(idx as nat, vaddr as nat, l1::NodeEntry::Directory(interp_new_inner), pte@);
+                        };
+                        assert(interp_to_l0(tok_new, rebuild_root_pt_inner(pt_new_inner, new_regions))
+                            === interp_to_l0(tok@, rebuild_root_pt_inner(dir_pt, set![])).insert(vaddr as nat, pte@));
+                    }
+                };
+
+                assert(candidate_mapping_overlaps_existing_vmem(interp_at(tok@, dir_pt, layer as nat + 1, dir_addr, entry_base as nat).interp(), vaddr as nat, pte@)
+                    <==> candidate_mapping_overlaps_existing_vmem(interp_to_l0(tok@, rebuild_root_pt_inner(dir_pt, set![])), vaddr as nat, pte@))
+                by {
+                    let interp_now_inner = interp_at(tok@, dir_pt, layer as nat + 1, dir_addr, entry_base as nat);
+                    let interp_now_outer = interp_at(tok@, pt, layer as nat, ptr, base as nat);
+                    assert(interp_to_l0(tok@, rebuild_root_pt_inner(dir_pt, set![])) == interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])));
+                    assert(candidate_mapping_overlaps_existing_vmem(interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp(), vaddr as nat, pte@)
+                        <==> candidate_mapping_overlaps_existing_vmem(interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])), vaddr as nat, pte@));
+                    if candidate_mapping_overlaps_existing_vmem(interp_now_outer.interp(), vaddr as nat, pte@) {
+                        let b = choose|b: nat| #![auto] {
+                            &&& interp_now_outer.interp().contains_key(b)
+                            &&& overlap(
+                                MemRegion { base: vaddr as nat, size: pte@.frame.size },
+                                MemRegion { base: b, size: interp_now_outer.interp()[b].frame.size },
+                            )
+                        };
+                        let ppte = interp_now_outer.interp()[b];
+                        assert(interp_now_outer.interp().contains_pair(b, ppte));
+                        interp_now_outer.lemma_interp_contains_implies_interp_of_entry_contains_at_index(b, ppte);
+                        let i = interp_now_outer.index_for_vaddr(b);
+                        interp_now_outer.lemma_interp_aux_between(0, b, ppte);
+                        indexing::lemma_index_from_base_and_addr(base as nat, b, x86_arch_spec.entry_size(layer as nat), X86_NUM_ENTRIES as nat);
+                        interp_now_outer.lemma_interp_of_entry_between(i, b, ppte);
+                        assert(i == idx) by (nonlinear_arith)
+                            requires
+                                overlap(
+                                    MemRegion { base: vaddr as nat, size: pte@.frame.size },
+                                    MemRegion { base: b, size: ppte.frame.size },
+                                ),
+                                idx == x86_arch_spec.index_for_vaddr(layer as nat, base as nat, vaddr as nat),
+                                i == x86_arch_spec.index_for_vaddr(layer as nat, base as nat, b),
+                                x86_arch_spec.entry_base(layer as nat, base as nat, i as nat) <= b < x86_arch_spec.next_entry_base(layer as nat, base as nat, i as nat),
+                                x86_arch_spec.entry_base(layer as nat, base as nat, i as nat) < b + ppte.frame.size <= x86_arch_spec.next_entry_base(layer as nat, base as nat, i as nat),
+                                aligned(base as nat, x86_arch_spec.entry_size(layer as nat)),
+                                aligned(vaddr as nat, pte.frame.size as nat),
+                                x86_arch_spec.contains_entry_size_at_index_atleast(pte.frame.size as nat, layer as nat),
+                        {};
+
+                        assert(interp_now_inner.interp().contains_pair(b, ppte));
+                        assert(candidate_mapping_overlaps_existing_vmem(interp_now_inner.interp(), vaddr as nat, pte@));
+                    }
+                    if !candidate_mapping_overlaps_existing_vmem(interp_now_outer.interp(), vaddr as nat, pte@) {
+                        assert forall|base, pte| interp_now_inner.interp().contains_pair(base, pte)
+                                implies interp_now_outer.interp().contains_pair(base, pte)
+                        by {
+                            interp_now_outer.lemma_interp_of_entry_contains_mapping_implies_interp_contains_mapping(idx as nat);
+                        };
+                        assert_by_contradiction!(!candidate_mapping_overlaps_existing_vmem(interp_now_inner.interp(), vaddr as nat, pte@), {
+                            let b = choose|b: nat| #![auto] {
+                                &&& interp_now_inner.interp().contains_key(b)
+                                &&& overlap(
+                                        MemRegion { base: vaddr as nat, size: pte@.frame.size },
+                                        MemRegion { base: b, size: interp_now_inner.interp()[b].frame.size },
+                                    )
+                            };
+                            assert(interp_now_inner.interp().contains_pair(b, interp_now_inner.interp()[b]));
+                            assert(candidate_mapping_overlaps_existing_vmem(interp_now_outer.interp(), vaddr as nat, pte@));
+                        });
+                    }
+                };
+
+
+
+                assert(aligned(entry_base as nat, x86_arch_spec.entry_size((layer + 1) as nat))) by (nonlinear_arith)
+                    requires
+                        layer < 3,
+                        aligned(base as nat, x86_arch_spec.entry_size(layer as nat)),
+                        entry_base == x86_arch_spec.entry_base(layer as nat, base as nat, idx as nat);
+                assert(accepted_mapping(vaddr as nat, pte@, (layer + 1) as nat, entry_base as nat)) by {
+                    assert(vaddr + pte.frame.size <= x86_arch_spec.next_entry_base(layer as nat, base as nat, idx as nat)) by (nonlinear_arith)
+                        requires
+                            aligned(base as nat, x86_arch_spec.entry_size(layer as nat)),
+                            aligned(vaddr as nat, pte.frame.size as nat),
+                            x86_arch_spec.contains_entry_size_at_index_atleast(pte.frame.size as nat, layer as nat),
+                            idx == x86_arch_spec.index_for_vaddr(layer as nat, base as nat, vaddr as nat),
+                    {};
+                };
+                match pmd_map_frame(Tracked(tok), Ghost(dir_pt), layer + 1, dir_addr, entry_base, vaddr, pte, Ghost(rebuild_root_pt_inner)) {
+                    Ok(rec_res) => {
+                        let ghost dir_pt_res = rec_res@.0;
+                        let ghost new_regions = rec_res@.1;
+
+                        assert(dir_pt_res.used_regions === dir_pt.used_regions.union(new_regions));
+                        assert(inv_at(tok@, dir_pt_res, (layer + 1) as nat, dir_addr));
+                        let ghost pt_res =
+                            PTDir {
+                                region: pt.region,
+                                entries: pt.entries.update(idx as int, Some(dir_pt_res)),
+                                used_regions: pt.used_regions.union(new_regions),
+                            };
+
+                        assert(!new_regions.contains(pt_res.region));
+                        assert(!dir_pt_res.used_regions.contains(pt_res.region));
+
+                        // None of the entries at this level change
+                        assert forall|i: nat| i < X86_NUM_ENTRIES implies
+                            entry_at_spec(tok@, pt_res, layer as nat, ptr, i) == entry_at_spec(old(tok)@, pt, layer as nat, ptr, i)
+                        by {
+                            reveal(ghost_pt_used_regions_pairwise_disjoint);
+                        };
+
+                        assert(inv_at(tok@, pt_res, layer as nat, ptr)) by {
+                            reveal(ghost_pt_used_regions_pairwise_disjoint);
+                            lemma_directories_obey_invariant_at_framing(old(tok)@, pt, tok@, pt_res, layer as nat, ptr, idx as nat);
+                        };
+
+                        // posts
+                        assert forall|r: MemRegion| !pt.used_regions.contains(r) && !new_regions.contains(r)
+                           implies #[trigger] tok@.regions[r] === old(tok)@.regions[r]
+                           by { assert(!dir_pt.used_regions.contains(r)); };
+                        assert(tok@.regions.dom() === old(tok)@.regions.dom().union(new_regions));
+                        assert(pt_res.used_regions === pt.used_regions.union(new_regions));
+                        assert(pt_res.region === pt.region);
+                        assert(!empty_at(tok@, pt_res, layer as nat, ptr));
+                        assert(no_empty_directories(tok@, pt_res, layer as nat, ptr)) by {
+                            reveal(ghost_pt_used_regions_pairwise_disjoint);
+                            lemma_no_empty_directories_framing(old(tok)@, pt, tok@, pt_res, layer as nat, ptr, base as nat, idx as nat);
+                        };
+                        assert(!empty_at(tok@, pt_res, layer as nat, ptr)) by {
+                            reveal(ghost_pt_used_regions_pairwise_disjoint);
+                        };
+
+                        Ok(Ghost((pt_res,new_regions)))
+                    },
+                    Err(e) => Err(e),
+                }
+            }
+        } else {
+            assert(candidate_mapping_overlaps_existing_vmem(interp_at(tok@, pt, layer as nat, ptr, base as nat).interp(), vaddr as nat, pte@)) by {
+                let interp_now = interp_at(tok@, pt, layer as nat, ptr, base as nat);
+                let interp_entry = interp_at_entry(tok@, pt, layer as nat, ptr, base as nat, idx as nat);
+                interp_now.lemma_interp_of_entry_contains_mapping_implies_interp_contains_mapping(idx as nat);
+                assert(interp_entry is Page);
+                let ghost ppte = interp_entry->Page_0;
+                assert(interp_entry.interp(entry_base as nat).contains_pair(entry_base as nat, ppte));
+                assert(overlap(
+                        MemRegion { base: vaddr as nat, size: pte@.frame.size },
+                        MemRegion { base: entry_base as nat, size: ppte.frame.size },
+                ));
+                assert(interp_now.interp().contains_pair(entry_base as nat, ppte));
+            };
+            assert(candidate_mapping_overlaps_existing_vmem(interp_to_l0(tok@, rebuild_root_pt(pt, set![])), vaddr as nat, pte@));
+            Err(())
+        }
+    } else {
+        if x86_arch_exec.entry_size(layer) == pte.frame.size {
+            let ghost root_pt = rebuild_root_pt(pt, set![]);
+
+            proof {
+                assert_by_contradiction!(layer > 0, {
+                    let iprime = choose|i: nat| 0 < i && i < X86_NUM_LAYERS && #[trigger] x86_arch_spec.entry_size(i) == pte.frame.size;
+                    //assert(x86_arch_spec.entry_size(0) == pte.frame.size);
+                    //assert(x86_arch_spec.contains_entry_size_at_index_atleast(pte.frame.size as nat, 1));
+                    assert forall|i: nat| 0 < i < X86_NUM_LAYERS implies
+                        x86_arch_spec.entry_size(0) >= #[trigger] x86_arch_spec.entry_size(i)
+                    by {
+                        x86_arch_spec.lemma_entry_sizes_increase(0, i);
+                    };
+                    assert(false);
+                });
+                assert(addr_is_zero_padded(layer as nat, pte.frame.base, true)) by {
+                    lemma_aligned_addr_mask_facts(pte.frame.base);
+                };
+                assert(pte.frame.base & MASK_ADDR == pte.frame.base) by {
+                    lemma_aligned_addr_mask_facts(pte.frame.base);
+                };
+            }
+
+            // Nothing is mapped here, so there are no overlapping mappings
+            assert(!candidate_mapping_overlaps_existing_vmem(interp_to_l0(old(tok)@, root_pt), vaddr as nat, pte@)) by {
+                assert_by_contradiction!(!candidate_mapping_overlaps_existing_vmem(interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp(), vaddr as nat, pte@), {
+                    let interp_old = interp_at(old(tok)@, pt, layer as nat, ptr, base as nat);
+                    let interp_entry_old = interp_at_entry(old(tok)@, pt, layer as nat, ptr, base as nat, idx as nat);
+                    let b = choose|b: nat| #![auto] {
+                        &&& interp_old.interp().contains_key(b)
+                        &&& overlap(
+                            MemRegion { base: vaddr as nat, size: pte@.frame.size },
+                            MemRegion { base: b, size: interp_old.interp()[b].frame.size },
+                        )
+                    };
+                    let ppte = interp_old.interp()[b];
+                    assert(interp_old.interp().contains_pair(b, ppte));
+
+                    interp_old.lemma_interp_contains_implies_interp_of_entry_contains();
+                    let i = choose|i: nat| #![auto] i < interp_old.num_entries() && interp_old.interp_of_entry(i).contains_pair(b, ppte);
+                    interp_old.lemma_interp_of_entry_between(i, b, ppte);
+                    assert(i == idx) by (nonlinear_arith)
+                        requires
+                            overlap(
+                                MemRegion { base: vaddr as nat, size: pte@.frame.size },
+                                MemRegion { base: b, size: ppte.frame.size },
+                            ),
+                            x86_arch_spec.entry_base(layer as nat, base as nat, i as nat) <= b < x86_arch_spec.next_entry_base(layer as nat, base as nat, i as nat),
+                            b + ppte.frame.size <= x86_arch_spec.next_entry_base(layer as nat, base as nat, i as nat),
+                            x86_arch_spec.entry_base(layer as nat, base as nat, idx as nat) == vaddr,
+                            vaddr + pte@.frame.size == x86_arch_spec.next_entry_base(layer as nat, base as nat, idx as nat),
+                    {};
+                });
+            };
+
+
+            let new_page_entry = PDE::new_page_entry(layer, pte);
+            let ghost pwtok = tok@;
+            // This is the token state we'll have after the write happened
+            let ghost tok_after_write = tok@.write(idx, new_page_entry.entry, pt.region, true);
+
+            proof {
+                lemma_bitvector_facts();
+                assert(new_page_entry.entry & 1 == 1);
+                assert(tok@.read(idx, pt.region) & 1 == 0);
+
+
+                // And that state will satisfy the invariant
+                assert(inv_at(tok_after_write, pt, layer as nat, ptr)) by {
+                    reveal(ghost_pt_used_regions_pairwise_disjoint);
+                    lemma_bitvector_facts();
+                    assert(tok_after_write.regions[pt.region] === pwtok.regions[pt.region].update(idx as int, new_page_entry.entry));
+
+                    assert forall|i: nat| #![auto] i < X86_NUM_ENTRIES implies
+                        entry_at_spec(tok_after_write, pt, layer as nat, ptr, i)@
+                        == if i == idx { new_page_entry@ } else { entry_at_spec(old(tok)@, pt, layer as nat, ptr, i)@ } by { };
+
+                    lemma_directories_obey_invariant_at_framing(old(tok)@, pt, tok_after_write, pt, layer as nat, ptr, idx as nat);
+                }
+
+                assert(tok_after_write.regions.dom() == tok@.regions.dom().union(set![]));
+                assert(map_builder_pre(tok@, pt, tok_after_write, pt, layer as nat, ptr, set![]));
+
+                assert(interp_to_l0(tok_after_write, rebuild_root_pt(pt, set![]))
+                            === interp_to_l0(tok@, rebuild_root_pt(pt, set![])).insert(vaddr as nat, pte@))
+                by {
+                    let idx = idx as nat;
+                    let base = base as nat;
+                    let vaddr = vaddr as nat;
+                    let pte = pte@;
+                    let pre_interp = interp_at(tok@, pt, layer as nat, ptr, base);
+                    let post_interp = interp_at(tok_after_write, pt, layer as nat, ptr, base);
+                    assert(interp_at_entry(tok_after_write, pt, layer as nat, ptr, base, idx) === l1::NodeEntry::Page(pte));
+                    assert(pre_interp.inv());
+                    assert(post_interp.inv());
+                    assert_seqs_equal!(post_interp.entries == pre_interp.entries.update(idx as int, l1::NodeEntry::Page(pte)), j => {
+                        lemma_interp_at_facts(tok@, pt, layer as nat, ptr, base as nat);
+                        lemma_interp_at_facts(tok_after_write, pt, layer as nat, ptr, base as nat);
+                        if j == idx {
+                        } else {
+                            broadcast use lemma_interp_at_entry_changed_tok;
+                            assert(interp_at_entry(tok_after_write, pt, layer as nat, ptr, base, j as nat)
+                                == interp_at_entry(tok@, pt, layer as nat, ptr, base, j as nat));
+                        }
+                    });
+                    assert(pre_interp.interp_of_entry(idx) =~= map![]);
+                    let entry_base = x86_arch_spec.entry_base(layer as nat, base, idx);
+                    assert(post_interp.interp_of_entry(idx) =~= map![entry_base => pte]);
+                    assert(pre_interp.update(idx, l1::NodeEntry::Page(pte)).interp_of_entry(idx)
+                            == l1::NodeEntry::Page(pte).interp(entry_base));
+                    assert(pre_interp.interp_of_entry(idx).insert(vaddr, pte)
+                        == pre_interp.update(idx, l1::NodeEntry::Page(pte)).interp_of_entry(idx));
+                    pre_interp.lemma_interp_of_entry_insert_page_implies_interp_insert_page(idx, vaddr, pte);
+                    assert(pre_interp.interp().insert(vaddr, pte) == pre_interp.update(idx, l1::NodeEntry::Page(pte)).interp());
+                    assert(post_interp.interp() === pre_interp.interp().insert(vaddr as nat, pte));
+                };
+
+
+                assert(inv(old(tok)@, root_pt)) by {
+                    assert(map_builder_pre(old(tok)@, pt, old(tok)@, pt, layer as nat, ptr, set![]));
+                };
+                assert(inv(tok_after_write, root_pt));
+
+                assert(inv(old(tok)@, root_pt));
+                assert(inv(tok_after_write, root_pt));
+
+                assert(interp_to_l0(tok_after_write, root_pt) == interp_to_l0(tok@, root_pt).insert(vaddr as nat, pte@));
+            }
+
+            WrappedMapToken::write_change(Tracked(tok), ptr, idx, new_page_entry.entry, Ghost(pt.region), Ghost(root_pt));
+
+            assert(no_empty_directories(tok@, pt, layer as nat, ptr)) by {
+                lemma_no_empty_directories_framing(old(tok)@, pt, tok@, pt, layer as nat, ptr, base as nat, idx as nat);
+            };
+
+            // posts
+            assert(forall|r: MemRegion| !pt.used_regions.contains(r) ==> #[trigger] tok@.regions[r] === old(tok)@.regions[r]);
+            assert(tok@.regions.dom() =~= old(tok)@.regions.dom().union(set![]));
+            assert(pt.used_regions.union(set![]) =~= pt.used_regions);
+            assert(!empty_at(tok@, pt, layer as nat, ptr)) by {
+                reveal(ghost_pt_used_regions_pairwise_disjoint);
+            };
+
+            Ok(Ghost((pt, set![])))
+        } else {
+            let (Ghost(pt_with_empty), new_dir_region, new_dir_entry, Ghost(rebuild_root_pt_inner))
+                = insert_empty_directory(Tracked(tok), Ghost(pt), layer, ptr, base, idx, vaddr, pte, Ghost(rebuild_root_pt));
+            let ghost tok_with_empty = tok@;
+            let ghost new_dir_pt = pt_with_empty.entries[idx as int]->Some_0;
+            let new_dir_addr = new_dir_region.base;
+            assert(inv_at(tok_with_empty, pt_with_empty, layer as nat, ptr));
+
+            assert(aligned(entry_base as nat, x86_arch_spec.entry_size((layer + 1) as nat))) by (nonlinear_arith)
+                requires
+                    layer < 3,
+                    aligned(base as nat, x86_arch_spec.entry_size(layer as nat)),
+                    entry_base == x86_arch_spec.entry_base(layer as nat, base as nat, idx as nat);
+            assert(accepted_mapping(vaddr as nat, pte@, (layer + 1) as nat, entry_base as nat)) by {
+                assert(vaddr + pte.frame.size <= x86_arch_spec.next_entry_base(layer as nat, base as nat, idx as nat)) by (nonlinear_arith)
+                    requires
+                        aligned(base as nat, x86_arch_spec.entry_size(layer as nat)),
+                        aligned(vaddr as nat, pte.frame.size as nat),
+                        x86_arch_spec.contains_entry_size_at_index_atleast(pte.frame.size as nat, layer as nat),
+                        idx == x86_arch_spec.index_for_vaddr(layer as nat, base as nat, vaddr as nat),
+                {}
+            };
+
+            match pmd_map_frame(Tracked(tok), Ghost(new_dir_pt), layer + 1, new_dir_addr, entry_base, vaddr, pte, Ghost(rebuild_root_pt_inner)) {
+                Ok(rec_res) => {
+                    assert(!candidate_mapping_overlaps_existing_vmem(interp_to_l0(tok_with_empty, rebuild_root_pt_inner(new_dir_pt, set![])), vaddr as nat, pte@));
+                    //let ghost dir_new_regions = rec_res@.1;
+                    let ghost pt_final =
+                        PTDir {
+                            region:       pt_with_empty.region,
+                            entries:      pt_with_empty.entries.update(idx as int, Some(rec_res@.0)),
+                            used_regions: pt_with_empty.used_regions.union(rec_res@.1),
+                        };
+                    let ghost new_regions = rec_res@.1.insert(new_dir_region@);
+                    proof {
+                        //assert(!dir_new_regions.contains(pt_final.region));
+                        assert(!new_dir_pt.used_regions.contains(pt_final.region)) by {
+                            reveal(ghost_pt_used_regions_pairwise_disjoint);
+                        };
+
+                        assert forall|i: nat| i < X86_NUM_ENTRIES implies
+                            #[trigger] entry_at_spec(tok@, pt_final, layer as nat, ptr, i)
+                            == if i == idx { new_dir_entry } else { entry_at_spec(tok_with_empty, pt_with_empty, layer as nat, ptr, i) }
+                        by {
+                            reveal(ghost_pt_used_regions_pairwise_disjoint);
+                        };
+                        assert(inv_at(tok@, pt_final, layer as nat, ptr)) by {
+                            reveal(ghost_pt_used_regions_pairwise_disjoint);
+                            lemma_directories_obey_invariant_at_framing(tok_with_empty, pt_with_empty, tok@, pt_final, layer as nat, ptr, idx as nat);
+                        };
+
+                        // From insert_empty_directory's post
+                        assert(interp_to_l0(tok_with_empty, rebuild_root_pt_inner(new_dir_pt, set![])) == interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])));
+                        assert(!candidate_mapping_overlaps_existing_vmem(interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])), vaddr as nat, pte@));
+
+                        assert(no_empty_directories(tok@, pt_final, layer as nat, ptr)) by {
+                            reveal(ghost_pt_used_regions_pairwise_disjoint);
+                            lemma_no_empty_directories_framing(old(tok)@, pt, tok@, pt_final, layer as nat, ptr, base as nat, idx as nat);
+                        };
+                        // posts
+                        assert(pt_final.region === pt.region);
+                        assert(pt_final.used_regions =~= pt.used_regions.union(new_regions));
+                        assert(tok@.regions.dom() =~= old(tok)@.regions.dom().union(new_regions));
+                        assert forall|r: MemRegion|
+                            !(#[trigger] pt.used_regions.contains(r))
+                            && !new_regions.contains(r)
+                            implies tok@.regions[r] === old(tok)@.regions[r] by
+                        {
+                            assert(r !== new_dir_region@);
+                            assert(!pt_with_empty.used_regions.contains(r));
+                            assert(!new_dir_pt.used_regions.contains(r));
+                            assert(tok@.regions[r] === tok_with_empty.regions[r]);
+                        };
+                        assert(forall|r: MemRegion| new_regions.contains(r) ==> !(#[trigger] pt.used_regions.contains(r)));
+                        assert(!empty_at(tok@, pt_final, layer as nat, ptr)) by {
+                            reveal(ghost_pt_used_regions_pairwise_disjoint);
+                        };
+                    }
+                    Ok(Ghost((pt_final, new_regions)))
+                },
+                Err(e) => {
+                    proof {
+                        lemma_interp_at_aux_facts(tok_with_empty, pt_with_empty, layer as nat, ptr, base as nat, seq![]);
+                        let interp_new_dir = interp_at(tok_with_empty, new_dir_pt, layer as nat + 1, new_dir_addr, entry_base as nat);
+                        let interp_outer = interp_at(tok_with_empty, pt_with_empty, layer as nat, ptr, base as nat);
+                        assert(candidate_mapping_overlaps_existing_vmem(interp_new_dir.interp(), vaddr as nat, pte@));
+                        interp_new_dir.lemma_empty_implies_interp_empty();
+                        assert(interp_new_dir.interp() =~= map![]);
+                        interp_outer.lemma_interp_of_entry_contains_mapping_implies_interp_contains_mapping(idx as nat);
+                        assert(false); // We always successfully insert into an empty directory
+                    }
+                    Err(e)
+                },
+            }
+        }
+    }
+}
+
+
+#[verifier(spinoff_prover)]
+#[cfg(feature = "unrolled")]
+fn pgd_map_frame(
+    Tracked(tok): Tracked<&mut WrappedMapToken>,
+    Ghost(pt): Ghost<PTDir>,
+    layer: usize,
+    ptr: usize,
+    base: usize,
+    vaddr: usize,
+    pte: PageTableEntryExec,
+    Ghost(rebuild_root_pt): Ghost<spec_fn(PTDir, Set<MemRegion>) -> PTDir>,
+) -> (res: Result<Ghost<(PTDir,Set<MemRegion>)>,()>)
+    requires
+        old(tok).inv(),
+        !old(tok)@.change_made,
+        old(tok)@.args == (OpArgs::Map { base: vaddr, pte: pte@ }),
+        layer == 0,
+        inv_at(old(tok)@, pt, layer as nat, ptr),
+        no_empty_directories(old(tok)@, pt, layer as nat, ptr),
+        aligned(base as nat, x86_arch_spec.entry_size(layer as nat)),
+        accepted_mapping(vaddr as nat, pte@, layer as nat, base as nat),
+        base <= vaddr < MAX_BASE,
+        candidate_mapping_overlaps_existing_vmem(interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp(), vaddr as nat, pte@)
+            <==> candidate_mapping_overlaps_existing_vmem(interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])), vaddr as nat, pte@),
+        forall|tok_new, pt_new, new_regions|
+           #[trigger] map_builder_pre(old(tok)@, pt, tok_new, pt_new, layer as nat, ptr, new_regions)
+               ==> {
+                   &&& inv(tok_new, rebuild_root_pt(pt_new, new_regions))
+                   &&& interp_at(tok_new, pt_new, layer as nat, ptr, base as nat).interp()
+                           == interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp()
+                        ==> interp_to_l0(tok_new, rebuild_root_pt(pt_new, new_regions))
+                                == interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![]))
+                   &&& interp_at(tok_new, pt_new, layer as nat, ptr, base as nat).interp()
+                           === interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp().insert(vaddr as nat, pte@)
+                        ==> interp_to_l0(tok_new, rebuild_root_pt(pt_new, new_regions))
+                                === interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])).insert(vaddr as nat, pte@)
+        }
+    ensures
+        tok.inv(),
+        tok@.pt_mem.pml4 == old(tok)@.pt_mem.pml4,
+        match res {
+            Ok(resv) => {
+                let (pt_res, new_regions) = resv@;
+                // We return the regions that we added
+                &&& tok@.regions.dom() === old(tok)@.regions.dom().union(new_regions)
+                &&& pt_res.used_regions === pt.used_regions.union(new_regions)
+                // and only those we added
+                &&& new_regions.disjoint(old(tok)@.regions.dom())
+                &&& (forall|r: MemRegion| new_regions.contains(r) ==> !(#[trigger] pt.used_regions.contains(r)))
+                // Invariant preserved
+                &&& inv_at(tok@, pt_res, layer as nat, ptr)
+                &&& !empty_at(tok@, pt_res, layer as nat, ptr)
+                &&& no_empty_directories(tok@, pt_res, layer as nat, ptr)
+                // We only touch already allocated regions if they're in pt.used_regions
+                &&& (forall|r: MemRegion| !(#[trigger] pt.used_regions.contains(r)) && !new_regions.contains(r)
+                    ==> tok@.regions[r] === old(tok)@.regions[r])
+                &&& pt_res.region === pt.region
+                &&& !candidate_mapping_overlaps_existing_vmem(interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])), vaddr as nat, pte@)
+                &&& tok@.change_made
+                &&& tok@.result === Ok(())
+            },
+            Err(e) => {
+                // If error, unchanged
+                &&& tok@ === old(tok)@
+                &&& candidate_mapping_overlaps_existing_vmem(interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])), vaddr as nat, pte@)
+                &&& candidate_mapping_overlaps_existing_vmem(interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp(), vaddr as nat, pte@)
+            },
+        },
+    // decreases X86_NUM_LAYERS - layer
+{
+    proof {
+        broadcast use
+            lemma_union_empty,
+            lemma_inv_implies_interp_inv;
+        lemma_bitvector_facts_simple();
+        lemma_interp_at_facts(tok@, pt, layer as nat, ptr, base as nat);
+        lemma_x86_arch_spec_inv();
+    }
+    let idx: usize = x86_arch_exec.index_for_vaddr(layer, base, vaddr);
+    proof {
+        assert({
+            &&& between(vaddr as nat, x86_arch_spec.entry_base(layer as nat, base as nat, idx as nat), x86_arch_spec.next_entry_base(layer as nat, base as nat, idx as nat))
+            &&& aligned(vaddr as nat, x86_arch_spec.entry_size(layer as nat)) ==> vaddr == x86_arch_spec.entry_base(layer as nat, base as nat, idx as nat)
+            &&& idx < X86_NUM_ENTRIES }) by
+        {
+            let es = x86_arch_spec.entry_size(layer as nat);
+            indexing::lemma_index_from_base_and_addr(base as nat, vaddr as nat, es, X86_NUM_ENTRIES as nat);
+        };
+        lemma_interp_at_aux_facts(old(tok)@, pt, layer as nat, ptr, base as nat, seq![]);
+    }
+    let entry = entry_at(Tracked(tok), Ghost(pt), layer, ptr, idx);
+    let entry_base: usize = x86_arch_exec.entry_base(layer, base, idx);
+    proof {
+        indexing::lemma_entry_base_from_index(base as nat, idx as nat, x86_arch_spec.entry_size(layer as nat));
+    }
+    if entry.is_present() {
+        if entry.is_dir(layer) {
+            if x86_arch_exec.entry_size(layer) == pte.frame.size {
+                // we cannot map this large frames anyway..
+                assert(false);
+                Err(())
+            } else {
+                let dir_addr = entry.address();
+                assert(pt.entries[idx as int] is Some);
+                let ghost dir_pt = pt.entries[idx as int]->Some_0;
+                assert(directories_obey_invariant_at(tok@, pt, layer as nat, ptr));
+
+                let ghost rebuild_root_pt_inner = |pt_new_inner: PTDir, new_regions: Set<MemRegion>| {
+                    let pt_new = PTDir {
+                        entries: pt.entries.update(idx as int, Some(pt_new_inner)),
+                        used_regions: pt.used_regions.union(new_regions),
+                        ..pt
+                    };
+                    rebuild_root_pt(pt_new, new_regions)
+                };
+
+                assert(pt.entries =~= PTDir {
+                    entries: pt.entries.update(idx as int, Some(dir_pt)),
+                    used_regions: pt.used_regions.union(set![]),
+                    ..pt
+                }.entries);
+                assert(forall|s: Set<MemRegion>| s.union(set![]) =~= s);
+                assert(rebuild_root_pt_inner(dir_pt, set![]) == rebuild_root_pt(pt, set![]));
+
+
+                assert forall|tok_new, pt_new_inner, new_regions|
+                   #[trigger] map_builder_pre(tok@, dir_pt, tok_new, pt_new_inner, layer as nat + 1, dir_addr, new_regions)
+                   implies {
+                       &&& inv(tok_new, rebuild_root_pt_inner(pt_new_inner, new_regions))
+                       &&& interp_at(tok_new, pt_new_inner, layer as nat + 1, dir_addr, entry_base as nat).interp()
+                               == interp_at(tok@, dir_pt, layer as nat + 1, dir_addr, entry_base as nat).interp()
+                            ==> interp_to_l0(tok_new, rebuild_root_pt_inner(pt_new_inner, new_regions))
+                                    == interp_to_l0(tok@, rebuild_root_pt_inner(dir_pt, set![]))
+                       &&& interp_at(tok_new, pt_new_inner, layer as nat + 1, dir_addr, entry_base as nat).interp()
+                               === interp_at(tok@, dir_pt, layer as nat + 1, dir_addr, entry_base as nat).interp().insert(vaddr as nat, pte@)
+                            ==> interp_to_l0(tok_new, rebuild_root_pt_inner(pt_new_inner, new_regions))
+                                    === interp_to_l0(tok@, rebuild_root_pt_inner(dir_pt, set![])).insert(vaddr as nat, pte@)
+                       }
+                by {
+                    //assert(pt_new_inner.used_regions === dir_pt.used_regions.union(new_regions));
+                    assert(inv_at(tok_new, pt_new_inner, (layer + 1) as nat, dir_addr));
+                    //assert(Ok(interp_at(tok_new, pt_new_inner, (layer + 1) as nat, dir_addr, entry_base as nat))
+                    //       === interp_at(old(tok_new)@, dir_pt, (layer + 1) as nat, dir_addr, entry_base as nat).map_frame(vaddr as nat, pte@));
+                    let ghost pt_new =
+                        PTDir {
+                            region: pt.region,
+                            entries: pt.entries.update(idx as int, Some(pt_new_inner)),
+                            used_regions: pt.used_regions.union(new_regions),
+                        };
+
+                    assert(!new_regions.contains(pt_new.region));
+                    assert(!pt_new_inner.used_regions.contains(pt_new.region));
+
+                    // None of the entries at this level change
+                    assert forall|i: nat| i < X86_NUM_ENTRIES implies
+                        #[trigger] entry_at_spec(tok_new, pt_new, layer as nat, ptr, i) == entry_at_spec(old(tok)@, pt, layer as nat, ptr, i) by { };
+
+                    assert(inv_at(tok_new, pt_new, layer as nat, ptr)) by {
+                        reveal(ghost_pt_used_regions_pairwise_disjoint);
+                        lemma_directories_obey_invariant_at_framing(tok@, pt, tok_new, pt_new, layer as nat, ptr, idx as nat);
+                    };
+
+                    assert(inv_at(tok@, pt, layer as nat, ptr));
+                    assert(tok@ == old(tok)@);
+
+                    assert forall|r| !(pt.used_regions.contains(r)) && !(new_regions.contains(r)) implies #[trigger] tok_new.regions[r] === tok@.regions[r] by {
+                        assert(!dir_pt.used_regions.contains(r));
+                        if tok_new.regions.contains_key(r) {
+                            assert(tok_new.regions[r] == tok@.regions[r]);
+                        } else {
+                            assert(!tok@.regions.contains_key(r));
+                        }
+                    }
+
+                    assert(map_builder_pre(tok@, pt, tok_new, pt_new, layer as nat, ptr, new_regions));
+                    assert(inv(tok_new, rebuild_root_pt(pt_new, new_regions)));
+
+                    // Prove the first interp property for the new builder
+                    if interp_at(tok_new, pt_new_inner, layer as nat + 1, dir_addr, entry_base as nat).interp()
+                           == interp_at(tok@, dir_pt, layer as nat + 1, dir_addr, entry_base as nat).interp()
+                    {
+                        assert(interp_at(tok_new, pt_new, layer as nat, ptr, base as nat).interp()
+                                == interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp())
+                        by {
+                            lemma_interp_at_aux_facts(tok_new, pt_new, layer as nat, ptr, base as nat, seq![]);
+                            assert forall|i: nat| i < X86_NUM_ENTRIES && i != idx implies
+                                    interp_at(tok_new, pt_new, layer as nat, ptr, base as nat).entries[i as int]
+                                    === #[trigger] interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).entries[i as int]
+                            by {
+                                reveal(ghost_pt_used_regions_pairwise_disjoint);
+                                lemma_interp_at_entry_changed_tok(old(tok)@, pt, tok_new, pt_new, layer as nat, ptr, base as nat, i);
+                            };
+                            interp_at(tok_new, pt_new, layer as nat, ptr, base as nat)
+                                .lemma_entries_interp_equal_implies_interp_equal(
+                                    interp_at(old(tok)@, pt, layer as nat, ptr, base as nat)
+                                );
+                        };
+                        assert(interp_to_l0(tok_new, rebuild_root_pt_inner(pt_new_inner, new_regions)) == interp_to_l0(tok@, rebuild_root_pt_inner(dir_pt, set![])));
+                    }
+
+                    let interp_now_inner = interp_at(tok@, dir_pt, layer as nat + 1, dir_addr, entry_base as nat);
+                    let interp_new_inner = interp_at(tok_new, pt_new_inner, layer as nat + 1, dir_addr, entry_base as nat);
+                    let interp_new = interp_at(tok_new, pt_new, layer as nat, ptr, base as nat);
+                    //let interp_now = interp_at(tok_new, pt_new, layer as nat, ptr, base as nat);
+                    let interp_old = interp_at(old(tok)@, pt, layer as nat, ptr, base as nat);
+                    // Prove the second interp property for the new builder
+                    if interp_new_inner.interp() === interp_now_inner.interp().insert(vaddr as nat, pte@) {
+                        lemma_interp_at_aux_facts(tok_new, pt_new, layer as nat, ptr, base as nat, seq![]);
+                        assert(interp_new.interp() === interp_old.interp().insert(vaddr as nat, pte@)) by {
+                            assert forall|i: nat| i < X86_NUM_ENTRIES && i != idx implies
+                                interp_at(tok_new, pt_new, layer as nat, ptr, base as nat).entries[i as int]
+                                === #[trigger] interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).entries[i as int]
+                            by {
+                                reveal(ghost_pt_used_regions_pairwise_disjoint);
+                                lemma_interp_at_entry_changed_tok(old(tok)@, pt, tok_new, pt_new, layer as nat, ptr, base as nat, i);
+                            };
+                            assert(interp_new.entries[idx as int].interp(entry_base as nat)
+                                === interp_old.entries[idx as int].interp(entry_base as nat).insert(vaddr as nat, pte@));
+                            assert(interp_new.entries == interp_old.entries.update(idx as int, l1::NodeEntry::Directory(interp_new_inner)));
+
+                            interp_old.lemma_interp_entries_insert_implies_interp_insert(idx as nat, vaddr as nat, l1::NodeEntry::Directory(interp_new_inner), pte@);
+                        };
+                        assert(interp_to_l0(tok_new, rebuild_root_pt_inner(pt_new_inner, new_regions))
+                            === interp_to_l0(tok@, rebuild_root_pt_inner(dir_pt, set![])).insert(vaddr as nat, pte@));
+                    }
+                };
+
+                assert(candidate_mapping_overlaps_existing_vmem(interp_at(tok@, dir_pt, layer as nat + 1, dir_addr, entry_base as nat).interp(), vaddr as nat, pte@)
+                    <==> candidate_mapping_overlaps_existing_vmem(interp_to_l0(tok@, rebuild_root_pt_inner(dir_pt, set![])), vaddr as nat, pte@))
+                by {
+                    let interp_now_inner = interp_at(tok@, dir_pt, layer as nat + 1, dir_addr, entry_base as nat);
+                    let interp_now_outer = interp_at(tok@, pt, layer as nat, ptr, base as nat);
+                    assert(interp_to_l0(tok@, rebuild_root_pt_inner(dir_pt, set![])) == interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])));
+                    assert(candidate_mapping_overlaps_existing_vmem(interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp(), vaddr as nat, pte@)
+                        <==> candidate_mapping_overlaps_existing_vmem(interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])), vaddr as nat, pte@));
+                    if candidate_mapping_overlaps_existing_vmem(interp_now_outer.interp(), vaddr as nat, pte@) {
+                        let b = choose|b: nat| #![auto] {
+                            &&& interp_now_outer.interp().contains_key(b)
+                            &&& overlap(
+                                MemRegion { base: vaddr as nat, size: pte@.frame.size },
+                                MemRegion { base: b, size: interp_now_outer.interp()[b].frame.size },
+                            )
+                        };
+                        let ppte = interp_now_outer.interp()[b];
+                        assert(interp_now_outer.interp().contains_pair(b, ppte));
+                        interp_now_outer.lemma_interp_contains_implies_interp_of_entry_contains_at_index(b, ppte);
+                        let i = interp_now_outer.index_for_vaddr(b);
+                        interp_now_outer.lemma_interp_aux_between(0, b, ppte);
+                        indexing::lemma_index_from_base_and_addr(base as nat, b, x86_arch_spec.entry_size(layer as nat), X86_NUM_ENTRIES as nat);
+                        interp_now_outer.lemma_interp_of_entry_between(i, b, ppte);
+                        assert(i == idx) by (nonlinear_arith)
+                            requires
+                                overlap(
+                                    MemRegion { base: vaddr as nat, size: pte@.frame.size },
+                                    MemRegion { base: b, size: ppte.frame.size },
+                                ),
+                                idx == x86_arch_spec.index_for_vaddr(layer as nat, base as nat, vaddr as nat),
+                                i == x86_arch_spec.index_for_vaddr(layer as nat, base as nat, b),
+                                x86_arch_spec.entry_base(layer as nat, base as nat, i as nat) <= b < x86_arch_spec.next_entry_base(layer as nat, base as nat, i as nat),
+                                x86_arch_spec.entry_base(layer as nat, base as nat, i as nat) < b + ppte.frame.size <= x86_arch_spec.next_entry_base(layer as nat, base as nat, i as nat),
+                                aligned(base as nat, x86_arch_spec.entry_size(layer as nat)),
+                                aligned(vaddr as nat, pte.frame.size as nat),
+                                x86_arch_spec.contains_entry_size_at_index_atleast(pte.frame.size as nat, layer as nat),
+                        {};
+
+                        assert(interp_now_inner.interp().contains_pair(b, ppte));
+                        assert(candidate_mapping_overlaps_existing_vmem(interp_now_inner.interp(), vaddr as nat, pte@));
+                    }
+                    if !candidate_mapping_overlaps_existing_vmem(interp_now_outer.interp(), vaddr as nat, pte@) {
+                        assert forall|base, pte| interp_now_inner.interp().contains_pair(base, pte)
+                                implies interp_now_outer.interp().contains_pair(base, pte)
+                        by {
+                            interp_now_outer.lemma_interp_of_entry_contains_mapping_implies_interp_contains_mapping(idx as nat);
+                        };
+                        assert_by_contradiction!(!candidate_mapping_overlaps_existing_vmem(interp_now_inner.interp(), vaddr as nat, pte@), {
+                            let b = choose|b: nat| #![auto] {
+                                &&& interp_now_inner.interp().contains_key(b)
+                                &&& overlap(
+                                        MemRegion { base: vaddr as nat, size: pte@.frame.size },
+                                        MemRegion { base: b, size: interp_now_inner.interp()[b].frame.size },
+                                    )
+                            };
+                            assert(interp_now_inner.interp().contains_pair(b, interp_now_inner.interp()[b]));
+                            assert(candidate_mapping_overlaps_existing_vmem(interp_now_outer.interp(), vaddr as nat, pte@));
+                        });
+                    }
+                };
+
+
+
+                assert(aligned(entry_base as nat, x86_arch_spec.entry_size((layer + 1) as nat))) by (nonlinear_arith)
+                    requires
+                        layer < 3,
+                        aligned(base as nat, x86_arch_spec.entry_size(layer as nat)),
+                        entry_base == x86_arch_spec.entry_base(layer as nat, base as nat, idx as nat);
+                assert(accepted_mapping(vaddr as nat, pte@, (layer + 1) as nat, entry_base as nat)) by {
+                    assert(vaddr + pte.frame.size <= x86_arch_spec.next_entry_base(layer as nat, base as nat, idx as nat)) by (nonlinear_arith)
+                        requires
+                            aligned(base as nat, x86_arch_spec.entry_size(layer as nat)),
+                            aligned(vaddr as nat, pte.frame.size as nat),
+                            x86_arch_spec.contains_entry_size_at_index_atleast(pte.frame.size as nat, layer as nat),
+                            idx == x86_arch_spec.index_for_vaddr(layer as nat, base as nat, vaddr as nat),
+                    {};
+                };
+                match pud_map_frame(Tracked(tok), Ghost(dir_pt), layer + 1, dir_addr, entry_base, vaddr, pte, Ghost(rebuild_root_pt_inner)) {
+                    Ok(rec_res) => {
+                        let ghost dir_pt_res = rec_res@.0;
+                        let ghost new_regions = rec_res@.1;
+
+                        assert(dir_pt_res.used_regions === dir_pt.used_regions.union(new_regions));
+                        assert(inv_at(tok@, dir_pt_res, (layer + 1) as nat, dir_addr));
+                        let ghost pt_res =
+                            PTDir {
+                                region: pt.region,
+                                entries: pt.entries.update(idx as int, Some(dir_pt_res)),
+                                used_regions: pt.used_regions.union(new_regions),
+                            };
+
+                        assert(!new_regions.contains(pt_res.region));
+                        assert(!dir_pt_res.used_regions.contains(pt_res.region));
+
+                        // None of the entries at this level change
+                        assert forall|i: nat| i < X86_NUM_ENTRIES implies
+                            entry_at_spec(tok@, pt_res, layer as nat, ptr, i) == entry_at_spec(old(tok)@, pt, layer as nat, ptr, i)
+                        by {
+                            reveal(ghost_pt_used_regions_pairwise_disjoint);
+                        };
+
+                        assert(inv_at(tok@, pt_res, layer as nat, ptr)) by {
+                            reveal(ghost_pt_used_regions_pairwise_disjoint);
+                            lemma_directories_obey_invariant_at_framing(old(tok)@, pt, tok@, pt_res, layer as nat, ptr, idx as nat);
+                        };
+
+                        // posts
+                        assert forall|r: MemRegion| !pt.used_regions.contains(r) && !new_regions.contains(r)
+                           implies #[trigger] tok@.regions[r] === old(tok)@.regions[r]
+                           by { assert(!dir_pt.used_regions.contains(r)); };
+                        assert(tok@.regions.dom() === old(tok)@.regions.dom().union(new_regions));
+                        assert(pt_res.used_regions === pt.used_regions.union(new_regions));
+                        assert(pt_res.region === pt.region);
+                        assert(!empty_at(tok@, pt_res, layer as nat, ptr));
+                        assert(no_empty_directories(tok@, pt_res, layer as nat, ptr)) by {
+                            reveal(ghost_pt_used_regions_pairwise_disjoint);
+                            lemma_no_empty_directories_framing(old(tok)@, pt, tok@, pt_res, layer as nat, ptr, base as nat, idx as nat);
+                        };
+                        assert(!empty_at(tok@, pt_res, layer as nat, ptr)) by {
+                            reveal(ghost_pt_used_regions_pairwise_disjoint);
+                        };
+
+                        Ok(Ghost((pt_res,new_regions)))
+                    },
+                    Err(e) => Err(e),
+                }
+            }
+        } else {
+            // we cannot have a non-directory entry at this layer
+            assert(false);
+            // assert(candidate_mapping_overlaps_existing_vmem(interp_at(tok@, pt, layer as nat, ptr, base as nat).interp(), vaddr as nat, pte@)) by {
+            //     let interp_now = interp_at(tok@, pt, layer as nat, ptr, base as nat);
+            //     let interp_entry = interp_at_entry(tok@, pt, layer as nat, ptr, base as nat, idx as nat);
+            //     interp_now.lemma_interp_of_entry_contains_mapping_implies_interp_contains_mapping(idx as nat);
+            //     assert(interp_entry is Page);
+            //     let ghost ppte = interp_entry->Page_0;
+            //     assert(interp_entry.interp(entry_base as nat).contains_pair(entry_base as nat, ppte));
+            //     assert(overlap(
+            //             MemRegion { base: vaddr as nat, size: pte@.frame.size },
+            //             MemRegion { base: entry_base as nat, size: ppte.frame.size },
+            //     ));
+            //     assert(interp_now.interp().contains_pair(entry_base as nat, ppte));
+            // };
+            // assert(candidate_mapping_overlaps_existing_vmem(interp_to_l0(tok@, rebuild_root_pt(pt, set![])), vaddr as nat, pte@));
+            Err(())
+        }
+    } else {
+        // can't create frame mappings here.
+        assert(x86_arch_spec.entry_size(layer as nat) != pte.frame.size);
+
+        let (Ghost(pt_with_empty), new_dir_region, new_dir_entry, Ghost(rebuild_root_pt_inner))
+            = insert_empty_directory(Tracked(tok), Ghost(pt), layer, ptr, base, idx, vaddr, pte, Ghost(rebuild_root_pt));
+        let ghost tok_with_empty = tok@;
+        let ghost new_dir_pt = pt_with_empty.entries[idx as int]->Some_0;
+        let new_dir_addr = new_dir_region.base;
+        assert(inv_at(tok_with_empty, pt_with_empty, layer as nat, ptr));
+
+        assert(aligned(entry_base as nat, x86_arch_spec.entry_size((layer + 1) as nat))) by (nonlinear_arith)
+            requires
+                layer < 3,
+                aligned(base as nat, x86_arch_spec.entry_size(layer as nat)),
+                entry_base == x86_arch_spec.entry_base(layer as nat, base as nat, idx as nat);
+        assert(accepted_mapping(vaddr as nat, pte@, (layer + 1) as nat, entry_base as nat)) by {
+            assert(vaddr + pte.frame.size <= x86_arch_spec.next_entry_base(layer as nat, base as nat, idx as nat)) by (nonlinear_arith)
+                requires
+                    aligned(base as nat, x86_arch_spec.entry_size(layer as nat)),
+                    aligned(vaddr as nat, pte.frame.size as nat),
+                    x86_arch_spec.contains_entry_size_at_index_atleast(pte.frame.size as nat, layer as nat),
+                    idx == x86_arch_spec.index_for_vaddr(layer as nat, base as nat, vaddr as nat),
+            {}
+        };
+
+        match pud_map_frame(Tracked(tok), Ghost(new_dir_pt), layer + 1, new_dir_addr, entry_base, vaddr, pte, Ghost(rebuild_root_pt_inner)) {
+            Ok(rec_res) => {
+                assert(!candidate_mapping_overlaps_existing_vmem(interp_to_l0(tok_with_empty, rebuild_root_pt_inner(new_dir_pt, set![])), vaddr as nat, pte@));
+                //let ghost dir_new_regions = rec_res@.1;
+                let ghost pt_final =
+                    PTDir {
+                        region:       pt_with_empty.region,
+                        entries:      pt_with_empty.entries.update(idx as int, Some(rec_res@.0)),
+                        used_regions: pt_with_empty.used_regions.union(rec_res@.1),
+                    };
+                let ghost new_regions = rec_res@.1.insert(new_dir_region@);
+                proof {
+                    //assert(!dir_new_regions.contains(pt_final.region));
+                    assert(!new_dir_pt.used_regions.contains(pt_final.region)) by {
+                        reveal(ghost_pt_used_regions_pairwise_disjoint);
+                    };
+
+                    assert forall|i: nat| i < X86_NUM_ENTRIES implies
+                        #[trigger] entry_at_spec(tok@, pt_final, layer as nat, ptr, i)
+                        == if i == idx { new_dir_entry } else { entry_at_spec(tok_with_empty, pt_with_empty, layer as nat, ptr, i) }
+                    by {
+                        reveal(ghost_pt_used_regions_pairwise_disjoint);
+                    };
+                    assert(inv_at(tok@, pt_final, layer as nat, ptr)) by {
+                        reveal(ghost_pt_used_regions_pairwise_disjoint);
+                        lemma_directories_obey_invariant_at_framing(tok_with_empty, pt_with_empty, tok@, pt_final, layer as nat, ptr, idx as nat);
+                    };
+
+                    // From insert_empty_directory's post
+                    assert(interp_to_l0(tok_with_empty, rebuild_root_pt_inner(new_dir_pt, set![])) == interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])));
+                    assert(!candidate_mapping_overlaps_existing_vmem(interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])), vaddr as nat, pte@));
+
+                    assert(no_empty_directories(tok@, pt_final, layer as nat, ptr)) by {
+                        reveal(ghost_pt_used_regions_pairwise_disjoint);
+                        lemma_no_empty_directories_framing(old(tok)@, pt, tok@, pt_final, layer as nat, ptr, base as nat, idx as nat);
+                    };
+                    // posts
+                    assert(pt_final.region === pt.region);
+                    assert(pt_final.used_regions =~= pt.used_regions.union(new_regions));
+                    assert(tok@.regions.dom() =~= old(tok)@.regions.dom().union(new_regions));
+                    assert forall|r: MemRegion|
+                        !(#[trigger] pt.used_regions.contains(r))
+                        && !new_regions.contains(r)
+                        implies tok@.regions[r] === old(tok)@.regions[r] by
+                    {
+                        assert(r !== new_dir_region@);
+                        assert(!pt_with_empty.used_regions.contains(r));
+                        assert(!new_dir_pt.used_regions.contains(r));
+                        assert(tok@.regions[r] === tok_with_empty.regions[r]);
+                    };
+                    assert(forall|r: MemRegion| new_regions.contains(r) ==> !(#[trigger] pt.used_regions.contains(r)));
+                    assert(!empty_at(tok@, pt_final, layer as nat, ptr)) by {
+                        reveal(ghost_pt_used_regions_pairwise_disjoint);
+                    };
+                }
+                Ok(Ghost((pt_final, new_regions)))
+            },
+            Err(e) => {
+                proof {
+                    lemma_interp_at_aux_facts(tok_with_empty, pt_with_empty, layer as nat, ptr, base as nat, seq![]);
+                    let interp_new_dir = interp_at(tok_with_empty, new_dir_pt, layer as nat + 1, new_dir_addr, entry_base as nat);
+                    let interp_outer = interp_at(tok_with_empty, pt_with_empty, layer as nat, ptr, base as nat);
+                    assert(candidate_mapping_overlaps_existing_vmem(interp_new_dir.interp(), vaddr as nat, pte@));
+                    interp_new_dir.lemma_empty_implies_interp_empty();
+                    assert(interp_new_dir.interp() =~= map![]);
+                    interp_outer.lemma_interp_of_entry_contains_mapping_implies_interp_contains_mapping(idx as nat);
+                    assert(false); // We always successfully insert into an empty directory
+                }
+                Err(e)
+            },
+        }
+    }
+}
+
+
+#[cfg(not(feature = "unrolled"))]
+#[verifier(spinoff_prover)]
+fn map_frame_aux(
+    Tracked(tok): Tracked<&mut WrappedMapToken>,
+    Ghost(pt): Ghost<PTDir>,
+    layer: usize,
+    ptr: usize,
+    base: usize,
+    vaddr: usize,
+    pte: PageTableEntryExec,
+    Ghost(rebuild_root_pt): Ghost<spec_fn(PTDir, Set<MemRegion>) -> PTDir>,
+) -> (res: Result<Ghost<(PTDir,Set<MemRegion>)>,()>)
+    requires
+        old(tok).inv(),
+        !old(tok)@.change_made,
+        old(tok)@.args == (OpArgs::Map { base: vaddr, pte: pte@ }),
+        inv_at(old(tok)@, pt, layer as nat, ptr),
+        no_empty_directories(old(tok)@, pt, layer as nat, ptr),
+        aligned(base as nat, x86_arch_spec.entry_size(layer as nat)),
+        accepted_mapping(vaddr as nat, pte@, layer as nat, base as nat),
+        base <= vaddr < MAX_BASE,
+        candidate_mapping_overlaps_existing_vmem(interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp(), vaddr as nat, pte@)
+            <==> candidate_mapping_overlaps_existing_vmem(interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])), vaddr as nat, pte@),
+        forall|tok_new, pt_new, new_regions|
+           #[trigger] map_builder_pre(old(tok)@, pt, tok_new, pt_new, layer as nat, ptr, new_regions)
+               ==> {
+                   &&& inv(tok_new, rebuild_root_pt(pt_new, new_regions))
+                   &&& interp_at(tok_new, pt_new, layer as nat, ptr, base as nat).interp()
+                           == interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp()
+                        ==> interp_to_l0(tok_new, rebuild_root_pt(pt_new, new_regions))
+                                == interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![]))
+                   &&& interp_at(tok_new, pt_new, layer as nat, ptr, base as nat).interp()
+                           === interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp().insert(vaddr as nat, pte@)
+                        ==> interp_to_l0(tok_new, rebuild_root_pt(pt_new, new_regions))
+                                === interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])).insert(vaddr as nat, pte@)
+        }
+    ensures
+        tok.inv(),
+        tok@.pt_mem.pml4 == old(tok)@.pt_mem.pml4,
+        match res {
+            Ok(resv) => {
+                let (pt_res, new_regions) = resv@;
+                // We return the regions that we added
+                &&& tok@.regions.dom() === old(tok)@.regions.dom().union(new_regions)
+                &&& pt_res.used_regions === pt.used_regions.union(new_regions)
+                // and only those we added
+                &&& new_regions.disjoint(old(tok)@.regions.dom())
+                &&& (forall|r: MemRegion| new_regions.contains(r) ==> !(#[trigger] pt.used_regions.contains(r)))
+                // Invariant preserved
+                &&& inv_at(tok@, pt_res, layer as nat, ptr)
+                &&& !empty_at(tok@, pt_res, layer as nat, ptr)
+                &&& no_empty_directories(tok@, pt_res, layer as nat, ptr)
+                // We only touch already allocated regions if they're in pt.used_regions
+                &&& (forall|r: MemRegion| !(#[trigger] pt.used_regions.contains(r)) && !new_regions.contains(r)
+                    ==> tok@.regions[r] === old(tok)@.regions[r])
+                &&& pt_res.region === pt.region
+                &&& !candidate_mapping_overlaps_existing_vmem(interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])), vaddr as nat, pte@)
+                &&& tok@.change_made
+                &&& tok@.result === Ok(())
+            },
+            Err(e) => {
+                // If error, unchanged
+                &&& tok@ === old(tok)@
+                &&& candidate_mapping_overlaps_existing_vmem(interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])), vaddr as nat, pte@)
+                &&& candidate_mapping_overlaps_existing_vmem(interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp(), vaddr as nat, pte@)
+            },
+        },
+    decreases X86_NUM_LAYERS - layer
+{
+    proof {
+        broadcast use
+            lemma_union_empty,
+            lemma_inv_implies_interp_inv;
+        lemma_bitvector_facts_simple();
+        lemma_interp_at_facts(tok@, pt, layer as nat, ptr, base as nat);
+        lemma_x86_arch_spec_inv();
+    }
+    let idx: usize = x86_arch_exec.index_for_vaddr(layer, base, vaddr);
+    proof {
+        assert({
+            &&& between(vaddr as nat, x86_arch_spec.entry_base(layer as nat, base as nat, idx as nat), x86_arch_spec.next_entry_base(layer as nat, base as nat, idx as nat))
+            &&& aligned(vaddr as nat, x86_arch_spec.entry_size(layer as nat)) ==> vaddr == x86_arch_spec.entry_base(layer as nat, base as nat, idx as nat)
+            &&& idx < X86_NUM_ENTRIES }) by
+        {
+            let es = x86_arch_spec.entry_size(layer as nat);
+            indexing::lemma_index_from_base_and_addr(base as nat, vaddr as nat, es, X86_NUM_ENTRIES as nat);
+        };
+        lemma_interp_at_aux_facts(old(tok)@, pt, layer as nat, ptr, base as nat, seq![]);
+    }
+    let entry = entry_at(Tracked(tok), Ghost(pt), layer, ptr, idx);
+    let entry_base: usize = x86_arch_exec.entry_base(layer, base, idx);
+    proof {
+        indexing::lemma_entry_base_from_index(base as nat, idx as nat, x86_arch_spec.entry_size(layer as nat));
+    }
+    if entry.is_present() {
+        if entry.is_dir(layer) {
+            if x86_arch_exec.entry_size(layer) == pte.frame.size {
+                // A directory is mapped here. We know that mapped directories are non-empty so
+                // there must be an overlapping mapping and this operation should fail.
+                assert(candidate_mapping_overlaps_existing_vmem(interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp(), vaddr as nat, pte@)) by {
+                    let ghost dir_pt = pt.entries[idx as int]->Some_0;
+                    let dir_addr = entry@->Directory_addr;
+                    let interp_old = interp_at(old(tok)@, pt, layer as nat, ptr, base as nat);
+                    let interp_entry = interp_at(old(tok)@, dir_pt, layer as nat + 1, dir_addr, entry_base as nat);
+                    assert(!empty_at(old(tok)@, dir_pt, layer as nat + 1, dir_addr));
+                    lemma_no_empty_directories_implies_interp_at_no_empty_directories(old(tok)@, pt, layer as nat, ptr, base as nat);
+                    interp_entry.lemma_nonempty_implies_interp_contains();
+                    let (b, ppte): (nat, PTE) =
+                        choose|b, ppte| #[trigger] interp_entry.interp().contains_pair(b, ppte)
+                            && interp_entry.arch.contains_entry_size_at_index_atleast(ppte.frame.size as nat, interp_entry.layer);
+                    assert(interp_entry.interp().contains_pair(b, ppte));
+                    lemma_interp_at_aux_facts(old(tok)@, dir_pt, layer as nat + 1, dir_addr, entry_base as nat, seq![]);
+                    interp_old.lemma_interp_of_entry_between(idx as nat, b, ppte);
+
+                    assert(interp_old.interp().contains_pair(b, ppte)) by {
+                        interp_old.lemma_interp_of_entry_contains_mapping_implies_interp_contains_mapping(idx as nat);
+                    };
+                    assert(x86_arch_spec.contains_entry_size_at_index_atleast(ppte.frame.size, layer as nat));
+                    assert(overlap(
+                            MemRegion { base: b, size: ppte.frame.size },
+                            MemRegion { base: vaddr as nat, size: pte@.frame.size },
+                        ));
+                };
+                assert(candidate_mapping_overlaps_existing_vmem(interp_to_l0(tok@, rebuild_root_pt(pt, set![])), vaddr as nat, pte@));
+                Err(())
+            } else {
+                let dir_addr = entry.address();
+                assert(pt.entries[idx as int] is Some);
+                let ghost dir_pt = pt.entries[idx as int]->Some_0;
+                assert(directories_obey_invariant_at(tok@, pt, layer as nat, ptr));
+
+                let ghost rebuild_root_pt_inner = |pt_new_inner: PTDir, new_regions: Set<MemRegion>| {
+                    let pt_new = PTDir {
+                        entries: pt.entries.update(idx as int, Some(pt_new_inner)),
+                        used_regions: pt.used_regions.union(new_regions),
+                        ..pt
+                    };
+                    rebuild_root_pt(pt_new, new_regions)
+                };
+
+                assert(pt.entries =~= PTDir {
+                    entries: pt.entries.update(idx as int, Some(dir_pt)),
+                    used_regions: pt.used_regions.union(set![]),
+                    ..pt
+                }.entries);
+                assert(forall|s: Set<MemRegion>| s.union(set![]) =~= s);
+                assert(rebuild_root_pt_inner(dir_pt, set![]) == rebuild_root_pt(pt, set![]));
+
+
+                assert forall|tok_new, pt_new_inner, new_regions|
+                   #[trigger] map_builder_pre(tok@, dir_pt, tok_new, pt_new_inner, layer as nat + 1, dir_addr, new_regions)
+                   implies {
+                       &&& inv(tok_new, rebuild_root_pt_inner(pt_new_inner, new_regions))
+                       &&& interp_at(tok_new, pt_new_inner, layer as nat + 1, dir_addr, entry_base as nat).interp()
+                               == interp_at(tok@, dir_pt, layer as nat + 1, dir_addr, entry_base as nat).interp()
+                            ==> interp_to_l0(tok_new, rebuild_root_pt_inner(pt_new_inner, new_regions))
+                                    == interp_to_l0(tok@, rebuild_root_pt_inner(dir_pt, set![]))
+                       &&& interp_at(tok_new, pt_new_inner, layer as nat + 1, dir_addr, entry_base as nat).interp()
+                               === interp_at(tok@, dir_pt, layer as nat + 1, dir_addr, entry_base as nat).interp().insert(vaddr as nat, pte@)
+                            ==> interp_to_l0(tok_new, rebuild_root_pt_inner(pt_new_inner, new_regions))
+                                    === interp_to_l0(tok@, rebuild_root_pt_inner(dir_pt, set![])).insert(vaddr as nat, pte@)
+                       }
+                by {
+                    //assert(pt_new_inner.used_regions === dir_pt.used_regions.union(new_regions));
+                    assert(inv_at(tok_new, pt_new_inner, (layer + 1) as nat, dir_addr));
+                    //assert(Ok(interp_at(tok_new, pt_new_inner, (layer + 1) as nat, dir_addr, entry_base as nat))
+                    //       === interp_at(old(tok_new)@, dir_pt, (layer + 1) as nat, dir_addr, entry_base as nat).map_frame(vaddr as nat, pte@));
+                    let ghost pt_new =
+                        PTDir {
+                            region: pt.region,
+                            entries: pt.entries.update(idx as int, Some(pt_new_inner)),
+                            used_regions: pt.used_regions.union(new_regions),
+                        };
+
+                    assert(!new_regions.contains(pt_new.region));
+                    assert(!pt_new_inner.used_regions.contains(pt_new.region));
+
+                    // None of the entries at this level change
+                    assert forall|i: nat| i < X86_NUM_ENTRIES implies
+                        #[trigger] entry_at_spec(tok_new, pt_new, layer as nat, ptr, i) == entry_at_spec(old(tok)@, pt, layer as nat, ptr, i) by { };
+
+                    assert(inv_at(tok_new, pt_new, layer as nat, ptr)) by {
+                        reveal(ghost_pt_used_regions_pairwise_disjoint);
+                        lemma_directories_obey_invariant_at_framing(tok@, pt, tok_new, pt_new, layer as nat, ptr, idx as nat);
+                    };
+
+                    assert(inv_at(tok@, pt, layer as nat, ptr));
+                    assert(tok@ == old(tok)@);
+
+                    assert forall|r| !(pt.used_regions.contains(r)) && !(new_regions.contains(r)) implies #[trigger] tok_new.regions[r] === tok@.regions[r] by {
+                        assert(!dir_pt.used_regions.contains(r));
                         if tok_new.regions.contains_key(r) {
                             assert(tok_new.regions[r] == tok@.regions[r]);
                         } else {
@@ -1970,6 +3998,8 @@ fn map_frame_aux(
     }
 }
 
+
+
 pub proof fn lemma_zeroed_page_implies_empty_at(tok: WrappedTokenView, pt: PTDir, layer: nat, ptr: usize)
     requires
         ptr % PAGE_SIZE == 0,
@@ -2119,6 +4149,16 @@ pub fn map_frame(Tracked(tok): Tracked<&mut WrappedMapToken>, pt: &mut Ghost<PTD
         tok.inv(),
 {
     let ghost rebuild_root_pt = |pt_new, new_regions| pt_new;
+    #[cfg(feature = "unrolled")]
+    match pgd_map_frame(Tracked(tok), *pt, 0, pml4, 0, vaddr, pte, Ghost(rebuild_root_pt)) {
+        Ok(res) => {
+            *pt = Ghost(res@.0);
+            Ok(())
+        },
+        Err(e) => Err(()),
+    }
+
+    #[cfg(not(feature = "unrolled"))]
     match map_frame_aux(Tracked(tok), *pt, 0, pml4, 0, vaddr, pte, Ghost(rebuild_root_pt)) {
         Ok(res) => {
             *pt = Ghost(res@.0);
