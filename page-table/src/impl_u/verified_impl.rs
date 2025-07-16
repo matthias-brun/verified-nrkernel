@@ -23,7 +23,7 @@ impl CodeVC for PTImpl {
         Tracked(tok): Tracked<Token>,
         pml4: usize,
         vaddr: usize,
-        pte: PageTableEntryExec,
+        pte: &PageTableEntryExec,
     ) -> (Result<(),()>, Tracked<Token>)
     {
         let tracked mut tok = tok;

@@ -53,7 +53,7 @@ pub extern "C" fn veros_init() -> i64 {
 pub extern "C" fn veros_map_frame(
     pt_ptr: u64,
     vaddr: u64,
-    pte: PageTableEntryExec) -> i64
+    pte: &PageTableEntryExec) -> i64
 {
 
     let pml4 = pt_ptr as usize;

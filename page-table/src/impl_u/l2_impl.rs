@@ -406,7 +406,7 @@ impl PDE {
         };
     }
 
-    pub fn new_page_entry(layer: usize, pte: PageTableEntryExec) -> (r: Self)
+    pub fn new_page_entry(layer: usize, pte: &PageTableEntryExec) -> (r: Self)
         requires
             0 < layer <= 3,
             addr_is_zero_padded(layer as nat, pte.frame.base, true),
@@ -1332,11 +1332,11 @@ pub open spec fn accepted_mapping(vaddr: nat, pte: PTE, layer: nat, base: nat) -
 fn pt_map_frame(
     Tracked(tok): Tracked<&mut WrappedMapToken>,
     Ghost(pt): Ghost<PTDir>,
-    layer: usize,
+    Ghost(layer): Ghost<nat>,
     ptr: usize,
     base: usize,
     vaddr: usize,
-    pte: PageTableEntryExec,
+    pte: &PageTableEntryExec,
     Ghost(rebuild_root_pt): Ghost<spec_fn(PTDir, Set<MemRegion>) -> PTDir>,
 ) -> (res: Result<Ghost<(PTDir,Set<MemRegion>)>,()>)
     requires
@@ -1397,6 +1397,7 @@ fn pt_map_frame(
         },
     // decreases X86_NUM_LAYERS - layer
 {
+    let layer = 3;
     proof {
         broadcast use
             lemma_union_empty,
@@ -1418,7 +1419,7 @@ fn pt_map_frame(
         lemma_interp_at_aux_facts(old(tok)@, pt, layer as nat, ptr, base as nat, seq![]);
     }
     let entry = entry_at(Tracked(tok), Ghost(pt), layer, ptr, idx);
-    let entry_base: usize = x86_arch_exec.entry_base(layer, base, idx);
+    let ghost entry_base = x86_arch_spec.entry_base(layer as nat, base as nat, idx as nat);
     proof {
         indexing::lemma_entry_base_from_index(base as nat, idx as nat, x86_arch_spec.entry_size(layer as nat));
     }
@@ -1598,11 +1599,11 @@ fn pt_map_frame(
 fn pmd_map_frame(
     Tracked(tok): Tracked<&mut WrappedMapToken>,
     Ghost(pt): Ghost<PTDir>,
-    layer: usize,
+    Ghost(layer): Ghost<nat>,
     ptr: usize,
     base: usize,
     vaddr: usize,
-    pte: PageTableEntryExec,
+    pte: &PageTableEntryExec,
     Ghost(rebuild_root_pt): Ghost<spec_fn(PTDir, Set<MemRegion>) -> PTDir>,
 ) -> (res: Result<Ghost<(PTDir,Set<MemRegion>)>,()>)
     requires
@@ -1663,6 +1664,7 @@ fn pmd_map_frame(
         },
     // decreases X86_NUM_LAYERS - layer
 {
+    let layer = 2;
     proof {
         broadcast use
             lemma_union_empty,
@@ -1684,7 +1686,7 @@ fn pmd_map_frame(
         lemma_interp_at_aux_facts(old(tok)@, pt, layer as nat, ptr, base as nat, seq![]);
     }
     let entry = entry_at(Tracked(tok), Ghost(pt), layer, ptr, idx);
-    let entry_base: usize = x86_arch_exec.entry_base(layer, base, idx);
+    let entry_base = x86_arch_exec.entry_base(layer, base, idx);
     proof {
         indexing::lemma_entry_base_from_index(base as nat, idx as nat, x86_arch_spec.entry_size(layer as nat));
     }
@@ -1928,7 +1930,7 @@ fn pmd_map_frame(
                             idx == x86_arch_spec.index_for_vaddr(layer as nat, base as nat, vaddr as nat),
                     {};
                 };
-                match pt_map_frame(Tracked(tok), Ghost(dir_pt), layer + 1, dir_addr, entry_base, vaddr, pte, Ghost(rebuild_root_pt_inner)) {
+                match pt_map_frame(Tracked(tok), Ghost(dir_pt), Ghost((layer + 1) as nat), dir_addr, entry_base, vaddr, pte, Ghost(rebuild_root_pt_inner)) {
                     Ok(rec_res) => {
                         let ghost dir_pt_res = rec_res@.0;
                         let ghost new_regions = rec_res@.1;
@@ -2142,7 +2144,7 @@ fn pmd_map_frame(
             Ok(Ghost((pt, set![])))
         } else {
             let (Ghost(pt_with_empty), new_dir_region, new_dir_entry, Ghost(rebuild_root_pt_inner))
-                = insert_empty_directory(Tracked(tok), Ghost(pt), layer, ptr, base, idx, vaddr, pte, Ghost(rebuild_root_pt));
+                = insert_empty_directory(Tracked(tok), Ghost(pt), layer, ptr, Ghost(base), idx, vaddr, pte, Ghost(rebuild_root_pt));
             let ghost tok_with_empty = tok@;
             let ghost new_dir_pt = pt_with_empty.entries[idx as int]->Some_0;
             let new_dir_addr = new_dir_region.base;
@@ -2163,7 +2165,7 @@ fn pmd_map_frame(
                 {}
             };
 
-            match pt_map_frame(Tracked(tok), Ghost(new_dir_pt), layer + 1, new_dir_addr, entry_base, vaddr, pte, Ghost(rebuild_root_pt_inner)) {
+            match pt_map_frame(Tracked(tok), Ghost(new_dir_pt), Ghost((layer + 1) as nat), new_dir_addr, entry_base, vaddr, pte, Ghost(rebuild_root_pt_inner)) {
                 Ok(rec_res) => {
                     assert(!candidate_mapping_overlaps_existing_vmem(interp_to_l0(tok_with_empty, rebuild_root_pt_inner(new_dir_pt, set![])), vaddr as nat, pte@));
                     //let ghost dir_new_regions = rec_res@.1;
@@ -2245,11 +2247,11 @@ fn pmd_map_frame(
 fn pud_map_frame(
     Tracked(tok): Tracked<&mut WrappedMapToken>,
     Ghost(pt): Ghost<PTDir>,
-    layer: usize,
+    Ghost(layer): Ghost<nat>,
     ptr: usize,
     base: usize,
     vaddr: usize,
-    pte: PageTableEntryExec,
+    pte: &PageTableEntryExec,
     Ghost(rebuild_root_pt): Ghost<spec_fn(PTDir, Set<MemRegion>) -> PTDir>,
 ) -> (res: Result<Ghost<(PTDir,Set<MemRegion>)>,()>)
     requires
@@ -2310,6 +2312,7 @@ fn pud_map_frame(
         },
     // decreases X86_NUM_LAYERS - layer
 {
+    let layer = 1;
     proof {
         broadcast use
             lemma_union_empty,
@@ -2331,7 +2334,7 @@ fn pud_map_frame(
         lemma_interp_at_aux_facts(old(tok)@, pt, layer as nat, ptr, base as nat, seq![]);
     }
     let entry = entry_at(Tracked(tok), Ghost(pt), layer, ptr, idx);
-    let entry_base: usize = x86_arch_exec.entry_base(layer, base, idx);
+    let entry_base = x86_arch_exec.entry_base(layer, base, idx);
     proof {
         indexing::lemma_entry_base_from_index(base as nat, idx as nat, x86_arch_spec.entry_size(layer as nat));
     }
@@ -2575,7 +2578,7 @@ fn pud_map_frame(
                             idx == x86_arch_spec.index_for_vaddr(layer as nat, base as nat, vaddr as nat),
                     {};
                 };
-                match pmd_map_frame(Tracked(tok), Ghost(dir_pt), layer + 1, dir_addr, entry_base, vaddr, pte, Ghost(rebuild_root_pt_inner)) {
+                match pmd_map_frame(Tracked(tok), Ghost(dir_pt), Ghost((layer + 1) as nat), dir_addr, entry_base, vaddr, pte, Ghost(rebuild_root_pt_inner)) {
                     Ok(rec_res) => {
                         let ghost dir_pt_res = rec_res@.0;
                         let ghost new_regions = rec_res@.1;
@@ -2789,7 +2792,7 @@ fn pud_map_frame(
             Ok(Ghost((pt, set![])))
         } else {
             let (Ghost(pt_with_empty), new_dir_region, new_dir_entry, Ghost(rebuild_root_pt_inner))
-                = insert_empty_directory(Tracked(tok), Ghost(pt), layer, ptr, base, idx, vaddr, pte, Ghost(rebuild_root_pt));
+                = insert_empty_directory(Tracked(tok), Ghost(pt), layer, ptr, Ghost(base), idx, vaddr, pte, Ghost(rebuild_root_pt));
             let ghost tok_with_empty = tok@;
             let ghost new_dir_pt = pt_with_empty.entries[idx as int]->Some_0;
             let new_dir_addr = new_dir_region.base;
@@ -2810,7 +2813,7 @@ fn pud_map_frame(
                 {}
             };
 
-            match pmd_map_frame(Tracked(tok), Ghost(new_dir_pt), layer + 1, new_dir_addr, entry_base, vaddr, pte, Ghost(rebuild_root_pt_inner)) {
+            match pmd_map_frame(Tracked(tok), Ghost(new_dir_pt), Ghost((layer + 1) as nat), new_dir_addr, entry_base, vaddr, pte, Ghost(rebuild_root_pt_inner)) {
                 Ok(rec_res) => {
                     assert(!candidate_mapping_overlaps_existing_vmem(interp_to_l0(tok_with_empty, rebuild_root_pt_inner(new_dir_pt, set![])), vaddr as nat, pte@));
                     //let ghost dir_new_regions = rec_res@.1;
@@ -2891,11 +2894,11 @@ fn pud_map_frame(
 fn pgd_map_frame(
     Tracked(tok): Tracked<&mut WrappedMapToken>,
     Ghost(pt): Ghost<PTDir>,
-    layer: usize,
+    Ghost(layer): Ghost<nat>,
     ptr: usize,
     base: usize,
     vaddr: usize,
-    pte: PageTableEntryExec,
+    pte: &PageTableEntryExec,
     Ghost(rebuild_root_pt): Ghost<spec_fn(PTDir, Set<MemRegion>) -> PTDir>,
 ) -> (res: Result<Ghost<(PTDir,Set<MemRegion>)>,()>)
     requires
@@ -2956,6 +2959,7 @@ fn pgd_map_frame(
         },
     // decreases X86_NUM_LAYERS - layer
 {
+    let layer = 0;
     proof {
         broadcast use
             lemma_union_empty,
@@ -2977,7 +2981,7 @@ fn pgd_map_frame(
         lemma_interp_at_aux_facts(old(tok)@, pt, layer as nat, ptr, base as nat, seq![]);
     }
     let entry = entry_at(Tracked(tok), Ghost(pt), layer, ptr, idx);
-    let entry_base: usize = x86_arch_exec.entry_base(layer, base, idx);
+    let entry_base = x86_arch_exec.entry_base(layer, base, idx);
     proof {
         indexing::lemma_entry_base_from_index(base as nat, idx as nat, x86_arch_spec.entry_size(layer as nat));
     }
@@ -3190,7 +3194,7 @@ fn pgd_map_frame(
                             idx == x86_arch_spec.index_for_vaddr(layer as nat, base as nat, vaddr as nat),
                     {};
                 };
-                match pud_map_frame(Tracked(tok), Ghost(dir_pt), layer + 1, dir_addr, entry_base, vaddr, pte, Ghost(rebuild_root_pt_inner)) {
+                match pud_map_frame(Tracked(tok), Ghost(dir_pt), Ghost((layer + 1) as nat), dir_addr, entry_base, vaddr, pte, Ghost(rebuild_root_pt_inner)) {
                     Ok(rec_res) => {
                         let ghost dir_pt_res = rec_res@.0;
                         let ghost new_regions = rec_res@.1;
@@ -3264,7 +3268,7 @@ fn pgd_map_frame(
         assert(x86_arch_spec.entry_size(layer as nat) != pte.frame.size);
 
         let (Ghost(pt_with_empty), new_dir_region, new_dir_entry, Ghost(rebuild_root_pt_inner))
-            = insert_empty_directory(Tracked(tok), Ghost(pt), layer, ptr, base, idx, vaddr, pte, Ghost(rebuild_root_pt));
+            = insert_empty_directory(Tracked(tok), Ghost(pt), layer, ptr, Ghost(base), idx, vaddr, pte, Ghost(rebuild_root_pt));
         let ghost tok_with_empty = tok@;
         let ghost new_dir_pt = pt_with_empty.entries[idx as int]->Some_0;
         let new_dir_addr = new_dir_region.base;
@@ -3285,7 +3289,7 @@ fn pgd_map_frame(
             {}
         };
 
-        match pud_map_frame(Tracked(tok), Ghost(new_dir_pt), layer + 1, new_dir_addr, entry_base, vaddr, pte, Ghost(rebuild_root_pt_inner)) {
+        match pud_map_frame(Tracked(tok), Ghost(new_dir_pt), Ghost((layer + 1) as nat), new_dir_addr, entry_base, vaddr, pte, Ghost(rebuild_root_pt_inner)) {
             Ok(rec_res) => {
                 assert(!candidate_mapping_overlaps_existing_vmem(interp_to_l0(tok_with_empty, rebuild_root_pt_inner(new_dir_pt, set![])), vaddr as nat, pte@));
                 //let ghost dir_new_regions = rec_res@.1;
@@ -3369,7 +3373,7 @@ fn map_frame_aux(
     ptr: usize,
     base: usize,
     vaddr: usize,
-    pte: PageTableEntryExec,
+    pte: &PageTableEntryExec,
     Ghost(rebuild_root_pt): Ghost<spec_fn(PTDir, Set<MemRegion>) -> PTDir>,
 ) -> (res: Result<Ghost<(PTDir,Set<MemRegion>)>,()>)
     requires
@@ -3450,7 +3454,7 @@ fn map_frame_aux(
         lemma_interp_at_aux_facts(old(tok)@, pt, layer as nat, ptr, base as nat, seq![]);
     }
     let entry = entry_at(Tracked(tok), Ghost(pt), layer, ptr, idx);
-    let entry_base: usize = x86_arch_exec.entry_base(layer, base, idx);
+    let entry_base =  x86_arch_exec.entry_base(layer, base, idx);
     proof {
         indexing::lemma_entry_base_from_index(base as nat, idx as nat, x86_arch_spec.entry_size(layer as nat));
     }
@@ -3902,7 +3906,7 @@ fn map_frame_aux(
             Ok(Ghost((pt, set![])))
         } else {
             let (Ghost(pt_with_empty), new_dir_region, new_dir_entry, Ghost(rebuild_root_pt_inner))
-                = insert_empty_directory(Tracked(tok), Ghost(pt), layer, ptr, base, idx, vaddr, pte, Ghost(rebuild_root_pt));
+                = insert_empty_directory(Tracked(tok), Ghost(pt), layer, ptr, Ghost(base), idx, vaddr, pte, Ghost(rebuild_root_pt));
             let ghost tok_with_empty = tok@;
             let ghost new_dir_pt = pt_with_empty.entries[idx as int]->Some_0;
             let new_dir_addr = new_dir_region.base;
@@ -4122,7 +4126,7 @@ proof fn lemma_not_empty_at_implies_interp_at_not_empty(tok: WrappedTokenView, p
     lemma_not_empty_at_implies_interp_at_aux_not_empty(tok, pt, layer, ptr, base, seq![], i);
 }
 
-pub fn map_frame(Tracked(tok): Tracked<&mut WrappedMapToken>, pt: &mut Ghost<PTDir>, pml4: usize, vaddr: usize, pte: PageTableEntryExec) -> (res: Result<(),()>)
+pub fn map_frame(Tracked(tok): Tracked<&mut WrappedMapToken>, pt: &mut Ghost<PTDir>, pml4: usize, vaddr: usize, pte: &PageTableEntryExec) -> (res: Result<(),()>)
     requires
         !old(tok)@.change_made,
         inv_and_nonempty(old(tok)@, old(pt)@),
@@ -4150,7 +4154,7 @@ pub fn map_frame(Tracked(tok): Tracked<&mut WrappedMapToken>, pt: &mut Ghost<PTD
 {
     let ghost rebuild_root_pt = |pt_new, new_regions| pt_new;
     #[cfg(feature = "unrolled")]
-    match pgd_map_frame(Tracked(tok), *pt, 0, pml4, 0, vaddr, pte, Ghost(rebuild_root_pt)) {
+    match pgd_map_frame(Tracked(tok), *pt, Ghost(0), pml4, 0, vaddr, pte, Ghost(rebuild_root_pt)) {
         Ok(res) => {
             *pt = Ghost(res@.0);
             Ok(())
@@ -4213,10 +4217,10 @@ fn insert_empty_directory(
     Ghost(pt): Ghost<PTDir>,
     layer: usize,
     ptr: usize,
-    base: usize,
+    Ghost(base): Ghost<usize>,
     idx: usize,
     vaddr: usize,
-    pte: PageTableEntryExec,
+    pte: &PageTableEntryExec,
     Ghost(rebuild_root_pt): Ghost<spec_fn(PTDir, Set<MemRegion>) -> PTDir>,
 ) -> (res: (Ghost<PTDir>, // pt_with_empty
             MemRegionExec, // new_dir_region

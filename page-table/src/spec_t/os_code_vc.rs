@@ -474,7 +474,7 @@ pub trait CodeVC {
         Tracked(tok): Tracked<Token>,
         pml4: usize,
         vaddr: usize,
-        pte: PageTableEntryExec,
+        pte: &PageTableEntryExec,
     ) -> (res: (Result<(),()>, Tracked<Token>))
         requires
             // State machine VC preconditions
