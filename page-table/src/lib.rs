@@ -81,10 +81,9 @@ pub extern "C" fn veros_unmap_frame(
     let pml4 = pt_ptr as usize;
     let token: Tracked<Token> = Tracked::assume_new();
 
-    let (res, _tok) = impl_u::verified_impl::PTImpl::sys_do_unmap(token, pml4, vaddr as usize);
+    let (res, _tok) = impl_u::verified_impl::PTImpl::sys_do_unmap(token, pml4, vaddr as usize, ret_frame);
     match res {
         Ok(frame) => {
-            *ret_frame = frame;
             return 0;
         }
         Err(_) => {
