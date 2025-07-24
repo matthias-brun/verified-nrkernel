@@ -111,13 +111,13 @@ impl State {
 
     pub closed spec fn is_happy_writenonneg(self, c: Constants, core: Core, addr: usize, value: usize) -> bool {
         &&& !self.hist.writes.tso.is_empty() ==> core == self.hist.writes.core
-        &&& self.hist.polarity !is Mapping ==> self.can_flip_polarity(c)
+        &&& !(self.hist.polarity is Mapping) ==> self.can_flip_polarity(c)
         &&& self.writer_mem().is_nonneg_write(addr, value)
     }
 
     pub closed spec fn is_happy_writenonpos(self, c: Constants, core: Core, addr: usize, value: usize) -> bool {
         &&& !self.hist.writes.tso.is_empty() ==> core == self.hist.writes.core
-        &&& self.hist.polarity !is Unmapping ==> self.can_flip_polarity(c)
+        &&& !(self.hist.polarity is Unmapping) ==> self.can_flip_polarity(c)
         &&& self.writer_mem().is_nonpos_write(addr, value)
     }
 }
