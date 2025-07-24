@@ -10,4 +10,4 @@ set -x
 verus --version
 
 # run verus
-verus --crate-type=lib --rlimit 50 --cfg feature=\"impl\"  $* page-table/src/lib.rs
+verus --crate-type=lib --rlimit 75 --cfg feature=\"impl\"  $* page-table/src/lib.rs
