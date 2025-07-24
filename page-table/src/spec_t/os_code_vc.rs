@@ -474,7 +474,7 @@ pub trait CodeVC {
         Tracked(tok): Tracked<Token>,
         pml4: usize,
         vaddr: usize,
-        pte: PageTableEntryExec,
+        pte: &PageTableEntryExec,
     ) -> (res: (Result<(),()>, Tracked<Token>))
         requires
             // State machine VC preconditions
@@ -503,7 +503,8 @@ pub trait CodeVC {
         Tracked(tok): Tracked<Token>,
         pml4: usize,
         vaddr: usize,
-    ) -> (res: (Result<MemRegionExec,()>, Tracked<Token>))
+        frame: &mut MemRegionExec,
+    ) -> (res: (Result<(),()>, Tracked<Token>))
         requires
             os::step_Unmap_enabled(vaddr as nat),
             tok.st().inv(tok.consts()),

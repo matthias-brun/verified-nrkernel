@@ -858,7 +858,7 @@ pub mod code {
     use crate::theorem::TokState;
     #[cfg(verus_keep_ghost)]
     use crate::spec_t::mmu::defs::{ aligned };
-    use core::arch::asm;
+    // use core::arch::asm;
 
 
     // Note:
@@ -1008,6 +1008,8 @@ pub mod code {
         ensures
             tok.tstate() is Spent,
     {
+        // let's only have the mfence when we actually compile for the linux module
+        #[cfg(feature="linuxmodule")]
         unsafe { asm!("mfence") };
         // unsafe { asm!("sfence") };
     }

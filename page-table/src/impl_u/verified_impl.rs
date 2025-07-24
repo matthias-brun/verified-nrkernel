@@ -23,7 +23,7 @@ impl CodeVC for PTImpl {
         Tracked(tok): Tracked<Token>,
         pml4: usize,
         vaddr: usize,
-        pte: PageTableEntryExec,
+        pte: &PageTableEntryExec,
     ) -> (Result<(),()>, Tracked<Token>)
     {
         let tracked mut tok = tok;
@@ -90,7 +90,8 @@ impl CodeVC for PTImpl {
         Tracked(tok): Tracked<Token>,
         pml4: usize,
         vaddr: usize,
-    ) -> (res: (Result<MemRegionExec,()>, Tracked<Token>))
+        frame: &mut MemRegionExec,
+    ) -> (res: (Result<(),()>, Tracked<Token>))
     {
         let tracked mut tok = tok;
 
@@ -113,7 +114,7 @@ impl CodeVC for PTImpl {
         let ghost wtok_before = wtok@;
         let ghost pt_before = pt@;
 
-        let res = unmap(Tracked(&mut wtok), &mut pt, pml4, vaddr);
+        let res = unmap(Tracked(&mut wtok), &mut pt, pml4, vaddr, frame);
         assert(PT::inv_and_nonempty(wtok@, pt@));
         assert forall|wtokp: WrappedTokenView| ({
             &&& wtokp.pt_mem == wtok@.pt_mem
@@ -127,7 +128,7 @@ impl CodeVC for PTImpl {
         };
 
         let shootdown = if let Ok(pte) = res {
-            DoShootdown::Yes { vaddr, size: pte.size }
+            DoShootdown::Yes { vaddr, size: frame.size }
         } else {
             DoShootdown::No
         };

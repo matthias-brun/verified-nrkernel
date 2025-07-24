@@ -406,7 +406,7 @@ impl PDE {
         };
     }
 
-    pub fn new_page_entry(layer: usize, pte: PageTableEntryExec) -> (r: Self)
+    pub fn new_page_entry(layer: usize, pte: &PageTableEntryExec) -> (r: Self)
         requires
             0 < layer <= 3,
             addr_is_zero_padded(layer as nat, pte.frame.base, true),
@@ -1335,7 +1335,7 @@ fn map_frame_aux(
     ptr: usize,
     base: usize,
     vaddr: usize,
-    pte: PageTableEntryExec,
+    pte: &PageTableEntryExec,
     Ghost(rebuild_root_pt): Ghost<spec_fn(PTDir, Set<MemRegion>) -> PTDir>,
 ) -> (res: Result<Ghost<(PTDir,Set<MemRegion>)>,()>)
     requires
@@ -1416,7 +1416,7 @@ fn map_frame_aux(
         lemma_interp_at_aux_facts(old(tok)@, pt, layer as nat, ptr, base as nat, seq![]);
     }
     let entry = entry_at(Tracked(tok), Ghost(pt), layer, ptr, idx);
-    let entry_base: usize = x86_arch_exec.entry_base(layer, base, idx);
+    let entry_base =  x86_arch_exec.entry_base(layer, base, idx);
     proof {
         indexing::lemma_entry_base_from_index(base as nat, idx as nat, x86_arch_spec.entry_size(layer as nat));
     }
@@ -1516,7 +1516,7 @@ fn map_frame_aux(
                     assert(tok@ == old(tok)@);
 
                     assert forall|r| !(pt.used_regions.contains(r)) && !(new_regions.contains(r)) implies #[trigger] tok_new.regions[r] === tok@.regions[r] by {
-                        assert(!dir_pt.used_regions.contains(r)); 
+                        assert(!dir_pt.used_regions.contains(r));
                         if tok_new.regions.contains_key(r) {
                             assert(tok_new.regions[r] == tok@.regions[r]);
                         } else {
@@ -1868,7 +1868,7 @@ fn map_frame_aux(
             Ok(Ghost((pt, set![])))
         } else {
             let (Ghost(pt_with_empty), new_dir_region, new_dir_entry, Ghost(rebuild_root_pt_inner))
-                = insert_empty_directory(Tracked(tok), Ghost(pt), layer, ptr, base, idx, vaddr, pte, Ghost(rebuild_root_pt));
+                = insert_empty_directory(Tracked(tok), Ghost(pt), layer, ptr, Ghost(base), idx, vaddr, pte, Ghost(rebuild_root_pt));
             let ghost tok_with_empty = tok@;
             let ghost new_dir_pt = pt_with_empty.entries[idx as int]->Some_0;
             let new_dir_addr = new_dir_region.base;
@@ -1963,6 +1963,8 @@ fn map_frame_aux(
         }
     }
 }
+
+
 
 pub proof fn lemma_zeroed_page_implies_empty_at(tok: WrappedTokenView, pt: PTDir, layer: nat, ptr: usize)
     requires
@@ -2086,7 +2088,7 @@ proof fn lemma_not_empty_at_implies_interp_at_not_empty(tok: WrappedTokenView, p
     lemma_not_empty_at_implies_interp_at_aux_not_empty(tok, pt, layer, ptr, base, seq![], i);
 }
 
-pub fn map_frame(Tracked(tok): Tracked<&mut WrappedMapToken>, pt: &mut Ghost<PTDir>, pml4: usize, vaddr: usize, pte: PageTableEntryExec) -> (res: Result<(),()>)
+pub fn map_frame(Tracked(tok): Tracked<&mut WrappedMapToken>, pt: &mut Ghost<PTDir>, pml4: usize, vaddr: usize, pte: &PageTableEntryExec) -> (res: Result<(),()>)
     requires
         !old(tok)@.change_made,
         inv_and_nonempty(old(tok)@, old(pt)@),
@@ -2168,10 +2170,10 @@ fn insert_empty_directory(
     Ghost(pt): Ghost<PTDir>,
     layer: usize,
     ptr: usize,
-    base: usize,
+    Ghost(base): Ghost<usize>,
     idx: usize,
     vaddr: usize,
-    pte: PageTableEntryExec,
+    pte: &PageTableEntryExec,
     Ghost(rebuild_root_pt): Ghost<spec_fn(PTDir, Set<MemRegion>) -> PTDir>,
 ) -> (res: (Ghost<PTDir>, // pt_with_empty
             MemRegionExec, // new_dir_region
@@ -2685,8 +2687,9 @@ fn unmap_aux(
     ptr: usize,
     base: usize,
     vaddr: usize,
+    frame: &mut MemRegionExec,
     Ghost(rebuild_root_pt): Ghost<spec_fn(PTDir, Set<MemRegion>) -> PTDir>,
-) -> (res: Result<(MemRegionExec, Ghost<(PTDir,Set<MemRegion>)>),()>)
+) -> (res: Result<Ghost<(PTDir,Set<MemRegion>)>,()>)
     requires
         old(tok).inv(),
         !old(tok)@.change_made,
@@ -2716,7 +2719,7 @@ fn unmap_aux(
         tok@.pt_mem.pml4 == old(tok)@.pt_mem.pml4,
         match res {
             Ok(resv) => {
-                let (pt_res, removed_regions) = resv.1@;
+                let (pt_res, removed_regions) = resv@;
                 &&& interp_at(tok@, pt_res, layer as nat, ptr, base as nat).interp()
                     == interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp().remove(vaddr as nat)
                 // We return the regions that we removed
@@ -2894,8 +2897,8 @@ fn unmap_aux(
                 broadcast use vstd::arithmetic::div_mod::lemma_mod_mod, vstd::arithmetic::div_mod::lemma_mod_breakdown;
             };
 
-            match unmap_aux(Tracked(tok), Ghost(dir_pt), layer + 1, dir_addr, entry_base, vaddr, Ghost(rebuild_root_pt_inner)) {
-                Ok((unmapped_region, rec_res)) => {
+            match unmap_aux(Tracked(tok), Ghost(dir_pt), layer + 1, dir_addr, entry_base, vaddr, frame, Ghost(rebuild_root_pt_inner)) {
+                Ok(rec_res) => {
                     let ghost dir_pt_res = rec_res@.0;
                     let ghost removed_regions = rec_res@.1;
 
@@ -3059,7 +3062,7 @@ fn unmap_aux(
                                 interp_old.lemma_entries_interp_equal_implies_interp_equal(interp_now);
                             };
                         }
-                        Ok((unmapped_region, Ghost((pt_after_dealloc, removed_regions_after_dealloc))))
+                        Ok(Ghost((pt_after_dealloc, removed_regions_after_dealloc)))
                     } else {
                         let ghost pt_res = pt_after_rec;
 
@@ -3077,7 +3080,7 @@ fn unmap_aux(
                                 lemma_no_empty_directories_framing(old(tok)@, pt, tok@, pt_res, layer as nat, ptr, base as nat, idx as nat);
                             };
                         }
-                        Ok((unmapped_region, Ghost((pt_res, removed_regions))))
+                        Ok(Ghost((pt_res, removed_regions)))
                     }
                 },
                 Err(e) => {
@@ -3165,7 +3168,8 @@ fn unmap_aux(
                     assert(pt.used_regions =~= pt.used_regions.difference(removed_regions));
                 }
                 let unmapped_region = MemRegionExec { base: entry.address(), size: x86_arch_exec.entry_size(layer) };
-                Ok((unmapped_region, Ghost((pt, removed_regions))))
+                *frame = unmapped_region;
+                Ok(Ghost((pt, removed_regions)))
             } else {
                 proof {
                     assert(entry_base != vaddr);
@@ -3190,7 +3194,7 @@ fn unmap_aux(
     }
 }
 
-pub fn unmap(Tracked(tok): Tracked<&mut WrappedUnmapToken>, pt: &mut Ghost<PTDir>, pml4: usize, vaddr: usize) -> (res: Result<MemRegionExec,()>)
+pub fn unmap(Tracked(tok): Tracked<&mut WrappedUnmapToken>, pt: &mut Ghost<PTDir>, pml4: usize, vaddr: usize,  frame: &mut MemRegionExec) -> (res: Result<(),()>)
     requires
         !old(tok)@.change_made,
         inv_and_nonempty(old(tok)@, old(pt)@),
@@ -3215,10 +3219,10 @@ pub fn unmap(Tracked(tok): Tracked<&mut WrappedUnmapToken>, pt: &mut Ghost<PTDir
         tok.inv(),
 {
     let ghost rebuild_root_pt = |pt_new, removed_regions| pt_new;
-    match unmap_aux(Tracked(tok), *pt, 0, pml4, 0, vaddr, Ghost(rebuild_root_pt)) {
+    match unmap_aux(Tracked(tok), *pt, 0, pml4, 0, vaddr, frame, Ghost(rebuild_root_pt)) {
         Ok(res) => {
-            *pt = Ghost(res.1@.0);
-            Ok(res.0)
+            *pt = Ghost(res@.0);
+            Ok(())
         },
         Err(e) => Err(()),
     }

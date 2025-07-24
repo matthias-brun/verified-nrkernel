@@ -352,7 +352,7 @@ pub mod code {
     }
 
     #[cfg(not(feature="linuxmodule"))]
-    use std::sync::atomic::{AtomicBool, Ordering::{Acquire, Release, Relaxed}};
+    use std::sync::atomic::{AtomicBool, Ordering::{Acquire, Release}};
 
     #[cfg(feature="linuxmodule")]
     use core::sync::atomic::{AtomicUsize, Ordering};
