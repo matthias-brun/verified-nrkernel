@@ -82,6 +82,7 @@ pub enum Step {
     // Non-atomic page table walks
     WalkInit { core: Core, vaddr: usize },
     WalkStep { core: Core, walk: Walk, r: usize },
+    WalkAbort { core: Core, walk: Walk },
     TLBFill { core: Core, walk: Walk, r: usize },
     TLBEvict { core: Core, tlb_va: usize },
     // TSO, operations on page table memory
@@ -346,6 +347,26 @@ pub closed spec fn step_WalkStep(
     }
 }
 
+pub closed spec fn step_WalkAbort(
+    pre: State,
+    post: State,
+    c: Constants,
+    core: Core,
+    walk: Walk,
+    lbl: Lbl
+    ) -> bool
+{
+    &&& lbl is Tau
+
+    &&& c.valid_core(core)
+    &&& pre.walks[core].contains(walk)
+
+    &&& post == State {
+        walks: pre.walks.insert(core, pre.walks[core].remove(walk)),
+        ..pre
+    }
+}
+
 /// Completes a (valid) page table walk and caches the resulting translation in the TLB.
 ///
 /// Note: A valid walk's result is a region whose base and size depend on the path taken. E.g. a
@@ -491,6 +512,7 @@ pub open spec fn next_step(pre: State, post: State, c: Constants, step: Step, lb
         Step::CacheEvict { core, walk }    => step_CacheEvict(pre, post, c, core, walk, lbl),
         Step::WalkInit { core, vaddr }     => step_WalkInit(pre, post, c, core, vaddr, lbl),
         Step::WalkStep { core, walk, r }   => step_WalkStep(pre, post, c, core, walk, r, lbl),
+        Step::WalkAbort { core, walk }     => step_WalkAbort(pre, post, c, core, walk, lbl),
         Step::TLBFill { core, walk, r }    => step_TLBFill(pre, post, c, core, walk, r, lbl),
         Step::TLBEvict { core, tlb_va }    => step_TLBEvict(pre, post, c, core, tlb_va, lbl),
         //Step::WalkDone { core, walk, r } => step_WalkDone(pre, post, c, core, walk, r, lbl),
@@ -651,8 +673,9 @@ pub mod refinement {
                     rl3::Step::CacheEvict { core, walk }  => rl2::Step::Stutter,
                     rl3::Step::WalkInit { core, vaddr }   => rl2::Step::WalkInit { core, vaddr },
                     rl3::Step::WalkStep { core, walk, r } => rl2::Step::WalkStep { core, walk },
+                    rl3::Step::WalkAbort { core, walk }   => rl2::Step::Stutter,
                     rl3::Step::TLBFill { core, walk, r }  => rl2::Step::TLBFill { core, walk },
-                    rl3::Step::TLBEvict { core, tlb_va }   => rl2::Step::TLBEvict { core, tlb_va },
+                    rl3::Step::TLBEvict { core, tlb_va }  => rl2::Step::TLBEvict { core, tlb_va },
                     rl3::Step::Write                      => {
                         let (core, addr, value) =
                             if let Lbl::Write(core, addr, value) = lbl {
@@ -734,6 +757,9 @@ pub mod refinement {
                 rl3::Step::WalkStep { core, walk, r } => {
                     rl3_walk_next_is_rl2_walk_next(pre, core, walk, r);
                     assert(rl2::step_WalkStep(pre.interp(), post.interp(), c, core, walk, lbl));
+                },
+                rl3::Step::WalkAbort { core, walk } => {
+                    assert(rl2::step_Stutter(pre.interp(), post.interp(), c, lbl));
                 },
                 rl3::Step::TLBFill { core, walk, r } => {
                     rl3_walk_next_is_rl2_walk_next(pre, core, walk, r);
