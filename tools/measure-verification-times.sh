@@ -6,5 +6,14 @@ source tools/activate.sh
 # display the commands
 set -x
 
+GIT_HASH=$(git rev-parse --short HEAD)
+
 # run verus
-verus --crate-type=lib page-table/src/lib.rs --rlimit 250 --cfg feature=\"impl\" --no-auto-recommends-check --time-expanded --output-json --num-threads 24
+verus --crate-type=lib  \
+      --rlimit 250 \
+      --cfg feature=\"impl\" \
+      --no-auto-recommends-check \
+      --time-expanded \
+      --output-json \
+      --num-threads 24 \
+    page-table/src/lib.rs > "verification-times-${GIT_HASH}.json"
