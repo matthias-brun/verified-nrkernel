@@ -7,4 +7,4 @@ source tools/activate.sh
 set -x
 
 # run verus
-verus --crate-type=lib page-table/src/lib.rs --rlimit 50 --cfg feature=\"impl\" --no-auto-recommends-check --time-expanded --output-json --num-threads 32
+verus --crate-type=lib page-table/src/lib.rs --rlimit 250 --cfg feature=\"impl\" --no-auto-recommends-check --time-expanded --output-json --num-threads 24
