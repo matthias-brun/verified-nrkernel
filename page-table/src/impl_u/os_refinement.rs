@@ -320,6 +320,7 @@ pub proof fn os_next_refines_hl_next(c: os::Constants, s1: os::State, s2: os::St
     next_step_refines_hl_next_step(c, s1, s2, step, lbl);
 }
 
+#[verifier(spinoff_prover)]
 proof fn next_step_refines_hl_next_step(c: os::Constants, s1: os::State, s2: os::State, step: os::Step, lbl: RLbl)
     requires
         os::next_step(c, s1, s2, step, lbl),
@@ -427,6 +428,7 @@ proof fn next_step_refines_hl_next_step(c: os::Constants, s1: os::State, s2: os:
 use crate::spec_t::hlspec::*;
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::defs::aligned;
+#[verifier(spinoff_prover)]
 proof fn step_MemOp_refines(c: os::Constants, s1: os::State, s2: os::State, core: Core, lbl: RLbl)
     requires
         s1.inv(c),
@@ -1101,6 +1103,7 @@ proof fn extra_mappings_preserved_effective_mapping_removed(
 // can go either direction:
 // either starting a Map operation that is destined to fail because of overlap
 // (thus moving Idle -> MapWaiting) or ending such an operation (MapExecution -> MapDone Err case)
+#[verifier(spinoff_prover)]
 proof fn extra_mappings_preserved_for_overlap_map(
     c: os::Constants,
     s1: os::State,

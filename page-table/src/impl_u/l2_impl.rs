@@ -2165,6 +2165,7 @@ fn is_directory_empty(Tracked(tok): Tracked<&mut WrappedUnmapToken>, Ghost(pt): 
 }
 
 /// Allocates and inserts an empty directory at the given index.
+#[verifier(spinoff_prover)]
 fn insert_empty_directory(
     Tracked(tok): Tracked<&mut WrappedMapToken>,
     Ghost(pt): Ghost<PTDir>,

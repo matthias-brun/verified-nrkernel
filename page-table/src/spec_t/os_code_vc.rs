@@ -195,6 +195,7 @@ pub proof fn lemma_concurrent_trs_during_shootdown(pre: os::State, post: os::Sta
 
 /// "What do we know about how concurrent transitions can change the state if we're holding the
 /// lock?"
+#[verifier(spinoff_prover)]
 pub proof fn lemma_concurrent_trs(pre: os::State, post: os::State, c: os::Constants, core: Core, pidx: nat)
     requires
         concurrent_trs(pre, post, c, core, pidx),

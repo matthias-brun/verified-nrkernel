@@ -82,6 +82,7 @@ pub proof fn next_preserves_inv(c: os::Constants, s1: os::State, s2: os::State, 
     next_step_preserves_inv(c, s1, s2, step, lbl);
 }
 
+#[verifier(spinoff_prover)]
 pub proof fn next_step_preserves_inv_basic(c: os::Constants, s1: os::State, s2: os::State, step: os::Step, lbl: RLbl)
     requires
         s1.inv(c),
@@ -188,6 +189,7 @@ pub proof fn next_step_preserves_inv(c: os::Constants, s1: os::State, s2: os::St
     next_step_preserves_tlb_inv(c, s1, s2, step, lbl);
 }
 
+#[verifier(spinoff_prover)]
 pub proof fn next_step_preserves_inv_mmu(c: os::Constants, s1: os::State, s2: os::State, step: os::Step, lbl: RLbl)
     requires
         s1.inv(c),
@@ -242,6 +244,7 @@ pub proof fn next_step_preserves_inv_mmu(c: os::Constants, s1: os::State, s2: os
     }
 }
 
+#[verifier(spinoff_prover)]
 pub proof fn next_step_preserves_inv_pending_maps(c: os::Constants, s1: os::State, s2: os::State, step: os::Step, lbl: RLbl)
     requires
         s1.inv(c),
@@ -404,6 +407,8 @@ pub proof fn next_step_preserves_inv_pending_maps(c: os::Constants, s1: os::Stat
     }
 }
 
+
+#[verifier(spinoff_prover)]
 pub proof fn next_step_preserves_inv_allocated_mem(c: os::Constants, s1: os::State, s2: os::State, step: os::Step, lbl: RLbl)
     requires
         s1.inv(c),
@@ -484,6 +489,7 @@ pub proof fn next_step_preserves_inv_allocated_mem(c: os::Constants, s1: os::Sta
     }
 }
 
+#[verifier(spinoff_prover)]
 pub proof fn next_step_preserves_inv_impl(c: os::Constants, s1: os::State, s2: os::State, step: os::Step, lbl: RLbl)
     requires
         s1.inv_mmu(c),
@@ -498,6 +504,7 @@ pub proof fn next_step_preserves_inv_impl(c: os::Constants, s1: os::State, s2: o
         to_rl1::next_refines;
 }
 
+#[verifier(spinoff_prover)]
 pub proof fn next_step_preserves_inv_shootdown(c: os::Constants, s1: os::State, s2: os::State, step: os::Step, lbl: RLbl)
     requires
         s1.inv(c),
@@ -511,6 +518,7 @@ pub proof fn next_step_preserves_inv_shootdown(c: os::Constants, s1: os::State, 
         to_rl1::next_refines;
 }
 
+#[verifier(spinoff_prover)]
 pub proof fn next_step_preserves_inv_writes(c: os::Constants, s1: os::State, s2: os::State, step: os::Step, lbl: RLbl)
     requires
         s1.inv(c),
@@ -824,6 +832,7 @@ pub proof fn next_step_preserves_tlb_inv(
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Proof of overlapping virtual memory Invariants
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#[verifier(spinoff_prover)]
 pub proof fn next_step_preserves_overlap_mem_inv(
     c: os::Constants,
     s1: os::State,
@@ -1173,6 +1182,7 @@ pub proof fn next_step_preserves_overlap_mem_inv(
     }
 }
 
+#[verifier(spinoff_prover)]
 pub proof fn step_MapNoOp_and_step_MapOpChange_preserves_overlap_mem_inv(
     c: os::Constants,
     s1: os::State,
@@ -1457,6 +1467,7 @@ pub proof fn lemma_unique_and_overlap_values_implies_overlap_vmem(
 //    assert(no_overlap_vmem_values(core_states.insert(core, os::CoreState::Idle), pt));
 //}
 
+#[verifier(spinoff_prover)]
 pub proof fn lemma_insert_preserves_no_overlap(
     c: os::Constants,
     core_states: Map<Core, os::CoreState>,
@@ -2010,6 +2021,7 @@ pub proof fn lemma_candidate_mapping_inflight_pmem_overlap_os_implies_hl(
     };
 }
 
+#[verifier(spinoff_prover)]
 pub proof fn lemma_candidate_mapping_inflight_pmem_overlap_hl_implies_os(
     c: os::Constants,
     s: os::State,

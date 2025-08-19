@@ -807,6 +807,7 @@ proof fn next_step_preserves_inv_unmapping(pre: State, post: State, c: Constants
     next_step_preserves_inv_unmapping__notin_nonpos(pre, post, c, step, lbl);
 }
 
+#[verifier(spinoff_prover)]
 proof fn next_step_preserves_inv_unmapping__valid_walk(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
     requires
         pre.wf(c),
@@ -1623,7 +1624,7 @@ proof fn next_step_preserves_inv_mapping__inflight_walks(pre: State, post: State
     }
 }
 
-
+#[verifier(spinoff_prover)]
 proof fn next_step_preserves_inv_sbuf_facts(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
     requires
         pre.happy,
@@ -2305,6 +2306,7 @@ proof fn lemma_iter_walk_result_vbase_equal_aux1(mem: PTMem, vaddr: usize)
 }
 
 // unstable
+#[verifier(spinoff_prover)]
 proof fn lemma_iter_walk_result_vbase_equal_aux2(mem: PTMem, vaddr: usize)
     ensures
         iter_walk(mem, iter_walk(mem, vaddr).result().vaddr()).result().vaddr() == iter_walk(mem, vaddr).result().vaddr(),

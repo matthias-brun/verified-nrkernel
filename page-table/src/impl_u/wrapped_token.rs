@@ -73,6 +73,7 @@ impl WrappedTokenView {
         forall|r| self.regions.contains_key(r) ==> #[trigger] self.regions[r] == Seq::new(512, |i: int| self.pt_mem.mem[(r.base + i * 8) as usize])
     }
 
+    #[verifier(spinoff_prover)]
     pub proof fn lemma_interps_match_aux1(self, pt: PTDir)
         requires
             PT::inv(self, pt),
@@ -679,6 +680,7 @@ impl WrappedMapToken {
         res & MASK_NEG_DIRTY_ACCESS
     }
 
+    #[verifier(spinoff_prover)]
     pub exec fn write_stutter(
         Tracked(tok): Tracked<&mut Self>,
         pbase: usize,
@@ -747,6 +749,7 @@ impl WrappedMapToken {
         }
     }
 
+    #[verifier(spinoff_prover)]
     pub exec fn write_change(
         Tracked(tok): Tracked<&mut Self>,
         pbase: usize,
@@ -1258,6 +1261,7 @@ impl WrappedUnmapToken {
         res & MASK_NEG_DIRTY_ACCESS
     }
 
+    #[verifier(spinoff_prover)]
     pub exec fn write_stutter(
         Tracked(tok): Tracked<&mut Self>,
         pbase: usize,
@@ -1326,6 +1330,7 @@ impl WrappedUnmapToken {
         }
     }
 
+    #[verifier(spinoff_prover)]
     pub exec fn write_change(
         Tracked(tok): Tracked<&mut Self>,
         pbase: usize,
@@ -1474,6 +1479,7 @@ impl WrappedUnmapToken {
     }
 
     /// Completes the remaining unmap transitions and performs a shootdown if necessary.
+    #[verifier(spinoff_prover)]
     pub exec fn finish_unmap_and_release_lock(Tracked(tok): Tracked<WrappedUnmapToken>, shootdown: DoShootdown, Ghost(root_pt): Ghost<PTDir>) -> (rtok: Tracked<Token>)
         requires
             (if shootdown is Yes {
