@@ -807,7 +807,9 @@ proof fn next_step_preserves_inv_unmapping(pre: State, post: State, c: Constants
     next_step_preserves_inv_unmapping__notin_nonpos(pre, post, c, step, lbl);
 }
 
-proof fn next_step_preserves_inv_unmapping__valid_walk(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
+mod proof_next_step_preserves_inv_unmapping__valid_walk {
+    use super::*;
+pub proof fn next_step_preserves_inv_unmapping__valid_walk(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
     requires
         pre.wf(c),
         pre.happy,
@@ -876,6 +878,10 @@ proof fn next_step_preserves_inv_unmapping__valid_walk(pre: State, post: State, 
         _ => assert(post.inv_unmapping__valid_walk(c)),
     }
 }
+
+}
+#[cfg(verus_keep_ghost)]
+use proof_next_step_preserves_inv_unmapping__valid_walk::next_step_preserves_inv_unmapping__valid_walk;
 
 // broadcast proof fn lemma_mapping__pt_walk_valid_in_pre_unchanged(pre: State, post: State, c: Constants, step: Step, lbl: Lbl, va: usize)
 //     requires
@@ -1014,10 +1020,13 @@ proof fn next_step_preserves_inv_unmapping__inflight_walks(pre: State, post: Sta
     }
 }
 
+
 /// Structure of this lemma is very similar to
 /// `step_Writeback_preserves_inv_unmapping__inflight_walks`.
+mod proof_step_WriteNonpos_preserves_inv_unmapping__inflight_walks {
+    use super::*;
 #[verifier(spinoff_prover)]
-proof fn step_WriteNonpos_preserves_inv_unmapping__inflight_walks(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
+pub proof fn step_WriteNonpos_preserves_inv_unmapping__inflight_walks(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
     requires
         step is WriteNonpos,
         pre.wf(c),
@@ -1180,6 +1189,10 @@ proof fn step_WriteNonpos_preserves_inv_unmapping__inflight_walks(pre: State, po
     };
 }
 
+}
+#[cfg(verus_keep_ghost)]
+use proof_step_WriteNonpos_preserves_inv_unmapping__inflight_walks::step_WriteNonpos_preserves_inv_unmapping__inflight_walks;
+
 proof fn lemma_step_Writeback_post_valid_pt_walk_not_wraddr_in_path(pre: State, post: State, c: Constants, lbl: Lbl, core: Core, vaddr: usize)
     requires
         pre.happy,
@@ -1248,10 +1261,12 @@ proof fn lemma_finish_iter_walk_invalid_after_nonpos_write(mem: PTMem, c: Consta
 }
 
 
+pub mod proof_step_Writeback_preserves_inv_unmapping__inflight_walks {
+    use super::*;
 /// Structure of this lemma is very similar to
 /// `step_WriteNonpos_preserves_inv_unmapping__inflight_walks`.
 #[verifier::rlimit(100)] #[verifier(spinoff_prover)]
-proof fn step_Writeback_preserves_inv_unmapping__inflight_walks(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
+pub proof fn step_Writeback_preserves_inv_unmapping__inflight_walks(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
     requires
         step is Writeback,
         pre.wf(c),
@@ -1396,6 +1411,10 @@ proof fn step_Writeback_preserves_inv_unmapping__inflight_walks(pre: State, post
     assert(post.inv_unmapping__inflight_walks(c));
 }
 
+}
+#[cfg(verus_keep_ghost)]
+use proof_step_Writeback_preserves_inv_unmapping__inflight_walks::step_Writeback_preserves_inv_unmapping__inflight_walks;
+
 broadcast proof fn lemma_finish_iter_walk_prefix_matches_iter_walk(pre: State, core: Core, walk: Walk)
     requires
         is_iter_walk_prefix(pre.core_mem(core), walk),
@@ -1507,8 +1526,10 @@ proof fn next_step_preserves_wf(pre: State, post: State, c: Constants, step: Ste
     assert(post.pt_mem.mem.dom() =~= pre.pt_mem.mem.dom());
 }
 
+pub mod proof_next_step_preserves_inv_mapping__inflight_walks {
+    use super::*;
 #[verifier::rlimit(100)] #[verifier(spinoff_prover)]
-proof fn next_step_preserves_inv_mapping__inflight_walks(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
+pub proof fn next_step_preserves_inv_mapping__inflight_walks(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
     requires
         pre.wf(c),
         pre.happy,
@@ -1623,6 +1644,9 @@ proof fn next_step_preserves_inv_mapping__inflight_walks(pre: State, post: State
     }
 }
 
+}
+#[cfg(verus_keep_ghost)]
+use proof_next_step_preserves_inv_mapping__inflight_walks::next_step_preserves_inv_mapping__inflight_walks;
 
 proof fn next_step_preserves_inv_sbuf_facts(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
     requires

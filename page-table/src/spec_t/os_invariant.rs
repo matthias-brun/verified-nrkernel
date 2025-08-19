@@ -82,6 +82,9 @@ pub proof fn next_preserves_inv(c: os::Constants, s1: os::State, s2: os::State, 
     next_step_preserves_inv(c, s1, s2, step, lbl);
 }
 
+#[cfg(verus_keep_ghost)]
+pub mod proof_next_step_preserves_inv_basic {
+    use super::*;
 pub proof fn next_step_preserves_inv_basic(c: os::Constants, s1: os::State, s2: os::State, step: os::Step, lbl: RLbl)
     requires
         s1.inv(c),
@@ -150,6 +153,10 @@ pub proof fn next_step_preserves_inv_basic(c: os::Constants, s1: os::State, s2: 
         };
     };
 }
+}
+#[cfg(verus_keep_ghost)]
+pub use proof_next_step_preserves_inv_basic::next_step_preserves_inv_basic;
+
 
 #[verifier::rlimit(100)] #[verifier(spinoff_prover)]
 pub proof fn next_step_preserves_inv(c: os::Constants, s1: os::State, s2: os::State, step: os::Step, lbl: RLbl)
@@ -188,6 +195,9 @@ pub proof fn next_step_preserves_inv(c: os::Constants, s1: os::State, s2: os::St
     next_step_preserves_tlb_inv(c, s1, s2, step, lbl);
 }
 
+#[cfg(verus_keep_ghost)]
+pub mod proof_next_step_preserves_inv_mmu {
+    use super::*;
 pub proof fn next_step_preserves_inv_mmu(c: os::Constants, s1: os::State, s2: os::State, step: os::Step, lbl: RLbl)
     requires
         s1.inv(c),
@@ -242,6 +252,12 @@ pub proof fn next_step_preserves_inv_mmu(c: os::Constants, s1: os::State, s2: os
     }
 }
 
+}
+#[cfg(verus_keep_ghost)]
+pub use proof_next_step_preserves_inv_mmu::next_step_preserves_inv_mmu;
+
+pub mod proof_next_step_preserves_inv_pending_maps {
+    use super::*;
 pub proof fn next_step_preserves_inv_pending_maps(c: os::Constants, s1: os::State, s2: os::State, step: os::Step, lbl: RLbl)
     requires
         s1.inv(c),
@@ -404,6 +420,12 @@ pub proof fn next_step_preserves_inv_pending_maps(c: os::Constants, s1: os::Stat
     }
 }
 
+}
+#[cfg(verus_keep_ghost)]
+pub use proof_next_step_preserves_inv_pending_maps::next_step_preserves_inv_pending_maps;
+
+pub mod proof_next_step_preserves_inv_allocated_mem {
+    use super::*;
 pub proof fn next_step_preserves_inv_allocated_mem(c: os::Constants, s1: os::State, s2: os::State, step: os::Step, lbl: RLbl)
     requires
         s1.inv(c),
@@ -484,6 +506,10 @@ pub proof fn next_step_preserves_inv_allocated_mem(c: os::Constants, s1: os::Sta
     }
 }
 
+}
+#[cfg(verus_keep_ghost)]
+pub use proof_next_step_preserves_inv_allocated_mem::next_step_preserves_inv_allocated_mem;
+
 pub proof fn next_step_preserves_inv_impl(c: os::Constants, s1: os::State, s2: os::State, step: os::Step, lbl: RLbl)
     requires
         s1.inv_mmu(c),
@@ -555,6 +581,9 @@ pub proof fn init_implies_tlb_inv(c: os::Constants, s: os::State)
     assert(s.TLB_dom_subset_of_pt_and_inflight_unmap_vaddr(c));
 }
 
+
+pub mod proof_next_step_preserves_tlb_inv {
+    use super::*;
 #[verifier::spinoff_prover]
 pub proof fn next_step_preserves_tlb_inv(
     c: os::Constants,
@@ -821,9 +850,15 @@ pub proof fn next_step_preserves_tlb_inv(
     }
 }
 
+}
+#[cfg(verus_keep_ghost)]
+pub use proof_next_step_preserves_tlb_inv::next_step_preserves_tlb_inv;
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Proof of overlapping virtual memory Invariants
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+pub mod proof_next_step_preserves_overlap_mem_inv {
+    use super::*;
 pub proof fn next_step_preserves_overlap_mem_inv(
     c: os::Constants,
     s1: os::State,
@@ -1172,6 +1207,10 @@ pub proof fn next_step_preserves_overlap_mem_inv(
         }
     }
 }
+}
+#[cfg(verus_keep_ghost)]
+pub use proof_next_step_preserves_overlap_mem_inv::next_step_preserves_overlap_mem_inv;
+
 
 pub proof fn step_MapNoOp_and_step_MapOpChange_preserves_overlap_mem_inv(
     c: os::Constants,
@@ -1457,6 +1496,8 @@ pub proof fn lemma_unique_and_overlap_values_implies_overlap_vmem(
 //    assert(no_overlap_vmem_values(core_states.insert(core, os::CoreState::Idle), pt));
 //}
 
+pub mod proof_lemma_insert_preserves_no_overlap {
+use super::*;
 pub proof fn lemma_insert_preserves_no_overlap(
     c: os::Constants,
     core_states: Map<Core, os::CoreState>,
@@ -1523,6 +1564,10 @@ pub proof fn lemma_insert_preserves_no_overlap(
         }
     }
 }
+
+}
+#[cfg(verus_keep_ghost)]
+pub use proof_lemma_insert_preserves_no_overlap::lemma_insert_preserves_no_overlap;
 
 pub proof fn lemma_insert_no_overlap_preserves_no_overlap(
     c: os::Constants,
@@ -2010,6 +2055,9 @@ pub proof fn lemma_candidate_mapping_inflight_pmem_overlap_os_implies_hl(
     };
 }
 
+#[cfg(verus_keep_ghost)]
+pub mod proof_lemma_candidate_mapping_inflight_pmem_overlap_hl_implies_os {
+use super::*;
 pub proof fn lemma_candidate_mapping_inflight_pmem_overlap_hl_implies_os(
     c: os::Constants,
     s: os::State,
@@ -2112,6 +2160,10 @@ pub proof fn lemma_candidate_mapping_inflight_pmem_overlap_hl_implies_os(
         }
     };
 }
+
+}
+#[cfg(verus_keep_ghost)]
+pub use proof_lemma_candidate_mapping_inflight_pmem_overlap_hl_implies_os::lemma_candidate_mapping_inflight_pmem_overlap_hl_implies_os;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // usefull lemmata about maps

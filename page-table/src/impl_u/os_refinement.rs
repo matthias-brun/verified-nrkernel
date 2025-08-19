@@ -320,7 +320,11 @@ pub proof fn os_next_refines_hl_next(c: os::Constants, s1: os::State, s2: os::St
     next_step_refines_hl_next_step(c, s1, s2, step, lbl);
 }
 
-proof fn next_step_refines_hl_next_step(c: os::Constants, s1: os::State, s2: os::State, step: os::Step, lbl: RLbl)
+#[cfg(verus_keep_ghost)]
+mod proof_next_step_refines_hl_next_step {
+    use super::*;
+
+pub proof fn next_step_refines_hl_next_step(c: os::Constants, s1: os::State, s2: os::State, step: os::Step, lbl: RLbl)
     requires
         os::next_step(c, s1, s2, step, lbl),
         s1.inv(c),
@@ -424,7 +428,13 @@ proof fn next_step_refines_hl_next_step(c: os::Constants, s1: os::State, s2: os:
     }
 }
 
+}
+#[cfg(verus_keep_ghost)]
+use proof_next_step_refines_hl_next_step::next_step_refines_hl_next_step;
+
 use crate::spec_t::hlspec::*;
+
+
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::defs::aligned;
 proof fn step_MemOp_refines(c: os::Constants, s1: os::State, s2: os::State, core: Core, lbl: RLbl)
