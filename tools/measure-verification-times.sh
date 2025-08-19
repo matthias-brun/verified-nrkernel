@@ -10,10 +10,10 @@ GIT_HASH=$(git rev-parse --short HEAD)
 
 # run verus
 verus --crate-type=lib  \
-      --rlimit 250 \
+      --rlimit 50 \
       --cfg feature=\"impl\" \
       --no-auto-recommends-check \
       --time-expanded \
       --output-json \
-      --num-threads 24 \
+      --num-threads 32 \
     page-table/src/lib.rs > "verification-times-${GIT_HASH}.json"
