@@ -884,7 +884,9 @@ pub mod code {
     use crate::theorem::TokState;
     #[cfg(verus_keep_ghost)]
     use crate::spec_t::mmu::defs::{ aligned };
-    // use core::arch::asm;
+
+    #[cfg(feature="linuxmodule")]
+    use core::arch::asm;
 
 
     // Note:
