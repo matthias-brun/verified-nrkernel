@@ -1,4 +1,5 @@
 use vstd::prelude::*;
+use vstd::assert_by_contradiction;
 use crate::spec_t::mmu::*;
 use crate::spec_t::mmu::pt_mem::*;
 #[cfg(verus_keep_ghost)]
@@ -6,6 +7,7 @@ use crate::spec_t::mmu::defs::{ aligned, LoadResult, update_range, MAX_BASE };
 use crate::spec_t::mmu::defs::{ PTE, Core };
 use crate::spec_t::mmu::rl3::{ Writes };
 use crate::spec_t::mmu::translation::{ MASK_NEG_DIRTY_ACCESS };
+
 
 verus! {
 
@@ -75,16 +77,6 @@ impl State {
         &&& self.writes.tso === set![]
         &&& self.writes.nonpos === set![]
     }
-
-    //pub open spec fn wf(self, c: Constants) -> bool {
-    //    true
-    //}
-    //
-    //pub open spec fn inv(self, c: Constants) -> bool {
-    //    self.happy ==> {
-    //    &&& self.wf(c)
-    //    }
-    //}
 }
 
 // ---- Mixed (relevant to multiple of TSO/Cache/Non-Atomic) ----
@@ -185,6 +177,7 @@ pub open spec fn step_MemOpTLB(
     &&& post.writes == pre.writes
     &&& post.pending_maps == pre.pending_maps
     &&& post.pending_unmaps == pre.pending_unmaps
+    &&& post.polarity == pre.polarity
 }
 
 // ---- Non-atomic page table walks ----
@@ -197,6 +190,7 @@ pub open spec fn step_TLBFill(pre: State, post: State, c: Constants, core: Core,
     &&& c.valid_core(core)
     &&& vaddr < MAX_BASE
     &&& pre.pt_mem.pt_walk(vaddr).result() matches WalkResult::Valid { vbase, pte }
+    &&& !pre.tlbs[core].contains_key(vbase)
 
     &&& post == State {
         tlbs: pre.tlbs.insert(core, pre.tlbs[core].insert(vbase, pte)),
@@ -227,6 +221,7 @@ pub open spec fn step_TLBFillNA(pre: State, post: State, c: Constants, core: Cor
     &&& c.valid_core(core)
     &&& pre.writes.nonpos.contains(core)
     &&& pre.pending_unmaps.contains_key(vaddr)
+    &&& !pre.tlbs[core].contains_key(vaddr)
 
     &&& post == State {
         tlbs: pre.tlbs.insert(core, pre.tlbs[core].insert(vaddr, pte)),
@@ -380,17 +375,383 @@ pub open spec fn init(pre: State, c: Constants) -> bool {
     &&& c.in_ptmem_range(pre.pt_mem.pml4 as nat, 4096)
 }
 
-//proof fn init_implies_inv(pre: State, c: Constants)
-//    requires init(pre, c)
-//    ensures pre.inv(c)
-//{}
-//
-//proof fn next_step_preserves_inv(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
-//    requires
-//        pre.inv(c),
-//        next_step(pre, post, c, step, lbl),
-//    ensures post.inv(c)
-//{}
+
+
+impl State {
+    pub open spec fn wf(self, c: Constants) -> bool {
+        &&& c.valid_core(self.writes.core)
+        &&& self.writes.tso.finite()
+
+        // &&& aligned(self.pt_mem.pml4 as nat, 4096)
+        // &&& c.in_ptmem_range(self.pt_mem.pml4 as nat, 4096)
+        // &&& c.memories_disjoint()
+        //&&& self.phys_mem.len() == c.range_mem.1
+        // &&& self.wf_ptmem_range(c)
+    }
+
+    pub open spec fn inv_mapping(self, c: Constants) -> bool {
+        &&& self.pending_unmaps === map![]
+    }
+
+    pub open spec fn inv_unmapping(self, c: Constants) -> bool {
+        &&& self.pending_maps === map![]
+        &&& forall|va| #[trigger] self.pending_unmaps.contains_key(va) ==> !self.pt_mem@.contains_key(va)
+        &&& forall|core| #[trigger] c.valid_core(core) && !self.writes.nonpos.contains(core)
+        ==> !self.pt_mem@.contains_key(va)
+    }
+
+    pub open spec fn inv_tlb_entry_is_in_mem_or_pending_unmaps(self, c: Constants) -> bool {
+        forall|va, core| c.valid_core(core) && #[trigger] self.tlbs[core].contains_key(va) ==> {
+            let pte = self.tlbs[core][va];
+            self.pt_mem@.contains_pair(va, pte) || self.pending_unmaps.contains_pair(va, pte)
+        }
+    }
+
+    pub open spec fn inv(self, c: Constants) -> bool {
+       self.happy ==> {
+       &&& self.wf(c)
+       &&& self.inv_tlb_entry_is_in_mem_or_pending_unmaps(c)
+       &&& self.polarity is Mapping ==> self.inv_mapping(c)
+       &&& self.polarity is Unmapping ==> self.inv_unmapping(c)
+       }
+    }
+}
+
+proof fn init_implies_inv(pre: State, c: Constants)
+   requires init(pre, c)
+   ensures pre.inv(c)
+{}
+
+pub proof fn next_preserves_inv(pre: State, post: State, c: Constants, lbl: Lbl)
+    requires
+        pre.inv(c),
+        next(pre, post, c, lbl),
+    ensures post.inv(c)
+{
+    let step = choose|step| next_step(pre, post, c, step, lbl);
+    next_step_preserves_inv(pre, post, c, step, lbl);
+}
+
+proof fn next_step_preserves_inv(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
+   requires
+       pre.inv(c),
+       next_step(pre, post, c, step, lbl),
+   ensures post.inv(c)
+{
+    if pre.happy && post.happy {
+        assert(post.wf(c));
+        if post.polarity is Mapping {
+            if pre.polarity is Unmapping { // Flipped polarity in this transition
+                assert(step is WriteNonneg);
+                assert(pre.can_flip_polarity(c));
+                assert(post.wf(c));
+                // TODO: switching invariant
+                assume(pre.pending_unmaps === map![]);
+                assert(post.inv_mapping(c));
+            }
+        } else {
+            if pre.polarity is Mapping { // Flipped polarity in this transition
+                // TODO: switching invariant
+                assume(pre.pending_maps === map![]);
+            } else {
+                // TODO: can probably lift from rl1
+                assume(post.pt_mem@.submap_of(pre.pt_mem@));
+                assert(post.inv_unmapping(c));
+            }
+        }
+        next_step_preserves_inv_tlb_entry_is_in_mem_or_pending_unmaps(pre, post, c, step, lbl);
+    } else {
+    }
+}
+
+proof fn next_step_preserves_inv_tlb_entry_is_in_mem_or_pending_unmaps(
+    pre: State,
+    post: State,
+    c: Constants,
+    step: Step,
+    lbl: Lbl
+)
+   requires
+       pre.inv(c),
+       post.wf(c),
+       post.polarity is Mapping ==> post.inv_mapping(c),
+       post.polarity is Unmapping ==> post.inv_unmapping(c),
+       pre.happy,
+       post.happy,
+       next_step(pre, post, c, step, lbl),
+   ensures post.inv_tlb_entry_is_in_mem_or_pending_unmaps(c)
+{
+    assert(pre.inv_tlb_entry_is_in_mem_or_pending_unmaps(c));
+    match step {
+        rl1::Step::Invlpg => {
+            assume(post.inv_tlb_entry_is_in_mem_or_pending_unmaps(c));
+        },
+        rl1::Step::MemOpNoTr => {
+            assert(post.inv_tlb_entry_is_in_mem_or_pending_unmaps(c));
+        },
+        rl1::Step::MemOpNoTrNA { vbase } => {
+            assert(post.inv_tlb_entry_is_in_mem_or_pending_unmaps(c));
+        },
+        rl1::Step::MemOpTLB { tlb_va } => {
+            assert(post.inv_tlb_entry_is_in_mem_or_pending_unmaps(c));
+        },
+        rl1::Step::TLBFill { core, vaddr } => {
+            assert(pre.pt_mem.pt_walk(vaddr).result() matches WalkResult::Valid { vbase, pte });
+            let vbase = pre.pt_mem.pt_walk(vaddr).result()->Valid_vbase;
+            assume(pre.pt_mem.pt_walk(vaddr).result() == pre.pt_mem.pt_walk(vbase).result());
+            assert forall|va, core| c.valid_core(core) && #[trigger] post.tlbs[core].contains_key(va) implies {
+                let pte = post.tlbs[core][va];
+                post.pt_mem@.contains_pair(va, pte) || post.pending_unmaps.contains_pair(va, pte)
+            } by {
+                let pte = post.tlbs[core][va];
+                // assume(post.pt_mem@.submap_of(pre.pt_mem@));
+                assume(post.pt_mem@.contains_key(va));
+                assume(post.pt_mem@.contains_pair(va, pte));
+            };
+            assert(post.inv_tlb_entry_is_in_mem_or_pending_unmaps(c));
+        },
+        rl1::Step::TLBFillNA { .. } => {
+            assert(post.inv_tlb_entry_is_in_mem_or_pending_unmaps(c));
+        },
+        rl1::Step::TLBEvict { core, tlb_va } => {
+            assert(post.inv_tlb_entry_is_in_mem_or_pending_unmaps(c));
+        },
+        rl1::Step::WriteNonneg => {
+            assume(pre.pt_mem@.submap_of(post.pt_mem@));
+            assert(post.inv_tlb_entry_is_in_mem_or_pending_unmaps(c));
+        },
+        rl1::Step::WriteNonpos => {
+            assume(post.pt_mem@.submap_of(pre.pt_mem@));
+            assert(post.inv_tlb_entry_is_in_mem_or_pending_unmaps(c));
+        },
+        rl1::Step::Read => {
+            assert(post.inv_tlb_entry_is_in_mem_or_pending_unmaps(c));
+        },
+        rl1::Step::Barrier => {
+            assert(post.inv_tlb_entry_is_in_mem_or_pending_unmaps(c));
+        },
+        rl1::Step::SadWrite => {
+            assert(post.inv_tlb_entry_is_in_mem_or_pending_unmaps(c));
+        },
+        rl1::Step::Sadness => {
+            assert(post.inv_tlb_entry_is_in_mem_or_pending_unmaps(c));
+        },
+        rl1::Step::Stutter => {
+            assert(post.inv_tlb_entry_is_in_mem_or_pending_unmaps(c));
+        },
+    }
+}
+
+
+
+pub mod refinement {
+    // use vstd::assert_by_contradiction;
+
+    use crate::spec_t::mmu::*;
+    use crate::spec_t::mmu::rl0;
+    use crate::spec_t::mmu::rl1;
+    // #[cfg(verus_keep_ghost)]
+    // use crate::spec_t::mmu::defs::MAX_BASE;
+
+    impl rl1::State {
+        pub open spec fn interp(self) -> rl0::State {
+            rl0::State {
+                happy: self.happy,
+                pt_mem: self.pt_mem,
+                phys_mem: self.phys_mem,
+                writes: self.writes,
+                pending_maps: self.pending_maps,
+                pending_unmaps: self.pending_unmaps,
+                polarity: self.polarity,
+            }
+        }
+    }
+
+    impl rl1::Step {
+        pub open spec fn interp(self, pre: rl1::State, lbl: Lbl) -> rl0::Step {
+            match self {
+                rl1::Step::Invlpg => rl0::Step::Invlpg,
+                rl1::Step::MemOpNoTr => rl0::Step::MemOpNoTr,
+                rl1::Step::MemOpNoTrNA { vbase } => rl0::Step::MemOpNoTrNA { vbase },
+                rl1::Step::MemOpTLB { tlb_va } => {
+                    if pre.pending_unmaps.contains_key(tlb_va) {
+                        rl0::Step::MemOpNA { vbase: tlb_va }
+                    } else {
+                        rl0::Step::MemOp { vbase: tlb_va }
+                    }
+                },
+                rl1::Step::TLBFill { .. } => rl0::Step::Stutter,
+                rl1::Step::TLBFillNA { .. } => rl0::Step::Stutter,
+                rl1::Step::TLBEvict { .. } => rl0::Step::Stutter,
+                rl1::Step::WriteNonneg => rl0::Step::WriteNonneg,
+                rl1::Step::WriteNonpos => rl0::Step::WriteNonpos,
+                rl1::Step::Read => rl0::Step::Read,
+                rl1::Step::Barrier => rl0::Step::Barrier,
+                rl1::Step::SadWrite => rl0::Step::SadWrite,
+                rl1::Step::Sadness => rl0::Step::Sadness,
+                rl1::Step::Stutter => rl0::Step::Stutter,
+            }
+        }
+    }
+
+    proof fn next_step_refines(pre: rl1::State, post: rl1::State, c: rl1::Constants, step: rl1::Step, lbl: Lbl)
+        requires
+            pre.inv(c),
+            rl1::next_step(pre, post, c, step, lbl),
+        ensures rl0::next_step(pre.interp(), post.interp(), c, step.interp(pre, lbl), lbl)
+    {
+        match step {
+            rl1::Step::Invlpg => {
+                assert(rl0::step_Invlpg(pre.interp(), post.interp(), c, lbl));
+            },
+            rl1::Step::MemOpNoTr => {
+                assert(rl0::step_MemOpNoTr(pre.interp(), post.interp(), c, lbl));
+            },
+            rl1::Step::MemOpNoTrNA { vbase } => {
+                assert(rl0::step_MemOpNoTrNA(pre.interp(), post.interp(), c, vbase, lbl));
+            },
+            rl1::Step::MemOpTLB { tlb_va } => {
+                next_step_MemOpTLB_refines(pre, post, c, step, lbl);
+                if pre.pending_unmaps.contains_key(tlb_va) {
+                    assert(rl0::step_MemOpNA(pre.interp(), post.interp(), c, tlb_va, lbl));
+                } else {
+                    assert(rl0::step_MemOp(pre.interp(), post.interp(), c, tlb_va, lbl));
+                }
+            },
+            rl1::Step::TLBFill { .. } => {
+                assert(rl0::step_Stutter(pre.interp(), post.interp(), c, lbl));
+            },
+            rl1::Step::TLBFillNA { .. } => {
+                assert(rl0::step_Stutter(pre.interp(), post.interp(), c, lbl));
+            },
+            rl1::Step::TLBEvict { .. } => {
+                assert(rl0::step_Stutter(pre.interp(), post.interp(), c, lbl));
+            },
+            rl1::Step::WriteNonneg => {
+                assert(rl0::step_WriteNonneg(pre.interp(), post.interp(), c, lbl));
+            },
+            rl1::Step::WriteNonpos => {
+                assert(rl0::step_WriteNonpos(pre.interp(), post.interp(), c, lbl));
+            },
+            rl1::Step::Read => {
+                assert(rl0::step_Read(pre.interp(), post.interp(), c, lbl));
+            },
+            rl1::Step::Barrier => {
+                assert(rl0::step_Barrier(pre.interp(), post.interp(), c, lbl));
+            },
+            rl1::Step::SadWrite => {
+                assert(rl0::step_SadWrite(pre.interp(), post.interp(), c, lbl));
+            },
+            rl1::Step::Sadness => {
+                assert(rl0::step_Sadness(pre.interp(), post.interp(), c, lbl));
+            },
+            rl1::Step::Stutter => {
+                assert(rl0::step_Stutter(pre.interp(), post.interp(), c, lbl));
+            },
+        }
+    }
+
+    proof fn next_step_MemOpTLB_refines(pre: rl1::State, post: rl1::State, c: rl1::Constants, step: rl1::Step, lbl: Lbl)
+        requires
+            step is MemOpTLB,
+            pre.happy,
+            pre.inv(c),
+            rl1::next_step(pre, post, c, step, lbl),
+        ensures rl0::next_step(pre.interp(), post.interp(), c, step.interp(pre, lbl), lbl)
+    {
+        let (core, memop_vaddr, memop) = if let Lbl::MemOp(core, vaddr, memop) = lbl {
+                (core, vaddr, memop)
+            } else { arbitrary() };
+        let tlb_va = step->MemOpTLB_tlb_va;
+        let pte = pre.tlbs[core][tlb_va];
+        assert(pre.tlbs[core].contains_pair(tlb_va, pte));
+
+        assert(c.valid_core(core));
+        // assume(forall|va, pte, core| #[trigger] pre.tlbs[core].contains_pair(va, pte)
+        //     ==> pre.pt_mem@.contains_pair(va, pte) || pre.pending_unmaps.contains_pair(va, pte)
+        //     );
+        if pre.pending_unmaps.contains_key(tlb_va) {
+            // assume(pre.polarity is Unmapping);
+            // Unmapping polarity -> Unmapped entry isn't in PT anymore
+            // assume(forall|va| #[trigger] pre.pending_unmaps.contains_key(va) ==> !pre.pt_mem@.contains_key(va));
+            assert(pre.pending_unmaps.contains_pair(tlb_va, pte));
+            assert(rl0::step_MemOpNA(pre.interp(), post.interp(), c, tlb_va, lbl));
+        } else {
+            assert(pre.pt_mem@.contains_pair(tlb_va, pte));
+            assert(rl0::step_MemOp(pre.interp(), post.interp(), c, tlb_va, lbl));
+        }
+        // let walk = step->MemOpTLB_walk;
+        // let (core, memop_vaddr, memop) = if let Lbl::MemOp(core, vaddr, memop) = lbl {
+        //         (core, vaddr, memop)
+        //     } else { arbitrary() };
+        // let core_mem = pre.core_mem(core);
+        // let writer_mem = pre.writer_mem();
+        // let walk_na = rl2::walk_next(pre.core_mem(core), walk);
+        //
+        // rl2::lemma_iter_walk_equals_pt_walk(core_mem, walk.vaddr);
+        // rl2::lemma_iter_walk_equals_pt_walk(writer_mem, walk.vaddr);
+        //
+        // if pre.polarity is Mapping {
+        //     assert(forall|i| 0 <= i < walk.path.len() ==> walk_na.path[i] == walk.path[i]) by {
+        //         reveal(rl2::walk_next);
+        //     };
+        //     assert(walk_na.result() is Invalid);
+        //
+        //     // This walk has the same result if done on the same core but atomically.
+        //     let walk_a_same_core = rl2::iter_walk(core_mem, walk.vaddr);
+        //     assert(walk_a_same_core == walk_na);
+        //
+        //     // The atomic walk on this core is the same as an atomic walk on the writer's view
+        //     // of the memory. (Or if not, it's in a region in `pre.pending_maps`.)
+        //     let walk_a_writer_core = rl2::iter_walk(writer_mem, walk.vaddr);
+        //
+        //     assert(walk_a_writer_core == writer_mem.pt_walk(walk.vaddr));
+        //
+        //     if pre.pending_map_for(walk.vaddr) {
+        //         let vb = choose|vb| {
+        //             &&& #[trigger] pre.hist.pending_maps.contains_key(vb)
+        //             &&& vb <= walk.vaddr < vb + pre.hist.pending_maps[vb].frame.size
+        //         };
+        //         pre.interp().pending_maps.contains_key(vb);
+        //         assert(rl1::step_MemOpNoTrNA(pre.interp(), post.interp(), c, vb, lbl));
+        //     } else {
+        //         if core == pre.writes.core {
+        //             // If the walk happens on the writer core, the two atomic walks are done on the same
+        //             // memory, i.e. are trivially equal.
+        //             assert(walk_a_writer_core == walk_a_same_core);
+        //             assert(rl1::step_MemOpNoTr(pre.interp(), post.interp(), c, lbl));
+        //         } else {
+        //             rl2::lemma_valid_implies_equal_walks(pre, c, core, walk.vaddr);
+        //             assert forall|va: usize| va < MAX_BASE && writer_mem.pt_walk(va).result() is Valid && !pre.pending_map_for(va)
+        //                 implies #[trigger] core_mem.pt_walk(va).result() == writer_mem.pt_walk(va).result()
+        //             by { rl2::lemma_valid_not_pending_implies_equal(pre, c, core, va); };
+        //             assert(walk_a_same_core.result() == walk_a_writer_core.result());
+        //             assert(rl1::step_MemOpNoTr(pre.interp(), post.interp(), c, lbl));
+        //         }
+        //     }
+        // } else {
+        //     broadcast use rl2::lemma_invalid_walk_is_invalid_in_writer_mem;
+        //     assert(pre.core_mem(core).pt_walk(walk.vaddr).result() is Invalid);
+        //     assert(pre.writer_mem().pt_walk(walk.vaddr).result() is Invalid);
+        // }
+    }
+
+    pub proof fn init_refines(pre: rl1::State, c: rl1::Constants)
+        requires rl1::init(pre, c),
+        ensures rl0::init(pre.interp(), c),
+    {}
+
+    pub proof fn next_refines(pre: rl1::State, post: rl1::State, c: rl1::Constants, lbl: Lbl)
+        requires
+            pre.inv(c),
+            rl1::next(pre, post, c, lbl),
+        ensures
+            rl0::next(pre.interp(), post.interp(), c, lbl),
+    {
+        let step = choose|step: rl1::Step| rl1::next_step(pre, post, c, step, lbl);
+        next_step_refines(pre, post, c, step, lbl);
+    }
+}
 
 
 } // verus!

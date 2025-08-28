@@ -1,6 +1,7 @@
 #![cfg_attr(verus_keep_ghost, verus::trusted)]
 // trusted: definitions for the trusted low-level hardware model
 
+pub mod rl0;
 pub mod rl1;
 pub mod rl2;
 pub mod rl3;

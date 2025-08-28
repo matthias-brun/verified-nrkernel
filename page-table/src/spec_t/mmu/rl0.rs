@@ -1,0 +1,373 @@
+use vstd::prelude::*;
+use crate::spec_t::mmu::*;
+use crate::spec_t::mmu::pt_mem::*;
+#[cfg(verus_keep_ghost)]
+use crate::spec_t::mmu::defs::{ aligned, LoadResult, update_range };
+use crate::spec_t::mmu::defs::{ PTE, Core };
+use crate::spec_t::mmu::rl3::{ Writes };
+use crate::spec_t::mmu::translation::{ MASK_NEG_DIRTY_ACCESS };
+
+verus! {
+
+// This file contains refinement layer 0 of the MMU, removing layer 1's TLBs.
+
+pub struct State {
+    pub happy: bool,
+    /// Byte-indexed physical (non-page-table) memory
+    pub phys_mem: Seq<u8>,
+    /// Page table memory
+    pub pt_mem: PTMem,
+    pub writes: Writes,
+    /// Tracks the virtual addresses and entries for which we may see non-atomic results.
+    /// If polarity is positive, translations may non-atomically fail.
+    /// If polarity is negative, translations may non-atomically succeed.
+    pub pending_maps: Map<usize, PTE>,
+    pub pending_unmaps: Map<usize, PTE>,
+    pub polarity: Polarity,
+}
+
+pub enum Step {
+    // Mixed
+    Invlpg,
+    // Faulting memory op due to failed translation
+    // (atomic walk)
+    MemOpNoTr,
+    // Faulting memory op due to failed translation
+    // (non-atomic walk result)
+    MemOpNoTrNA { vbase: usize },
+    // Memory ops
+    MemOp { vbase: usize },
+    MemOpNA { vbase: usize },
+    // TSO
+    WriteNonneg,
+    WriteNonpos,
+    Read,
+    Barrier,
+    SadWrite,
+    Sadness,
+    Stutter,
+}
+
+
+impl State {
+    pub open spec fn is_happy_writenonneg(self, core: Core, addr: usize, value: usize) -> bool {
+        &&& !self.writes.tso.is_empty() ==> core == self.writes.core
+        &&& self.pt_mem.is_nonneg_write(addr, value)
+    }
+
+    pub open spec fn is_happy_writenonpos(self, core: Core, addr: usize, value: usize) -> bool {
+        &&& !self.writes.tso.is_empty() ==> core == self.writes.core
+        &&& self.pt_mem.is_nonpos_write(addr, value)
+    }
+
+    pub open spec fn is_tso_read_deterministic(self, core: Core, addr: usize) -> bool {
+        self.writes.tso.contains(addr) ==> self.writes.core == core
+    }
+
+    pub open spec fn can_flip_polarity(self, c: Constants) -> bool {
+        &&& self.writes.tso === set![]
+        &&& self.writes.nonpos === set![]
+    }
+
+    //pub open spec fn wf(self, c: Constants) -> bool {
+    //    true
+    //}
+    //
+    //pub open spec fn inv(self, c: Constants) -> bool {
+    //    self.happy ==> {
+    //    &&& self.wf(c)
+    //    }
+    //}
+}
+
+// ---- Mixed (relevant to multiple of TSO/Cache/Non-Atomic) ----
+
+pub open spec fn step_Invlpg(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+    &&& lbl matches Lbl::Invlpg(core, va)
+
+    &&& pre.happy
+    &&& c.valid_core(core)
+
+    &&& post == State {
+        writes: Writes {
+            core: pre.writes.core,
+            tso: if core == pre.writes.core { set![] } else { pre.writes.tso },
+            nonpos:
+                if post.writes.tso === set![] {
+                    pre.writes.nonpos.remove(core)
+                } else { pre.writes.nonpos },
+        },
+        pending_maps: if core == pre.writes.core { map![] } else { pre.pending_maps },
+        pending_unmaps: if post.writes.nonpos === set![] { map![] } else { pre.pending_unmaps },
+        ..pre
+    }
+}
+
+pub open spec fn step_MemOpNoTr(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+    &&& lbl matches Lbl::MemOp(core, memop_vaddr, memop)
+    &&& pre.happy
+
+    &&& c.valid_core(core)
+    &&& aligned(memop_vaddr as nat, memop.op_size())
+    &&& memop.valid_op_size()
+    &&& pre.pt_mem.pt_walk(memop_vaddr).result() is Invalid
+    &&& memop.is_pagefault()
+
+    &&& post == pre
+}
+
+/// MemOp using non-atomic translation when mapping
+pub open spec fn step_MemOpNoTrNA(pre: State, post: State, c: Constants, vbase: usize, lbl: Lbl) -> bool {
+    &&& lbl matches Lbl::MemOp(core, memop_vaddr, memop)
+    &&& pre.happy
+    &&& pre.polarity is Mapping
+
+    &&& c.valid_core(core)
+    &&& aligned(memop_vaddr as nat, memop.op_size())
+    &&& memop.valid_op_size()
+    &&& pre.pending_maps.contains_key(vbase)
+    &&& vbase <= memop_vaddr < vbase + pre.pending_maps[vbase].frame.size
+    &&& memop.is_pagefault()
+
+    &&& post == pre
+}
+
+pub open spec fn step_MemOp(pre: State, post: State, c: Constants, vbase: usize, lbl: Lbl) -> bool {
+    &&& lbl matches Lbl::MemOp(core, memop_vaddr, memop)
+    &&& pre.happy
+
+    &&& c.valid_core(core)
+    &&& aligned(memop_vaddr as nat, memop.op_size())
+    &&& memop.valid_op_size()
+    &&& pre.pt_mem@.contains_key(vbase)
+    // &&& pre.pt_mem.pt_walk(memop_vaddr).result() matches WalkResult::Valid { vbase, pte }
+    // &&& pre.tlbs[core].contains_key(tlb_va)
+    &&& {
+    let pte = pre.pt_mem@[vbase];
+    let paddr = pte.frame.base + (memop_vaddr - vbase);
+    &&& vbase <= memop_vaddr < vbase + pte.frame.size
+    &&& match memop {
+        MemOp::Store { new_value, result } => {
+            if paddr < c.phys_mem_size && !pte.flags.is_supervisor && pte.flags.is_writable {
+                &&& result is Ok
+                &&& post.phys_mem === update_range(pre.phys_mem, paddr, new_value)
+            } else {
+                &&& result is Pagefault
+                &&& post.phys_mem === pre.phys_mem
+            }
+        },
+        MemOp::Load { is_exec, result, .. } => {
+            if paddr < c.phys_mem_size && !pte.flags.is_supervisor && (is_exec ==> !pte.flags.disable_execute) {
+                &&& result == LoadResult::Value(pre.phys_mem.subrange(paddr, paddr + memop.op_size()))
+                &&& post.phys_mem === pre.phys_mem
+            } else {
+                &&& result is Pagefault
+                &&& post.phys_mem === pre.phys_mem
+            }
+        },
+    }
+    }
+
+    &&& post.happy == pre.happy
+    &&& post.pt_mem == pre.pt_mem
+    &&& post.writes == pre.writes
+    &&& post.pending_maps == pre.pending_maps
+    &&& post.pending_unmaps == pre.pending_unmaps
+}
+
+/// MemOp using non-atomic translation when unmapping
+pub open spec fn step_MemOpNA(pre: State, post: State, c: Constants, vbase: usize, lbl: Lbl) -> bool {
+    &&& lbl matches Lbl::MemOp(core, memop_vaddr, memop)
+    &&& pre.happy
+
+    &&& c.valid_core(core)
+    &&& aligned(memop_vaddr as nat, memop.op_size())
+    &&& memop.valid_op_size()
+    &&& pre.pending_unmaps.contains_key(vbase)
+    &&& {
+    let pte = pre.pending_unmaps[vbase];
+    let paddr = pte.frame.base + (memop_vaddr - vbase);
+    &&& vbase <= memop_vaddr < vbase + pte.frame.size
+    &&& match memop {
+        MemOp::Store { new_value, result } => {
+            if paddr < c.phys_mem_size && !pte.flags.is_supervisor && pte.flags.is_writable {
+                &&& result is Ok
+                &&& post.phys_mem === update_range(pre.phys_mem, paddr, new_value)
+            } else {
+                &&& result is Pagefault
+                &&& post.phys_mem === pre.phys_mem
+            }
+        },
+        MemOp::Load { is_exec, result, .. } => {
+            if paddr < c.phys_mem_size && !pte.flags.is_supervisor && (is_exec ==> !pte.flags.disable_execute) {
+                &&& result == LoadResult::Value(pre.phys_mem.subrange(paddr, paddr + memop.op_size()))
+                &&& post.phys_mem === pre.phys_mem
+            } else {
+                &&& result is Pagefault
+                &&& post.phys_mem === pre.phys_mem
+            }
+        },
+    }
+    }
+
+    &&& post.happy == pre.happy
+    &&& post.pt_mem == pre.pt_mem
+    &&& post.writes == pre.writes
+    &&& post.pending_maps == pre.pending_maps
+    &&& post.pending_unmaps == pre.pending_unmaps
+}
+
+
+// ---- TSO ----
+
+pub open spec fn step_WriteNonneg(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+    &&& lbl matches Lbl::Write(core, addr, value)
+
+    &&& pre.happy
+    &&& c.valid_core(core)
+    &&& c.in_ptmem_range(addr as nat, 8)
+    &&& aligned(addr as nat, 8)
+    &&& pre.is_happy_writenonneg(core, addr, value)
+    &&& pre.polarity is Mapping || pre.can_flip_polarity(c)
+
+    &&& post.happy      == pre.happy
+    &&& post.phys_mem   == pre.phys_mem
+    &&& post.pt_mem     == pre.pt_mem.write(addr, value)
+    &&& post.writes.tso == pre.writes.tso.insert(addr)
+    &&& post.writes.core == core
+    &&& post.polarity == Polarity::Mapping
+    &&& post.writes.nonpos == pre.writes.nonpos
+    &&& post.pending_maps == pre.pending_maps.union_prefer_right(
+        Map::new(
+            |vbase| post.pt_mem@.contains_key(vbase) && !pre.pt_mem@.contains_key(vbase),
+            |vbase| post.pt_mem@[vbase]
+        ))
+    &&& post.pending_unmaps == pre.pending_unmaps
+}
+
+pub open spec fn step_WriteNonpos(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+    &&& lbl matches Lbl::Write(core, addr, value)
+
+    &&& pre.happy
+    &&& c.valid_core(core)
+    &&& c.in_ptmem_range(addr as nat, 8)
+    &&& aligned(addr as nat, 8)
+    &&& pre.is_happy_writenonpos(core, addr, value)
+    &&& pre.polarity is Unmapping || pre.can_flip_polarity(c)
+
+    &&& post.happy      == pre.happy
+    &&& post.phys_mem   == pre.phys_mem
+    &&& post.pt_mem     == pre.pt_mem.write(addr, value)
+    &&& post.writes.tso == pre.writes.tso.insert(addr)
+    &&& post.writes.core == core
+    &&& post.polarity == Polarity::Unmapping
+    &&& post.writes.nonpos == Set::new(|core| c.valid_core(core))
+    &&& post.pending_maps == pre.pending_maps
+    &&& post.pending_unmaps == pre.pending_unmaps.union_prefer_right(
+        Map::new(
+            |vbase| pre.pt_mem@.contains_key(vbase) && !post.pt_mem@.contains_key(vbase),
+            |vbase| pre.pt_mem@[vbase]
+        ))
+}
+
+pub open spec fn step_Read(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+    &&& lbl matches Lbl::Read(core, addr, value)
+
+    &&& pre.happy
+    &&& c.valid_core(core)
+    &&& c.in_ptmem_range(addr as nat, 8)
+    &&& aligned(addr as nat, 8)
+    &&& pre.is_tso_read_deterministic(core, addr)
+            ==> value & MASK_NEG_DIRTY_ACCESS == pre.pt_mem.read(addr) & MASK_NEG_DIRTY_ACCESS
+
+    &&& post == pre
+}
+
+pub open spec fn step_Barrier(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+    &&& lbl matches Lbl::Barrier(core)
+
+    &&& pre.happy
+    &&& c.valid_core(core)
+
+    &&& post == State {
+        writes: Writes {
+            tso: if core == pre.writes.core { set![] } else { pre.writes.tso },
+            ..pre.writes
+        },
+        pending_maps: if core == pre.writes.core { map![] } else { pre.pending_maps },
+        ..pre
+    }
+}
+
+pub open spec fn step_Stutter(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+    &&& lbl is Tau
+    &&& post == pre
+}
+
+pub open spec fn step_SadWrite(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+    // If we do a write without fulfilling the right conditions, we set happy to false.
+    &&& lbl matches Lbl::Write(core, addr, value)
+    &&& {
+        ||| value & 1 == 1 && !pre.is_happy_writenonneg(core, addr, value)
+        ||| value & 1 == 0 && !pre.is_happy_writenonpos(core, addr, value)
+    }
+    &&& !post.happy
+}
+
+pub open spec fn step_Sadness(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+    // If happy is unset, arbitrary steps are allowed.
+    &&& !pre.happy
+    &&& !post.happy
+}
+
+pub open spec fn next_step(pre: State, post: State, c: Constants, step: Step, lbl: Lbl) -> bool {
+    match step {
+        Step::Invlpg                    => step_Invlpg(pre, post, c, lbl),
+        Step::MemOpNoTr                 => step_MemOpNoTr(pre, post, c, lbl),
+        Step::MemOpNoTrNA { vbase }     => step_MemOpNoTrNA(pre, post, c, vbase, lbl),
+        Step::MemOp { vbase }           => step_MemOp(pre, post, c, vbase, lbl),
+        Step::MemOpNA { vbase }         => step_MemOpNA(pre, post, c, vbase, lbl),
+        Step::WriteNonneg               => step_WriteNonneg(pre, post, c, lbl),
+        Step::WriteNonpos               => step_WriteNonpos(pre, post, c, lbl),
+        Step::Read                      => step_Read(pre, post, c, lbl),
+        Step::Barrier                   => step_Barrier(pre, post, c, lbl),
+        Step::SadWrite                  => step_SadWrite(pre, post, c, lbl),
+        Step::Sadness                   => step_Sadness(pre, post, c, lbl),
+        Step::Stutter                   => step_Stutter(pre, post, c, lbl),
+    }
+}
+
+pub open spec fn next(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+    exists|step| next_step(pre, post, c, step, lbl)
+}
+
+pub open spec fn init(pre: State, c: Constants) -> bool {
+    &&& pre.happy
+    &&& pre.writes.tso === set![]
+    &&& pre.writes.nonpos === set![]
+    &&& pre.pending_maps === map![]
+    &&& pre.pending_unmaps === map![]
+    &&& pre.polarity === Polarity::Mapping
+
+    &&& c.valid_core(pre.writes.core)
+    &&& pre.pt_mem.mem === Map::new(|va| aligned(va as nat, 8) && c.in_ptmem_range(va as nat, 8), |va| 0)
+    &&& aligned(pre.pt_mem.pml4 as nat, 4096)
+    &&& c.memories_disjoint()
+    &&& pre.phys_mem.len() == c.range_mem.1
+    &&& c.in_ptmem_range(pre.pt_mem.pml4 as nat, 4096)
+}
+
+//proof fn init_implies_inv(pre: State, c: Constants)
+//    requires init(pre, c)
+//    ensures pre.inv(c)
+//{}
+//
+//proof fn next_step_preserves_inv(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
+//    requires
+//        pre.inv(c),
+//        next_step(pre, post, c, step, lbl),
+//    ensures post.inv(c)
+//{}
+
+
+} // verus!

@@ -379,6 +379,7 @@ pub closed spec fn step_TLBFill(pre: State, post: State, c: Constants, core: Cor
     &&& pre.walks[core].contains(walk)
     &&& walk_next.complete
     &&& walk_next.result() matches WalkResult::Valid { vbase, pte }
+    &&& !pre.tlbs[core].contains_key(vbase)
 
     &&& post == State {
         walks: pre.walks.insert(core, pre.walks[core].remove(walk)),
