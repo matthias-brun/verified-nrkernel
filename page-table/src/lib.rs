@@ -5,9 +5,6 @@
 #[cfg(not(feature="linuxmodule"))]
 extern crate alloc;
 
-extern crate builtin;
-extern crate builtin_macros;
-extern crate state_machines_macros;
 extern crate vstd;
 
 
