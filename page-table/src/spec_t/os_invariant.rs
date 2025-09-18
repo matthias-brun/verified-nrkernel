@@ -1095,7 +1095,7 @@ pub proof fn next_step_preserves_overlap_mem_inv(
                     }
                 }
                 assert(s2.inv_existing_map_no_overlap_existing_vmem(c));
-                assert (s2.inv_inflight_pmem_no_overlap_inflight_pmem(c)) by {
+                assert(s2.inv_inflight_pmem_no_overlap_inflight_pmem(c)) by {
                         assert forall |core1: Core, core2: Core|
                                 (c.valid_core(core1) && c.valid_core(core2)
                                     && s2.core_states[core1].has_pte(s2.interp_pt_mem()) && s2.core_states[core2].has_pte(s2.interp_pt_mem())
@@ -1176,7 +1176,11 @@ pub proof fn next_step_preserves_overlap_mem_inv(
                 assert(s2.inv_existing_map_no_overlap_existing_vmem(c));
                 assert(s2.overlapping_mem_inv(c));
             },
-            _ => { assert(s2.overlapping_mem_inv(c));
+            os::Step::MapEnd { core } => {
+                assert(s2.overlapping_mem_inv(c));
+            },
+            _ => {
+                assert(s2.overlapping_mem_inv(c));
             },
         }
     }
