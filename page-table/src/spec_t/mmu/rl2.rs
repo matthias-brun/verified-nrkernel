@@ -37,7 +37,7 @@ pub struct State {
 pub struct History {
     pub pending_maps: Map<usize, PTE>,
     pub pending_unmaps: Map<usize, PTE>,
-    pub pending_protects: Map<usize, Set<PTE>>,
+    pub pending_protects: Map<usize, PTE>,
 }
 
 pub enum Step {
@@ -99,6 +99,7 @@ impl State {
     pub open spec fn is_happy_writeprotect(self, core: Core, addr: usize, value: usize) -> bool {
         &&& !self.writes.tso.is_empty() ==> core == self.writes.core
         &&& self.writer_mem().is_prot_write(addr, value)
+        &&& self.hist.pending_protects.is_empty()
     }
 
     pub open spec fn can_flip_polarity(self, c: Constants) -> bool {
@@ -121,11 +122,6 @@ impl State {
         &&& vb <= va < vb + self.hist.pending_maps[vb].frame.size
         }
     }
-
-    //pub open spec fn can_change_polarity(self, c: Constants) -> bool {
-    //    &&& self.writes.tso.is_empty()
-    //    &&& forall|core| #![auto] c.valid_core(core) ==> self.writes.neg[core].is_empty()
-    //}
 }
 
 
@@ -401,7 +397,7 @@ pub open spec fn step_WriteProtect(pre: State, post: State, c: Constants, lbl: L
     &&& post.sbuf == pre.sbuf.insert(core, pre.sbuf[core].push((addr, value)))
     &&& post.walks == pre.walks
     &&& post.writes.tso === pre.writes.tso.insert(addr)
-    &&& post.writes.nonpos == pre.writes.nonpos
+    &&& post.writes.nonpos == Set::new(|core| c.valid_core(core))
     &&& post.writes.core == core
     &&& post.polarity == Polarity::Protect
     &&& post.hist.pending_maps == pre.hist.pending_maps
@@ -410,8 +406,9 @@ pub open spec fn step_WriteProtect(pre: State, post: State, c: Constants, lbl: L
         == if post.polarity is Protect {
                 pre.hist.pending_protects.union_prefer_right(
                     Map::new(
-                        |vbase| pre.writer_mem()@.contains_key(vbase) && post.writer_mem()@[vbase] != pre.writer_mem()@[vbase],
-                        |vbase| pre.hist.pending_protects[vbase].insert(pre.writer_mem()@[vbase])
+                        |vbase| pre.writer_mem()@.contains_key(vbase)
+                                && post.writer_mem()@[vbase] != pre.writer_mem()@[vbase],
+                        |vbase| pre.writer_mem()@[vbase]
                     ))
         } else { pre.hist.pending_protects }
 }
@@ -758,7 +755,7 @@ impl State {
         // &&& self.inv_unmapping__notin_nonpos(c)
         &&& self.hist.pending_maps === map![]
         &&& self.hist.pending_unmaps === map![]
-        // &&& self.writes.nonpos === set![] ==> self.hist.pending_unmaps === map![]
+        &&& self.writes.nonpos === set![] ==> self.hist.pending_protects === map![]
     }
 
     pub open spec fn inv(self, c: Constants) -> bool {
@@ -809,7 +806,10 @@ proof fn next_step_preserves_inv(pre: State, post: State, c: Constants, step: St
                 reveal(State::inv_unmapping__notin_nonpos);
                 assert(pre.inv_mapping__inflight_walks(c));
             } else if pre.polarity is Protect {
-                admit();
+                assert(pre.can_flip_polarity(c));
+                broadcast use lemma_writes_tso_empty_implies_sbuf_empty;
+                // reveal(State::inv_unmapping__notin_nonpos);
+                assume(pre.inv_mapping__inflight_walks(c));
             }
             assert(post.writes.tso === set![] ==> post.hist.pending_maps === map![]) by {
                 match step {
@@ -846,6 +846,7 @@ proof fn next_step_preserves_inv_protect(pre: State, post: State, c: Constants, 
         next_step(pre, post, c, step, lbl),
     ensures post.inv_protect(c)
 {
+    assume(post.writes.nonpos === set![] ==> post.hist.pending_protects === map![]);
     // assert_by_contradiction!(Set::new(|core| c.valid_core(core)) !== set![], {
     //     assert(Set::new(|core| c.valid_core(core)).contains(pre.writes.core));
     // });
@@ -894,7 +895,9 @@ proof fn next_step_preserves_inv_unmapping(pre: State, post: State, c: Constants
         broadcast use lemma_writes_tso_empty_implies_sbuf_empty;
         assert(pre.writer_sbuf_entries_have_P_bit_0());
     } else if pre.polarity is Protect {
-        admit();
+        broadcast use lemma_writes_tso_empty_implies_sbuf_empty;
+        assume(pre.inv_unmapping__notin_nonpos(c));
+        assume(pre.inv_unmapping__inflight_walks(c));
     }
     assert(post.writer_sbuf_entries_have_P_bit_0());
 
@@ -1860,7 +1863,7 @@ proof fn lemma_mem_view_after_step_write(pre: State, post: State, c: Constants, 
         post.happy,
         pre.wf(c),
         pre.inv_sbuf_facts(c),
-        step_WriteNonneg(pre, post, c, lbl) || step_WriteNonpos(pre, post, c, lbl),
+        step_WriteNonneg(pre, post, c, lbl) || step_WriteNonpos(pre, post, c, lbl) || step_WriteProtect(pre, post, c, lbl),
     ensures
         post.writer_mem().pml4 == pre.pt_mem.pml4,
         post.writer_mem().mem  == pre.writer_mem().mem.insert(lbl->Write_1, lbl->Write_2),
@@ -2601,7 +2604,7 @@ pub mod refinement {
                     let pte = walk_na_res->Valid_pte;
                     if pre.hist.pending_unmaps.contains_key(vaddr) && pre.writes.nonpos.contains(core) {
                         rl1::Step::TLBFillNA1 { core, vaddr }
-                    } else if pre.hist.pending_protects.contains_key(vaddr) && pre.writes.nonpos.contains(core) {
+                    } else if pre.hist.pending_protects.contains_pair(vaddr, pte) && pre.writes.nonpos.contains(core) {
                         rl1::Step::TLBFillNA2 { core, vaddr, pte }
                     } else {
                         rl1::Step::TLBFill { core, vaddr }
@@ -2679,9 +2682,8 @@ pub mod refinement {
                     }
                 } else {
                     assert(pre.polarity is Protect);
-                    assume(pre.hist.pending_unmaps === map![]);
-                    if pre.hist.pending_protects.contains_key(vbase) && pre.writes.nonpos.contains(core) {
-                        assume(pre.hist.pending_protects[vbase].contains(pte));
+                    assert(pre.hist.pending_unmaps === map![]);
+                    if pre.hist.pending_protects.contains_pair(vbase, pte) && pre.writes.nonpos.contains(core) {
                         assert(rl1::step_TLBFillNA2(pre.interp(), post.interp(), c, core, vbase, pte, lbl));
                     } else {
                         // assert_by_contradiction!(walk_a == walk_na, {
@@ -2722,7 +2724,6 @@ pub mod refinement {
                 assert(rl1::step_WriteNonpos(pre.interp(), post.interp(), c, lbl));
             },
             rl2::Step::WriteProtect => {
-                admit();
                 let (core, addr, value) =
                     if let Lbl::Write(core, addr, value) = lbl {
                         (core, addr, value)
@@ -2783,11 +2784,12 @@ pub mod refinement {
         rl2::lemma_iter_walk_equals_pt_walk(core_mem, walk.vaddr);
         rl2::lemma_iter_walk_equals_pt_walk(writer_mem, walk.vaddr);
 
+        assert(walk_na.result() is Invalid);
+
         if pre.polarity is Mapping {
             assert(forall|i| 0 <= i < walk.path.len() ==> walk_na.path[i] == walk.path[i]) by {
                 reveal(rl2::walk_next);
             };
-            assert(walk_na.result() is Invalid);
 
             // This walk has the same result if done on the same core but atomically.
             let walk_a_same_core = rl2::iter_walk(core_mem, walk.vaddr);
@@ -2825,8 +2827,15 @@ pub mod refinement {
             broadcast use rl2::lemma_invalid_walk_is_invalid_in_writer_mem;
             assert(pre.core_mem(core).pt_walk(walk.vaddr).result() is Invalid);
             assert(pre.writer_mem().pt_walk(walk.vaddr).result() is Invalid);
+            assert(rl1::step_MemOpNoTr(pre.interp(), post.interp(), c, lbl));
         } else {
-            admit();
+            assert(pre.polarity is Protect);
+            // TODO: should be relatively easy: protect does not invalidate any walks, so the walk
+            // must be invalid in pre already
+            assume(walk_na.result() is Invalid <==> pre.core_mem(core).pt_walk(walk.vaddr).result() is Invalid);
+            assume(pre.core_mem(core).pt_walk(walk.vaddr).result() is Invalid
+                <==> pre.writer_mem().pt_walk(walk.vaddr).result() is Invalid);
+            assert(rl1::step_MemOpNoTr(pre.interp(), post.interp(), c, lbl));
         }
     }
 

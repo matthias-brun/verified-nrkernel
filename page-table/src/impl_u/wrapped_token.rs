@@ -1,6 +1,7 @@
 use vstd::prelude::*;
 use vstd::{ assert_by_contradiction, assert_seqs_equal };
 
+use crate::extra::lemma_bits_misc;
 use crate::spec_t::os;
 use crate::spec_t::os_invariant;
 use crate::spec_t::mmu::{ self, WalkResult };
@@ -27,20 +28,6 @@ use crate::impl_u::wrapped_token;
 use crate::impl_u::l2_impl::{ PT, PTDir };
 
 verus! {
-
-proof fn lemma_bits_misc()
-    ensures
-        bit!(0usize) == 1,
-        forall|v: usize| v & bit!(0) == #[trigger] (v & !(bit!(5) | bit!(6)) & bit!(0)),
-        forall|v1: usize, v2: usize| #![auto]
-            (v2 & 1) != (v1 & 1) ==> v2 & MASK_NEG_PROT_FLAGS != v1 & MASK_NEG_PROT_FLAGS,
-{
-        assert(bit!(0usize) == 1) by (bit_vector);
-        assert(forall|v: usize| v & bit!(0) == #[trigger] (v & !(bit!(5) | bit!(6)) & bit!(0))) by (bit_vector);
-        assert(forall|v1: usize, v2: usize| #![auto] (v2 & 1) != (v1 & 1) ==>
-            v2 & !(bit!(63usize) | bit!(2usize) | bit!(1usize)) !=
-            v1 & !(bit!(63usize) | bit!(2usize) | bit!(1usize))) by (bit_vector);
-}
 
 pub enum OpArgs {
     Map { base: usize, pte: PTE },

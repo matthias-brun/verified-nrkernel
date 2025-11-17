@@ -28,7 +28,7 @@ pub struct State {
     /// If polarity is protect, translations may non-atomically have different permissions.
     pub pending_maps: Map<usize, PTE>,
     pub pending_unmaps: Map<usize, PTE>,
-    pub pending_protects: Map<usize, Set<PTE>>,
+    pub pending_protects: Map<usize, PTE>,
     pub polarity: Polarity,
 }
 
@@ -75,6 +75,13 @@ impl State {
     pub open spec fn is_happy_writeprotect(self, core: Core, addr: usize, value: usize) -> bool {
         &&& !self.writes.tso.is_empty() ==> core == self.writes.core
         &&& self.pt_mem.is_prot_write(addr, value)
+        // We only allow one modification per protect period. We could allow more but that would make
+        // it more complex to determine the possible non-atomic walk results. E.g. if we change the RW
+        // bit on a directory mapping, and the XD bit on a page mapping in that directory, I think we
+        // could observe all 4 possibilities: RW/XD, (not RW)/XD, RW/(not XD), (not RW)/(not XD)
+        // Our implementation only makes one modification, so we choose the simpler option, where the
+        // only possible outcomes are that we see the new or the old translation.
+        &&& self.pending_protects.is_empty()
     }
 
     pub open spec fn is_tso_read_deterministic(self, core: Core, addr: usize) -> bool {
@@ -248,6 +255,7 @@ pub open spec fn step_TLBFillNA1(pre: State, post: State, c: Constants, core: Co
 
 /// A TLB fill resulting from a non-atomic page table walk, during mprotect
 pub open spec fn step_TLBFillNA2(pre: State, post: State, c: Constants, core: Core, vaddr: usize, pte: PTE, lbl: Lbl) -> bool {
+    let pte = pre.pending_protects[vaddr];
     &&& lbl is Tau
     &&& pre.happy
     &&& pre.polarity is Protect
@@ -255,7 +263,6 @@ pub open spec fn step_TLBFillNA2(pre: State, post: State, c: Constants, core: Co
     &&& c.valid_core(core)
     &&& pre.writes.nonpos.contains(core)
     &&& pre.pending_protects.contains_key(vaddr)
-    &&& pre.pending_protects[vaddr].contains(pte)
 
     &&& post == State {
         tlbs: pre.tlbs.insert(core, pre.tlbs[core].insert(vaddr, pte)),
@@ -346,7 +353,7 @@ pub open spec fn step_WriteProtect(pre: State, post: State, c: Constants, lbl: L
                 pre.pending_protects.union_prefer_right(
                     Map::new(
                         |vbase| pre.pt_mem@.contains_key(vbase) && post.pt_mem@[vbase] != pre.pt_mem@[vbase],
-                        |vbase| pre.pending_protects[vbase].insert(pre.pt_mem@[vbase])
+                        |vbase| pre.pt_mem@[vbase]
                     ))
         } else { pre.pending_protects }
 }
