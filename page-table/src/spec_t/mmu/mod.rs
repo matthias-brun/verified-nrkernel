@@ -19,7 +19,8 @@ use crate::spec_t::mmu::translation::{ PDE, GPDE, l0_bits, l1_bits, l2_bits, l3_
 
 verus! {
 
-// Only used in the simplified hardware models.
+// Only used in the simplified hardware models. (The trusted model does technically use it but only
+// in history variables, so it has no effect.)
 // $line_count$Trusted${$
 
 pub enum Polarity {

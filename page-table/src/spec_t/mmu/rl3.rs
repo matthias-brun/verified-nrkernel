@@ -7,6 +7,8 @@
 // $line_count$Trusted${$
 
 use vstd::prelude::*;
+
+use crate::extra::lemma_bits_misc;
 use crate::spec_t::mmu::*;
 use crate::spec_t::mmu::pt_mem::*;
 use crate::spec_t::mmu::defs::{ bit, Core, bitmask_inc, MemOp, LoadResult, PTE };
@@ -47,7 +49,7 @@ pub struct History {
     pub writes: Writes,
     pub pending_maps: Map<usize, PTE>,
     pub pending_unmaps: Map<usize, PTE>,
-    pub pending_protects: Map<usize, Set<PTE>>,
+    pub pending_protects: Map<usize, PTE>,
     pub polarity: Polarity,
 }
 
@@ -429,11 +431,11 @@ pub closed spec fn step_Write(pre: State, post: State, c: Constants, lbl: Lbl) -
     &&& post.hist.happy == pre.hist.happy
         && (pre.is_happy_writenonneg(core, addr, value)
             || pre.is_happy_writenonpos(core, addr, value)
-            || pre.is_happy_writeprotect(core, addr, value))
+            || (pre.is_happy_writeprotect(core, addr, value) && pre.hist.pending_protects.is_empty()))
     &&& post.hist.walks == pre.hist.walks
     &&& post.hist.writes.tso == pre.hist.writes.tso.insert(addr)
     &&& post.hist.writes.nonpos ==
-        if pre.writer_mem().is_nonpos_write(addr, value) {
+        if pre.writer_mem().is_nonpos_write(addr, value) || pre.writer_mem().is_prot_write(addr, value) {
             Set::new(|core| c.valid_core(core))
         } else { pre.hist.writes.nonpos }
     &&& post.hist.writes.core == core
@@ -457,8 +459,9 @@ pub closed spec fn step_Write(pre: State, post: State, c: Constants, lbl: Lbl) -
         == if post.hist.polarity is Protect {
                 pre.hist.pending_protects.union_prefer_right(
                     Map::new(
-                        |vbase| pre.writer_mem()@.contains_key(vbase) && post.writer_mem()@[vbase] != pre.writer_mem()@[vbase],
-                        |vbase| pre.hist.pending_protects[vbase].insert(pre.writer_mem()@[vbase])
+                        |vbase| pre.writer_mem()@.contains_key(vbase)
+                                && post.writer_mem()@[vbase] != pre.writer_mem()@[vbase],
+                        |vbase| pre.writer_mem()@[vbase]
                     ))
         } else { pre.hist.pending_protects }
     &&& post.hist.polarity ==
@@ -652,6 +655,7 @@ pub proof fn next_preserves_inv(pre: State, post: State, c: Constants, lbl: Lbl)
 
 
 pub mod refinement {
+    use crate::extra::lemma_bits_misc;
     use crate::spec_t::mmu::*;
     use crate::spec_t::mmu::rl2;
     use crate::spec_t::mmu::rl3;
@@ -807,6 +811,8 @@ pub mod refinement {
                             (core, addr, value)
                         } else { arbitrary() };
                     if pre.is_happy_writenonneg(core, addr, value) {
+                        lemma_bits_misc();
+                        assert(!pre.writer_mem().is_prot_write(addr, value));
                         assert(rl2::step_WriteNonneg(pre.interp(), post.interp(), c, lbl));
                     } else if pre.is_happy_writenonpos(core, addr, value) {
                         assert(rl2::step_WriteNonpos(pre.interp(), post.interp(), c, lbl));
