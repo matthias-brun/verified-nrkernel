@@ -357,6 +357,13 @@ pub mod code {
     #[cfg(feature="linuxmodule")]
     use core::sync::atomic::{AtomicUsize, Ordering};
 
+    #[cfg(feature="linuxmodule")]
+    use crate::spec_t::os_code_vc::HandlerVC;
+    #[cfg(feature="linuxmodule")]
+    use crate::impl_u::verified_impl::PTImpl;
+    #[cfg(feature="linuxmodule")]
+    use crate::spec_t::os_code_vc;
+
     /// global variable representing the page table lock
     #[cfg(not(feature="linuxmodule"))]
     exec static PGTABLE_LOCK: AtomicBool = AtomicBool::new(false);
@@ -364,6 +371,14 @@ pub mod code {
     /// global variable representing the current TLB shootduw
     #[cfg(feature="linuxmodule")]
     exec static SHOOTDOWN_VADDR: AtomicUsize = AtomicUsize::new(0);
+
+    /// the number of cores maximum
+    #[cfg(feature="linuxmodule")]
+    pub exec const NUM_CORES: usize = 256;
+
+    /// the shootdown acks counter
+    #[cfg(feature="linuxmodule")]
+    exec static SHOOTDOWN_ACKS: [AtomicUsize; NUM_CORES] = [ const { AtomicUsize::new(0) }; NUM_CORES];
 
     /// acquires the page table spinlock
     #[cfg(not(feature="linuxmodule"))]
@@ -418,6 +433,18 @@ pub mod code {
 
         /// invalidates a tlb page for the given start address and the current mm
         fn flush_tlb_page(start: u64, page_size: u64);
+
+        /// obtain the current processor id
+        fn get_current_cpu_id() -> u32;
+
+        /// obtain the current processor id
+        fn get_num_cpus() -> u32;
+
+        // handler here is a typedef void (*smp_call_func_t)(void *info);
+        fn smp_call_function(handler: fn(Tracked<os_code_vc::Token>, usize)-> Tracked<os_code_vc::Token>, info: usize, wait: u32) ;
+
+        // CPU relax function for spin loops
+        fn cpu_relax();
     }
 
     /// initiates a shootdown for a given virtual page of a given size
@@ -434,7 +461,16 @@ pub mod code {
     {
         // on linux this is a blocking call to flush the TLB for the given page.
         #[cfg(feature="linuxmodule")]
-        SHOOTDOWN_VADDR.store(vaddr, Ordering::Relaxed);
+        {
+            SHOOTDOWN_VADDR.store(vaddr, Ordering::Relaxed);
+
+            let num_cpus = unsafe { get_num_cpus() } as usize;
+            for cpu_id in 0..num_cpus {
+                SHOOTDOWN_ACKS[cpu_id].store(0, Ordering::Relaxed);
+            }
+
+            unsafe { smp_call_function(PTImpl::handle_shootdown_ipi, vaddr, 0); }
+        }
 
         // #[cfg(not(feature="linuxmodule"))]
         // implementation of the shootdown is not necessary if we run this as an standalone module
@@ -449,9 +485,16 @@ pub mod code {
         ensures
             tok.tstate() is Spent,
     {
-        // on linux this is a blocking call to flush the TLB for the given page.
         #[cfg(feature="linuxmodule")]
-        unsafe { flush_tlb_page(SHOOTDOWN_VADDR.load(Ordering::Relaxed) as u64, 4096); }
+        {
+            let num_cpus = unsafe { get_num_cpus() } as usize;
+            for cpu_id in 0..num_cpus {
+                while SHOOTDOWN_ACKS[cpu_id].load(Ordering::Relaxed) == 0 {
+                    // spin
+                    unsafe { cpu_relax(); }
+                }
+            }
+        }
 
         // #[cfg(not(feature="linuxmodule"))]
         // implementation of the shootdown is not necessary if we run this as an standalone module
@@ -466,11 +509,8 @@ pub mod code {
         ensures
             tok.tstate() is Spent,
     {
-        // #[cfg(feature="linuxmodule")]
-        // implementation of the shootdown acknowledgement in Linux is not necessary, as `flush_tlb_page` is blocking.
-
-        // #[cfg(not(feature="linuxmodule"))]
-        // implementation for the standalone module is not neccessary as this runs in user space.
+        let my_cpu = unsafe { get_current_cpu_id() } as usize;
+        SHOOTDOWN_ACKS[my_cpu].store(1, Ordering::Relaxed);
     }
 
 
