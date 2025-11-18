@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 vstd = { path = "../.verus/source/vstd", features = [], default-features = false }
+builtin = { path = "../.verus/source/builtin" }
 
 [lib]
 path = "src/lib.rs"
