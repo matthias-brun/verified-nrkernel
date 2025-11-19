@@ -363,6 +363,8 @@ pub mod code {
     use crate::impl_u::verified_impl::PTImpl;
     #[cfg(feature="linuxmodule")]
     use crate::spec_t::os_code_vc;
+    #[cfg(feature="linuxmodule")]
+    use core::ffi::c_char;
 
     /// global variable representing the page table lock
     #[cfg(not(feature="linuxmodule"))]
@@ -445,6 +447,8 @@ pub mod code {
 
         // CPU relax function for spin loops
         fn do_cpu_relax();
+
+        fn print(s: *const c_char, v: usize);
     }
 
     /// initiates a shootdown for a given virtual page of a given size
@@ -462,12 +466,17 @@ pub mod code {
         // on linux this is a blocking call to flush the TLB for the given page.
         #[cfg(feature="linuxmodule")]
         {
+            // unsafe { print(">>>>>>>>>>>>>>>>>>>>:\0".as_ptr() as *const c_char, vaddr); }
+            // unsafe { print("Initiating shootdown for vaddr:\0".as_ptr() as *const c_char, vaddr); }
+
             SHOOTDOWN_VADDR.store(vaddr, Ordering::Relaxed);
 
             let num_cpus = unsafe { get_num_cpus() } as usize;
             for cpu_id in 0..num_cpus {
                 SHOOTDOWN_ACKS[cpu_id].store(0, Ordering::Relaxed);
             }
+
+            // unsafe { print("Send IPIs to all CPUs:\0".as_ptr() as *const c_char, vaddr); }
 
             unsafe { smp_call_function(PTImpl::handle_shootdown_ipi, vaddr, 0); }
         }
@@ -487,13 +496,16 @@ pub mod code {
     {
         #[cfg(feature="linuxmodule")]
         {
+            // unsafe { print("Wait for shootdown\0".as_ptr() as *const c_char, 0); }
             let num_cpus = unsafe { get_num_cpus() } as usize;
             for cpu_id in 0..num_cpus {
+                // unsafe { print("Waiting for CPU ack:\0".as_ptr() as *const c_char, cpu_id); }
                 while SHOOTDOWN_ACKS[cpu_id].load(Ordering::Relaxed) == 0 {
                     // spin
                     unsafe { do_cpu_relax(); }
                 }
             }
+            // unsafe { print("<<<<<<<<<<<<<<<<<<<<:\0".as_ptr() as *const c_char, 0); }
         }
 
         // #[cfg(not(feature="linuxmodule"))]
@@ -510,6 +522,7 @@ pub mod code {
             tok.tstate() is Spent,
     {
         let my_cpu = unsafe { get_current_cpu_id() } as usize;
+        // unsafe { print("acknowledging CPU:\0".as_ptr() as *const c_char, my_cpu); }
         SHOOTDOWN_ACKS[my_cpu].store(1, Ordering::Relaxed);
     }
 
