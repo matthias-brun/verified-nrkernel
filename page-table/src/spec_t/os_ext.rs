@@ -444,7 +444,7 @@ pub mod code {
         fn smp_call_function(handler: fn(Tracked<os_code_vc::Token>, usize)-> Tracked<os_code_vc::Token>, info: usize, wait: u32) ;
 
         // CPU relax function for spin loops
-        fn cpu_relax();
+        fn do_cpu_relax();
     }
 
     /// initiates a shootdown for a given virtual page of a given size
@@ -491,7 +491,7 @@ pub mod code {
             for cpu_id in 0..num_cpus {
                 while SHOOTDOWN_ACKS[cpu_id].load(Ordering::Relaxed) == 0 {
                     // spin
-                    unsafe { cpu_relax(); }
+                    unsafe { do_cpu_relax(); }
                 }
             }
         }
