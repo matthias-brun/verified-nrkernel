@@ -194,6 +194,40 @@ impl PDE {
             requires 32 <= mw <= 52;
     }
 
+    pub broadcast proof fn lemma_view_unchanged_prot_flags(self, other: PDE)
+        requires
+            self.layer@ < 4,
+            #[trigger] (self.entry & MASK_NEG_PROT_FLAGS)
+                == #[trigger] (other.entry & MASK_NEG_PROT_FLAGS),
+            self.layer == other.layer,
+        ensures
+            other@ is Directory <==> self@ is Directory,
+            other@ is Page      <==> self@ is Page,
+            other@ is Invalid   <==> self@ is Invalid,
+            other@ matches GPDE::Directory { addr, .. } ==> self@->Directory_addr == addr,
+            other@ matches GPDE::Page { addr, .. }      ==> self@->Page_addr == addr,
+    {
+        reveal(PDE::all_mb0_bits_are_zero);
+        let v1 = self.entry;
+        let v2 = other.entry;
+        assert(forall|v1: usize, v2: usize, b: usize|
+            ((v1 & MASK_NEG_PROT_FLAGS) == #[trigger] (v2 & MASK_NEG_PROT_FLAGS))
+                && b < 64 && b != 1 && b != 2 && b != 63
+                ==> #[trigger] (v1 & bit!(b)) == v2 & bit!(b)) by (bit_vector);
+        assert(forall|v1: usize, v2: usize, b1: usize, b2: usize|
+            (#[trigger] (v1 & MASK_NEG_PROT_FLAGS) == #[trigger] (v2 & MASK_NEG_PROT_FLAGS))
+                && 2 < b1 <= b2 < 63
+                // The line below is just bitmask_inc!(b1, b2) but we can't trigger on that directly
+                // (due to arith/non-arith mixing rules).
+                ==> (v1 & ((!(!0usize << #[trigger] (((b2+1usize)-b1) as usize))) << b1))
+                    == v2 & bitmask_inc!(b1,b2)) by (bit_vector);
+        axiom_max_phyaddr_width_facts();
+        assert(forall|v1: usize, v2: usize, mw: usize| #![auto]
+            v1 & MASK_NEG_PROT_FLAGS == v2 & MASK_NEG_PROT_FLAGS && 32 <= mw <= 52
+            ==> v1 & bitmask_inc!(mw, 51) == v2 & bitmask_inc!(mw, 51)) by (bit_vector);
+    }
+
+
     pub broadcast proof fn lemma_view_unchanged_dirty_access(self, other: PDE)
         requires
             self.layer@ < 4,
@@ -206,39 +240,39 @@ impl PDE {
         let v1 = self.entry;
         let v2 = other.entry;
         assert(forall|b: usize| 0 <= b < 5 ==> #[trigger] (v1 & bit!(b)) == v2 & bit!(b)) by (bit_vector)
-            requires v1 & !(bit!(5) | bit!(6)) == v2 & !(bit!(5) | bit!(6));
+            requires v1 & MASK_NEG_DIRTY_ACCESS == v2 & MASK_NEG_DIRTY_ACCESS;
         assert(forall|b: usize| 6 < b < 64 ==> #[trigger] (v1 & bit!(b)) == v2 & bit!(b)) by (bit_vector)
-            requires v1 & !(bit!(5) | bit!(6)) == v2 & !(bit!(5) | bit!(6));
+            requires v1 & MASK_NEG_DIRTY_ACCESS == v2 & MASK_NEG_DIRTY_ACCESS;
         axiom_max_phyaddr_width_facts();
         let mw = MAX_PHYADDR_WIDTH;
 
         assert(v1 & bitmask_inc!(12usize, mw - 1)
             == v2 & bitmask_inc!(12usize, mw - 1)) by (bit_vector)
             requires
-                v1 & !(bit!(5) | bit!(6)) == v2 & !(bit!(5) | bit!(6)),
+                v1 & MASK_NEG_DIRTY_ACCESS == v2 & MASK_NEG_DIRTY_ACCESS,
                 32 <= mw <= 52;
         assert(v1 & bitmask_inc!(21usize, mw - 1)
             == v2 & bitmask_inc!(21usize, mw - 1)) by (bit_vector)
             requires
-                v1 & !(bit!(5) | bit!(6)) == v2 & !(bit!(5) | bit!(6)),
+                v1 & MASK_NEG_DIRTY_ACCESS == v2 & MASK_NEG_DIRTY_ACCESS,
                 32 <= mw <= 52;
         assert(v1 & bitmask_inc!(30usize, mw - 1)
             == v2 & bitmask_inc!(30usize, mw - 1)) by (bit_vector)
             requires
-                v1 & !(bit!(5) | bit!(6)) == v2 & !(bit!(5) | bit!(6)),
+                v1 & MASK_NEG_DIRTY_ACCESS == v2 & MASK_NEG_DIRTY_ACCESS,
                 32 <= mw <= 52;
         assert(v1 & bitmask_inc!(mw, 51) == v2 & bitmask_inc!(mw, 51)) by (bit_vector)
             requires
-                v1 & !(bit!(5) | bit!(6)) == v2 & !(bit!(5) | bit!(6)),
+                v1 & MASK_NEG_DIRTY_ACCESS == v2 & MASK_NEG_DIRTY_ACCESS,
                 32 <= mw <= 52;
         assert(v1 & bitmask_inc!(mw, 62) == v2 & bitmask_inc!(mw, 62)) by (bit_vector)
             requires
-                v1 & !(bit!(5) | bit!(6)) == v2 & !(bit!(5) | bit!(6)),
+                v1 & MASK_NEG_DIRTY_ACCESS == v2 & MASK_NEG_DIRTY_ACCESS,
                 32 <= mw <= 52;
         assert(v1 & bitmask_inc!(13, 29) == v2 & bitmask_inc!(13, 29)) by (bit_vector)
-            requires v1 & !(bit!(5) | bit!(6)) == v2 & !(bit!(5) | bit!(6));
+            requires v1 & MASK_NEG_DIRTY_ACCESS == v2 & MASK_NEG_DIRTY_ACCESS;
         assert(v1 & bitmask_inc!(13, 20) == v2 & bitmask_inc!(13, 20)) by (bit_vector)
-            requires v1 & !(bit!(5) | bit!(6)) == v2 & !(bit!(5) | bit!(6));
+            requires v1 & MASK_NEG_DIRTY_ACCESS == v2 & MASK_NEG_DIRTY_ACCESS;
     }
 
     pub open spec fn view(self) -> GPDE {

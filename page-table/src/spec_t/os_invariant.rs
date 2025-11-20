@@ -665,7 +665,7 @@ pub proof fn next_step_preserves_tlb_inv(
                     assert(s2.TLB_interp_pt_mem_agree(c));
                     assert(s2.TLB_unmap_agree(c));
                 }
-                rl1::Step::TLBFillNA2 { core, vaddr, pte } => {
+                rl1::Step::TLBFillNA2 { core, vaddr } => {
                     admit();
                     assert(s2.successful_IPI(c));
                     assert(s2.TLB_dom_subset_of_pt_and_inflight_unmap_vaddr(c));

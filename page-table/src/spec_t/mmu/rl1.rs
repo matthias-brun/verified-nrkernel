@@ -45,10 +45,10 @@ pub enum Step {
     MemOpTLB { tlb_va: usize },
     TLBFill { core: Core, vaddr: usize },
     TLBEvict { core: Core, tlb_va: usize },
-    // Non-atomic TLB fill after an unmap
+    // Non-atomic TLB fill during an unmap
     TLBFillNA1 { core: Core, vaddr: usize },
-    // Non-atomic TLB fill after an mprotect
-    TLBFillNA2 { core: Core, vaddr: usize, pte: PTE },
+    // Non-atomic TLB fill during an mprotect
+    TLBFillNA2 { core: Core, vaddr: usize },
     // TSO
     WriteNonneg,
     WriteNonpos,
@@ -73,7 +73,6 @@ impl State {
     }
 
     pub open spec fn is_happy_writeprotect(self, core: Core, addr: usize, value: usize) -> bool {
-        &&& !self.writes.tso.is_empty() ==> core == self.writes.core
         &&& self.pt_mem.is_prot_write(addr, value)
         // We only allow one modification per protect period. We could allow more but that would make
         // it more complex to determine the possible non-atomic walk results. E.g. if we change the RW
@@ -81,7 +80,7 @@ impl State {
         // could observe all 4 possibilities: RW/XD, (not RW)/XD, RW/(not XD), (not RW)/(not XD)
         // Our implementation only makes one modification, so we choose the simpler option, where the
         // only possible outcomes are that we see the new or the old translation.
-        &&& self.pending_protects.is_empty()
+        &&& self.writes.tso.is_empty()
     }
 
     pub open spec fn is_tso_read_deterministic(self, core: Core, addr: usize) -> bool {
@@ -254,7 +253,7 @@ pub open spec fn step_TLBFillNA1(pre: State, post: State, c: Constants, core: Co
 }
 
 /// A TLB fill resulting from a non-atomic page table walk, during mprotect
-pub open spec fn step_TLBFillNA2(pre: State, post: State, c: Constants, core: Core, vaddr: usize, pte: PTE, lbl: Lbl) -> bool {
+pub open spec fn step_TLBFillNA2(pre: State, post: State, c: Constants, core: Core, vaddr: usize, lbl: Lbl) -> bool {
     let pte = pre.pending_protects[vaddr];
     &&& lbl is Tau
     &&& pre.happy
@@ -410,22 +409,22 @@ pub open spec fn step_Sadness(pre: State, post: State, c: Constants, lbl: Lbl) -
 
 pub open spec fn next_step(pre: State, post: State, c: Constants, step: Step, lbl: Lbl) -> bool {
     match step {
-        Step::Invlpg                          => step_Invlpg(pre, post, c, lbl),
-        Step::MemOpNoTr                       => step_MemOpNoTr(pre, post, c, lbl),
-        Step::MemOpNoTrNA { vbase }           => step_MemOpNoTrNA(pre, post, c, vbase, lbl),
-        Step::MemOpTLB { tlb_va }             => step_MemOpTLB(pre, post, c, tlb_va, lbl),
-        Step::TLBFill { core, vaddr }         => step_TLBFill(pre, post, c, core, vaddr, lbl),
-        Step::TLBEvict { core, tlb_va }       => step_TLBEvict(pre, post, c, core, tlb_va, lbl),
-        Step::TLBFillNA1 { core, vaddr }      => step_TLBFillNA1(pre, post, c, core, vaddr, lbl),
-        Step::TLBFillNA2 { core, vaddr, pte } => step_TLBFillNA2(pre, post, c, core, vaddr, pte, lbl),
-        Step::WriteNonneg                     => step_WriteNonneg(pre, post, c, lbl),
-        Step::WriteNonpos                     => step_WriteNonpos(pre, post, c, lbl),
-        Step::WriteProtect                    => step_WriteProtect(pre, post, c, lbl),
-        Step::Read                            => step_Read(pre, post, c, lbl),
-        Step::Barrier                         => step_Barrier(pre, post, c, lbl),
-        Step::SadWrite                        => step_SadWrite(pre, post, c, lbl),
-        Step::Sadness                         => step_Sadness(pre, post, c, lbl),
-        Step::Stutter                         => step_Stutter(pre, post, c, lbl),
+        Step::Invlpg                     => step_Invlpg(pre, post, c, lbl),
+        Step::MemOpNoTr                  => step_MemOpNoTr(pre, post, c, lbl),
+        Step::MemOpNoTrNA { vbase }      => step_MemOpNoTrNA(pre, post, c, vbase, lbl),
+        Step::MemOpTLB { tlb_va }        => step_MemOpTLB(pre, post, c, tlb_va, lbl),
+        Step::TLBFill { core, vaddr }    => step_TLBFill(pre, post, c, core, vaddr, lbl),
+        Step::TLBEvict { core, tlb_va }  => step_TLBEvict(pre, post, c, core, tlb_va, lbl),
+        Step::TLBFillNA1 { core, vaddr } => step_TLBFillNA1(pre, post, c, core, vaddr, lbl),
+        Step::TLBFillNA2 { core, vaddr } => step_TLBFillNA2(pre, post, c, core, vaddr, lbl),
+        Step::WriteNonneg                => step_WriteNonneg(pre, post, c, lbl),
+        Step::WriteNonpos                => step_WriteNonpos(pre, post, c, lbl),
+        Step::WriteProtect               => step_WriteProtect(pre, post, c, lbl),
+        Step::Read                       => step_Read(pre, post, c, lbl),
+        Step::Barrier                    => step_Barrier(pre, post, c, lbl),
+        Step::SadWrite                   => step_SadWrite(pre, post, c, lbl),
+        Step::Sadness                    => step_Sadness(pre, post, c, lbl),
+        Step::Stutter                    => step_Stutter(pre, post, c, lbl),
     }
 }
 
