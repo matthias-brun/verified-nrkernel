@@ -126,9 +126,9 @@ impl State {
     }
 
     pub closed spec fn is_happy_writeprotect(self, core: Core, addr: usize, value: usize) -> bool {
-        &&& !self.hist.writes.tso.is_empty() ==> core == self.hist.writes.core
         &&& self.hist.polarity !is Protect ==> self.can_flip_polarity()
         &&& self.writer_mem().is_prot_write(addr, value)
+        &&& self.hist.writes.tso.is_empty()
     }
 }
 

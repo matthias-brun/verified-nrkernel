@@ -9,7 +9,9 @@ use crate::spec_t::mmu::defs::{
 };
 use crate::spec_t::mmu::defs::{ Core, PTE };
 use crate::spec_t::mmu::rl3::{ Writes };
-use crate::spec_t::mmu::translation::{ MASK_NEG_DIRTY_ACCESS };
+use crate::spec_t::mmu::translation::{
+    MASK_NEG_DIRTY_ACCESS, MASK_NEG_PROT_FLAGS
+};
 
 verus! {
 
@@ -97,9 +99,8 @@ impl State {
     }
 
     pub open spec fn is_happy_writeprotect(self, core: Core, addr: usize, value: usize) -> bool {
-        &&& !self.writes.tso.is_empty() ==> core == self.writes.core
         &&& self.writer_mem().is_prot_write(addr, value)
-        &&& self.hist.pending_protects.is_empty()
+        &&& self.writes.tso.is_empty()
     }
 
     pub open spec fn can_flip_polarity(self, c: Constants) -> bool {
@@ -120,6 +121,13 @@ impl State {
         exists|vb| {
         &&& #[trigger] self.hist.pending_maps.contains_key(vb)
         &&& vb <= va < vb + self.hist.pending_maps[vb].frame.size
+        }
+    }
+
+    pub open spec fn pending_protect_for(self, va: usize) -> bool {
+        exists|vb| {
+        &&& #[trigger] self.hist.pending_protects.contains_key(vb)
+        &&& vb <= va < vb + self.hist.pending_protects[vb].frame.size
         }
     }
 }
@@ -592,7 +600,7 @@ impl State {
 
     pub open spec fn inv_sbuf_facts(self, c: Constants) -> bool {
         &&& self.non_writer_sbufs_are_empty(c)
-        &&& self.polarity !is Protect ==> self.writer_sbuf_entries_are_unique()
+        &&& self.writer_sbuf_entries_are_unique()
         &&& self.writer_sbuf_subset_tso_writes()
     }
 
@@ -619,31 +627,6 @@ impl State {
             &&& aligned(walk.vaddr as nat, 8)
             &&& walk.path.len() <= 3
             &&& !walk.complete
-            // TODO: 
-            // We could have more conditions and assumptions on what the page table looks like.
-            // E.g. no "cycles" (configuring the page table in a way where a page table walk uses a
-            // memory location more than once) and assume that we only unmap already-empty
-            // directories.
-            //
-            // - If we unmap a directory that still has children, we can have inflight walks
-            //   "caching" that part of the path. I.e. they may still complete successfully, so we
-            //   have staleness due to non-atomicity/translation caching, not just TSO.
-            //
-            // - The issue is that enforcing these conditions might be more work than just not
-            //   relying on them.
-            // - Plus we'd need to prove them in the implementation
-            //
-            // Enforcing bottom-to-top unmapping:
-            // - How to differentiate removal of a page mapping vs directory mapping?
-            // - When we explicitly do separate memory ranges I could technically use the address
-            //   to distinguish whether we're unmapping a page mapping or a directory mapping
-            // - But this may not work generally with huge page mappings?
-            //
-            // Without bottom-to-top unmapping:
-            // - We can now have in-flight walks that will complete successfully but don't satisfy
-            //   is_iter_walk_prefix
-            // - Specifically: If we remove a non-empty directory, walks using that directory may
-            //   be in-progress and eventually complete successfully
             &&& (if walk_a.result() is Invalid {
                      walk_na.result() matches WalkResult::Valid { vbase, pte }
                          ==> self.hist.pending_unmaps.contains_pair(vbase, pte)
@@ -673,7 +656,7 @@ impl State {
     /// This duplicates some of `inv_unmapping__inflight_walks`. We only really need it to prove
     /// `inv_mapping__inflight_walks` when we flip polarity.
     #[verifier(opaque)]
-    pub open spec fn inv_unmapping__notin_nonpos(self, c: Constants) -> bool {
+    pub open spec fn inv_notin_nonpos(self, c: Constants) -> bool {
         forall|core, walk|
             c.valid_core(core)
             && !self.writes.nonpos.contains(core)
@@ -709,9 +692,7 @@ impl State {
     /// If a ptwalk is successful on the writer core and not tracked by `pending_maps`, then its
     /// locations are not in the store buffer.
     pub open spec fn inv_mapping__valid_not_pending_is_not_in_sbuf(self, c: Constants) -> bool {
-        forall|va:usize,a|
-            #![trigger self.writer_mem().pt_walk(va), self.writer_sbuf().contains_fst(a)]
-        {
+        forall|va, a| #![trigger self.writer_mem().pt_walk(va), self.writer_sbuf().contains_fst(a)] {
             let walk = self.writer_mem().pt_walk(va);
             va < MAX_BASE && walk.result() is Valid && !self.pending_map_for(va) && walk.path.contains_fst(a)
                 ==> !self.writer_sbuf().contains_fst(a)
@@ -739,23 +720,62 @@ impl State {
         &&& self.inv_unmapping__inflight_walks(c)
         &&& self.inv_unmapping__core_vs_writer_reads(c)
         &&& self.inv_unmapping__valid_walk(c)
-        &&& self.inv_unmapping__notin_nonpos(c)
+        &&& self.inv_notin_nonpos(c)
         &&& self.hist.pending_maps === map![]
         &&& self.hist.pending_protects === map![]
         &&& self.writes.nonpos === set![] ==> self.hist.pending_unmaps === map![]
     }
 
+    pub open spec fn inv_protect__valid_not_pending_is_not_in_sbuf(self, c: Constants) -> bool {
+        forall|va, a| #![trigger self.writer_mem().pt_walk(va), self.writer_sbuf().contains_fst(a)] {
+            let walk = self.writer_mem().pt_walk(va);
+            va < MAX_BASE && walk.result() is Valid && !self.pending_protect_for(va) && walk.path.contains_fst(a)
+                ==> !self.writer_sbuf().contains_fst(a)
+        }
+    }
+
+    pub open spec fn inv_protect__inflight_walks(self, c: Constants) -> bool {
+        forall|core, walk| c.valid_core(core) && #[trigger] self.walks[core].contains(walk) ==> {
+            let walk_na = finish_iter_walk(self.core_mem(core), walk);
+            let walk_a  = self.core_mem(core).pt_walk(walk.vaddr);
+            // let writer_walk_a = self.core_mem(core).pt_walk(walk.vaddr);
+            &&& walk.vaddr < MAX_BASE
+            &&& aligned(walk.vaddr as nat, 8)
+            &&& walk.path.len() <= 3
+            &&& !walk.complete
+            &&& (if walk_a.result() is Invalid {
+                     walk_na.result() is Invalid
+                 } else {
+                     // (walk_na == walk_a) || (walk_na == writer_walk_a)
+                     walk_na.result() matches WalkResult::Valid { vbase, pte }
+                        && vbase      == walk_a.result()->Valid_vbase
+                        && pte.frame  == walk_a.result()->Valid_pte.frame
+                        && (pte.flags == walk_a.result()->Valid_pte.flags
+                            || self.hist.pending_protects.contains_pair(vbase, pte))
+                 })
+        }
+    }
+
     pub open spec fn inv_protect(self, c: Constants) -> bool {
+        &&& self.writes.tso !== set![] ==> self.writes.nonpos === Set::new(|core| c.valid_core(core))
+        // TODO: Tricky things:
+        // * There can be multiple writes in the store buffer but only one that has any effect on a
+        //   valid pt walk
+        // * We only need to reason about that one but distinguishing it could be tricky
         &&& true
+        // &&& TODO: forall vbase. !pending_protects.contains_key(vbase) ==> inflight walks are prefixes of atomic walk
+        // TODO: Need something like inv_unmapping__valid_walk as well?
+
         // &&& self.writes.tso !== set![] ==> self.writes.nonpos === Set::new(|core| c.valid_core(core))
         // &&& self.writer_sbuf_entries_have_P_bit_0()
         // &&& self.inv_unmapping__inflight_walks(c)
         // &&& self.inv_unmapping__core_vs_writer_reads(c)
         // &&& self.inv_unmapping__valid_walk(c)
-        // &&& self.inv_unmapping__notin_nonpos(c)
+        &&& self.inv_notin_nonpos(c)
         &&& self.hist.pending_maps === map![]
         &&& self.hist.pending_unmaps === map![]
         &&& self.writes.nonpos === set![] ==> self.hist.pending_protects === map![]
+        &&& self.writes.tso.len() <= 1
     }
 
     pub open spec fn inv(self, c: Constants) -> bool {
@@ -803,12 +823,12 @@ proof fn next_step_preserves_inv(pre: State, post: State, c: Constants, step: St
             if pre.polarity is Unmapping { // Flipped polarity in this transition
                 assert(pre.can_flip_polarity(c));
                 broadcast use lemma_writes_tso_empty_implies_sbuf_empty;
-                reveal(State::inv_unmapping__notin_nonpos);
+                reveal(State::inv_notin_nonpos);
                 assert(pre.inv_mapping__inflight_walks(c));
             } else if pre.polarity is Protect {
                 assert(pre.can_flip_polarity(c));
                 broadcast use lemma_writes_tso_empty_implies_sbuf_empty;
-                // reveal(State::inv_unmapping__notin_nonpos);
+                // reveal(State::inv_notin_nonpos);
                 assume(pre.inv_mapping__inflight_walks(c));
             }
             assert(post.writes.tso === set![] ==> post.hist.pending_maps === map![]) by {
@@ -846,7 +866,9 @@ proof fn next_step_preserves_inv_protect(pre: State, post: State, c: Constants, 
         next_step(pre, post, c, step, lbl),
     ensures post.inv_protect(c)
 {
+    assume(pre.inv_protect(c));
     assume(post.writes.nonpos === set![] ==> post.hist.pending_protects === map![]);
+    next_step_preserves_inv_notin_nonpos_Protect(pre, post, c, step, lbl);
     // assert_by_contradiction!(Set::new(|core| c.valid_core(core)) !== set![], {
     //     assert(Set::new(|core| c.valid_core(core)).contains(pre.writes.core));
     // });
@@ -866,14 +888,14 @@ proof fn next_step_preserves_inv_protect(pre: State, post: State, c: Constants, 
     //     assert(pre.inv_unmapping__core_vs_writer_reads(c)) by {
     //         reveal(State::inv_unmapping__core_vs_writer_reads);
     //     };
-    //     assert(pre.inv_unmapping__notin_nonpos(c)) by {
-    //         reveal(State::inv_unmapping__notin_nonpos);
+    //     assert(pre.inv_notin_nonpos(c)) by {
+    //         reveal(State::inv_notin_nonpos);
     //     };
     // }
     // next_step_preserves_inv_unmapping__valid_walk(pre, post, c, step, lbl);
     // next_step_preserves_inv_unmapping__core_vs_writer_reads(pre, post, c, step, lbl);
     // next_step_preserves_inv_unmapping__inflight_walks(pre, post, c, step, lbl);
-    // next_step_preserves_inv_unmapping__notin_nonpos(pre, post, c, step, lbl);
+    // next_step_preserves_inv_notin_nonpos_Unmapping(pre, post, c, step, lbl);
 }
 
 proof fn next_step_preserves_inv_unmapping(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
@@ -896,7 +918,7 @@ proof fn next_step_preserves_inv_unmapping(pre: State, post: State, c: Constants
         assert(pre.writer_sbuf_entries_have_P_bit_0());
     } else if pre.polarity is Protect {
         broadcast use lemma_writes_tso_empty_implies_sbuf_empty;
-        assume(pre.inv_unmapping__notin_nonpos(c));
+        assume(pre.inv_notin_nonpos(c));
         assume(pre.inv_unmapping__inflight_walks(c));
     }
     assert(post.writer_sbuf_entries_have_P_bit_0());
@@ -911,14 +933,14 @@ proof fn next_step_preserves_inv_unmapping(pre: State, post: State, c: Constants
         assert(pre.inv_unmapping__core_vs_writer_reads(c)) by {
             reveal(State::inv_unmapping__core_vs_writer_reads);
         };
-        assert(pre.inv_unmapping__notin_nonpos(c)) by {
-            reveal(State::inv_unmapping__notin_nonpos);
+        assert(pre.inv_notin_nonpos(c)) by {
+            reveal(State::inv_notin_nonpos);
         };
     }
     next_step_preserves_inv_unmapping__valid_walk(pre, post, c, step, lbl);
     next_step_preserves_inv_unmapping__core_vs_writer_reads(pre, post, c, step, lbl);
     next_step_preserves_inv_unmapping__inflight_walks(pre, post, c, step, lbl);
-    next_step_preserves_inv_unmapping__notin_nonpos(pre, post, c, step, lbl);
+    next_step_preserves_inv_notin_nonpos_Unmapping(pre, post, c, step, lbl);
 }
 
 #[verifier(spinoff_prover)]
@@ -1044,7 +1066,7 @@ broadcast proof fn lemma_unmapping__pt_walk_valid_in_post_unchanged(pre: State, 
     assert(bit!(0usize) == 1) by (bit_vector);
 }
 
-proof fn next_step_preserves_inv_unmapping__notin_nonpos(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
+proof fn next_step_preserves_inv_notin_nonpos_Unmapping(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
     requires
         pre.wf(c),
         pre.happy,
@@ -1053,26 +1075,59 @@ proof fn next_step_preserves_inv_unmapping__notin_nonpos(pre: State, post: State
         pre.inv_sbuf_facts(c),
         pre.inv_unmapping(c),
         next_step(pre, post, c, step, lbl),
-    ensures post.inv_unmapping__notin_nonpos(c)
+    ensures post.inv_notin_nonpos(c)
 {
-    reveal(State::inv_unmapping__notin_nonpos);
+    reveal(State::inv_notin_nonpos);
     broadcast use
         group_ambient,
         lemma_step_core_mem;
     match step {
         Step::WalkStep { core, walk } => {
             reveal(rl2::walk_next);
-            assert(post.inv_unmapping__notin_nonpos(c));
+            assert(post.inv_notin_nonpos(c));
         },
         Step::WriteNonpos => {
-            assert(post.inv_unmapping__notin_nonpos(c));
+            assert(post.inv_notin_nonpos(c));
         },
         Step::Writeback { core } => {
             broadcast use lemma_writes_tso_empty_implies_sbuf_empty;
-            assert(post.inv_unmapping__notin_nonpos(c));
+            assert(post.inv_notin_nonpos(c));
         },
         _ => {
-            assert(post.inv_unmapping__notin_nonpos(c));
+            assert(post.inv_notin_nonpos(c));
+        },
+    }
+}
+
+proof fn next_step_preserves_inv_notin_nonpos_Protect(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
+    requires
+        pre.wf(c),
+        pre.happy,
+        post.happy,
+        post.polarity is Protect,
+        pre.inv_sbuf_facts(c),
+        pre.inv_protect(c),
+        next_step(pre, post, c, step, lbl),
+    ensures post.inv_notin_nonpos(c)
+{
+    reveal(State::inv_notin_nonpos);
+    broadcast use
+        group_ambient,
+        lemma_step_core_mem;
+    match step {
+        Step::WalkStep { core, walk } => {
+            reveal(rl2::walk_next);
+            assert(post.inv_notin_nonpos(c));
+        },
+        Step::WriteProtect => {
+            assert(post.inv_notin_nonpos(c));
+        },
+        Step::Writeback { core } => {
+            broadcast use lemma_writes_tso_empty_implies_sbuf_empty;
+            assert(post.inv_notin_nonpos(c));
+        },
+        _ => {
+            assert(post.inv_notin_nonpos(c));
         },
     }
 }
@@ -1112,7 +1167,7 @@ proof fn next_step_preserves_inv_unmapping__inflight_walks(pre: State, post: Sta
             assert(post.inv_unmapping__inflight_walks(c));
         },
         Step::Invlpg => {
-            reveal(State::inv_unmapping__notin_nonpos);
+            reveal(State::inv_notin_nonpos);
             if !pre.can_flip_polarity(c) && post.can_flip_polarity(c) {
                 assert(forall|core| #[trigger] c.valid_core(core) ==> !post.writes.nonpos.contains(core));
                 broadcast use
@@ -1882,6 +1937,27 @@ proof fn lemma_mem_view_after_step_write(pre: State, post: State, c: Constants, 
     }
 }
 
+broadcast proof fn lemma_step_writeprotect_walk_mostly_unchanged(pre: State, post: State, c: Constants, lbl: Lbl, va: usize)
+    requires
+        pre.happy,
+        post.happy,
+        pre.wf(c),
+        pre.inv_sbuf_facts(c),
+        step_WriteProtect(pre, post, c, lbl),
+    ensures #![trigger step_WriteProtect(pre, post, c, lbl), post.writer_mem().pt_walk(va)]
+        post.writer_mem().pt_walk(va).result() is Valid
+            <==> pre.writer_mem().pt_walk(va).result() is Valid,
+        post.writer_mem().pt_walk(va).result() matches WalkResult::Valid { vbase, pte }
+            ==> (vbase == pre.writer_mem().pt_walk(va).result()->Valid_vbase
+              && pte.frame == pre.writer_mem().pt_walk(va).result()->Valid_pte.frame)
+{
+    reveal(PDE::all_mb0_bits_are_zero);
+    pre.pt_mem.lemma_write_seq(pre.writer_sbuf());
+    post.pt_mem.lemma_write_seq(post.writer_sbuf());
+    lemma_mem_view_after_step_write(pre, post, c, lbl);
+    broadcast use PDE::lemma_view_unchanged_prot_flags;
+}
+
 broadcast proof fn lemma_step_writenonneg_valid_walk_unchanged(pre: State, post: State, c: Constants, lbl: Lbl, va: usize)
     requires
         pre.happy,
@@ -2224,9 +2300,9 @@ proof fn lemma_valid_not_pending_implies_equal(state: State, c: Constants, core:
         va < MAX_BASE,
         state.wf(c),
         state.inv_sbuf_facts(c),
-        state.inv_mapping__valid_not_pending_is_not_in_sbuf(c),
+        (state.inv_mapping__valid_not_pending_is_not_in_sbuf(c) && !state.pending_map_for(va) ||
+        state.inv_protect__valid_not_pending_is_not_in_sbuf(c) && !state.pending_protect_for(va)),
         state.writer_mem().pt_walk(va).result() is Valid,
-        !state.pending_map_for(va),
         c.valid_core(core),
     ensures
         state.core_mem(core).pt_walk(va) == state.writer_mem().pt_walk(va)
@@ -2605,7 +2681,7 @@ pub mod refinement {
                     if pre.hist.pending_unmaps.contains_key(vaddr) && pre.writes.nonpos.contains(core) {
                         rl1::Step::TLBFillNA1 { core, vaddr }
                     } else if pre.hist.pending_protects.contains_pair(vaddr, pte) && pre.writes.nonpos.contains(core) {
-                        rl1::Step::TLBFillNA2 { core, vaddr, pte }
+                        rl1::Step::TLBFillNA2 { core, vaddr }
                     } else {
                         rl1::Step::TLBFill { core, vaddr }
                     }
@@ -2666,39 +2742,90 @@ pub mod refinement {
                     if pre.hist.pending_unmaps.contains_key(vbase) && pre.writes.nonpos.contains(core) {
                         assert(rl1::step_TLBFillNA1(pre.interp(), post.interp(), c, core, vbase, lbl));
                     } else {
-                        assert_by_contradiction!(walk_a == walk_na, {
-                            broadcast use
-                                rl2::lemma_finish_iter_walk_prefix_matches_iter_walk,
-                                rl2::lemma_iter_walk_equals_pt_walk,
-                                rl2::lemma_writes_tso_empty_implies_sbuf_empty;
-                            reveal(rl2::State::inv_unmapping__notin_nonpos);
-                            assert(rl2::is_iter_walk_prefix(pre.core_mem(core), walk));
-                            assert(walk_na == rl2::finish_iter_walk(pre.core_mem(core), walk));
-                            assert(pre.writes.tso === set![]);
-                            assert(pre.sbuf[pre.writes.core] === seq![]);
-                            assert(pre.writer_mem() == pre.core_mem(core));
-                        });
+                        assert(walk_a == walk_na) by {
+                            broadcast use rl2::lemma_writes_tso_empty_implies_sbuf_empty;
+                            reveal(rl2::State::inv_notin_nonpos);
+                        };
                         assert(rl1::step_TLBFill(pre.interp(), post.interp(), c, core, vbase, lbl));
                     }
                 } else {
                     assert(pre.polarity is Protect);
                     assert(pre.hist.pending_unmaps === map![]);
+                    assume(walk_a == pre.writer_mem().pt_walk(vbase));
                     if pre.hist.pending_protects.contains_pair(vbase, pte) && pre.writes.nonpos.contains(core) {
-                        assert(rl1::step_TLBFillNA2(pre.interp(), post.interp(), c, core, vbase, pte, lbl));
+                        // The walk's result matches an entry in `pending_protects` and this core
+                        // has not yet performed invalidation, so we can directly do a non-atomic
+                        // TLB fill.
+                        assert(rl1::step_TLBFillNA2(pre.interp(), post.interp(), c, core, vbase, lbl));
                     } else {
+                        assume(vbase < MAX_BASE);
+                        broadcast use
+                            rl2::lemma_finish_iter_walk_prefix_matches_iter_walk,
+                            rl2::lemma_iter_walk_equals_pt_walk,
+                            rl2::lemma_writes_tso_empty_implies_sbuf_empty;
+                        if pre.writes.nonpos.contains(core) {
+                            // Core has not yet invalidated
+                            assert(!pre.hist.pending_protects.contains_pair(vbase, pte));
+                            if pre.hist.pending_protects.contains_key(vbase) {
+                                // And the walk matches an entry in `pending_protects` but with a
+                                // different PTE. We have to prove that this can only be the PTE of
+                                // the atomic walk.
+                                assert(pte != pre.hist.pending_protects[vbase]);
+
+                                // If not equal to atomic walk, we know that at least one read
+                                // along the path must be different. This means the write was
+                                // already written back and sbuf is empty.
+                                // assume(pre.writer_sbuf() === seq![]);
+
+                                // assume(pre.inv_protect__inflight_walks(c));
+                                assume(walk_a.result() is Valid); // TODO: easy, walk can't have been invalidated
+                                assume(walk_a.result()->Valid_vbase == vbase); // TODO: easy
+
+                                // TODO: not too hard? Probably need properties about combining
+                                // flags.
+                                // Should know: If tso non-empty, sbuf non-empty, all walks are
+                                // prefixes. If tso non-empty, sbuf empty, if a walk uses the
+                                // address in tso, the result is either the pte in
+                                // pending_protects, or the atomic one
+                                assume((pte == pre.hist.pending_protects[vbase])
+                                    || (pte == walk_a.result()->Valid_pte));
+                                assert(pte == walk_a.result()->Valid_pte);
+                                assert(walk_a.result() == walk_na.result());
+                                // assume(walk_a.result()->Valid_pte == pte);
+                                assert(rl1::step_TLBFill(pre.interp(), post.interp(), c, core, vbase, lbl));
+                            } else {
+                                assume(pre.inv_protect__inflight_walks(c));
+                                assert(pre.walks[core].contains(walk));
+                                let walk_base_a = pre.writer_mem().pt_walk(vbase);
+                                assume(pre.inv_protect__valid_not_pending_is_not_in_sbuf(c));
+                                // assume(walk_a.result() is Valid);
+                                assume(walk_base_a.result() is Valid);
+                                assume(!pre.pending_protect_for(walk.vaddr)); // or vbase
+                                rl2::lemma_valid_not_pending_implies_equal(pre, c, core, vbase);
+                                assume(vbase == walk_base_a.result()->Valid_vbase);
+                                assume(pte == walk_base_a.result()->Valid_pte);
+
+                                assert(rl1::step_TLBFill(pre.interp(), post.interp(), c, core, vbase, lbl));
+                            }
+                        } else {
+                            // This core already invalidated, so inflight walks match the memory.
+                            assert(walk_a == walk_na) by {
+                                reveal(rl2::State::inv_notin_nonpos);
+                            };
+                            assert(rl1::step_TLBFill(pre.interp(), post.interp(), c, core, vbase, lbl));
+                        }
                         // assert_by_contradiction!(walk_a == walk_na, {
                         //     broadcast use
                         //         rl2::lemma_finish_iter_walk_prefix_matches_iter_walk,
                         //         rl2::lemma_iter_walk_equals_pt_walk,
                         //         rl2::lemma_writes_tso_empty_implies_sbuf_empty;
-                        //     reveal(rl2::State::inv_unmapping__notin_nonpos);
+                        //     reveal(rl2::State::inv_notin_nonpos);
                         //     assert(rl2::is_iter_walk_prefix(pre.core_mem(core), walk));
                         //     assert(walk_na == rl2::finish_iter_walk(pre.core_mem(core), walk));
                         //     assert(pre.writes.tso === set![]);
                         //     assert(pre.sbuf[pre.writes.core] === seq![]);
                         //     assert(pre.writer_mem() == pre.core_mem(core));
                         // });
-                        assume(rl1::step_TLBFill(pre.interp(), post.interp(), c, core, vbase, lbl));
                     }
                 }
             },

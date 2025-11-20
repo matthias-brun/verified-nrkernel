@@ -284,6 +284,17 @@ impl Flags {
             disable_execute: self.disable_execute || other.disable_execute,
         }
     }
+
+    // /// This definition is equivalent to:
+    // /// `f1 <= f2 <==> (Exists f3. f1.combine(f3) == f2)`
+    // ///
+    // /// The intention is that we can determine whether `f1` can become `f2` if we continue the walk
+    // /// and combine further sets of flags.
+    // pub open spec fn less_or_equal(self, other: Flags) -> bool {
+    //     &&& other.is_writable ==> self.is_writable
+    //     &&& self.is_supervisor ==> other.is_supervisor
+    //     &&& self.disable_execute ==> other.disable_execute
+    // }
 }
 
 pub ghost struct ArchLayer {
@@ -301,15 +312,13 @@ pub ghost struct Arch {
 
 impl Arch {
     pub open spec(checked) fn entry_size(self, layer: nat) -> nat
-        recommends
-            layer < self.layers.len(),
+        recommends layer < self.layers.len(),
     {
         self.layers[layer as int].entry_size
     }
 
     pub open spec(checked) fn num_entries(self, layer: nat) -> nat
-        recommends
-            layer < self.layers.len(),
+        recommends layer < self.layers.len(),
     {
         self.layers.index(layer as int).num_entries
     }
@@ -335,8 +344,7 @@ impl Arch {
     }
 
     pub open spec(checked) fn entry_size_is_next_layer_size(self, i: nat) -> bool
-        recommends
-            i < self.layers.len(),
+        recommends i < self.layers.len(),
     {
         i + 1 < self.layers.len() ==> self.entry_size(i) == self.entry_size((i + 1) as nat)
             * self.num_entries((i + 1) as nat)
