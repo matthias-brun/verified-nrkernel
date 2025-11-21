@@ -521,9 +521,12 @@ pub mod code {
         ensures
             tok.tstate() is Spent,
     {
-        let my_cpu = unsafe { get_current_cpu_id() } as usize;
-        // unsafe { print("acknowledging CPU:\0".as_ptr() as *const c_char, my_cpu); }
-        SHOOTDOWN_ACKS[my_cpu].store(1, Ordering::Relaxed);
+        #[cfg(feature="linuxmodule")]
+        {
+            let my_cpu = unsafe { get_current_cpu_id() } as usize;
+            // unsafe { print("acknowledging CPU:\0".as_ptr() as *const c_char, my_cpu); }
+            SHOOTDOWN_ACKS[my_cpu].store(1, Ordering::Relaxed);
+        }
     }
 
 
