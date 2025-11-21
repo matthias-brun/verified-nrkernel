@@ -1533,6 +1533,21 @@ impl Step {
             _ => hlspec::Step::Stutter,
         }
     }
+
+    // The MMU label this transition corresponds to. (if the transition takes an MMU step)
+    pub open spec fn mmu_lbl(self, pre: State, lbl: RLbl) -> mmu::Lbl {
+        match self {
+            Step::MemOp { core }                        => mmu::Lbl::MemOp(core, lbl->MemOp_vaddr as usize, lbl->MemOp_op),
+            Step::ReadPTMem { core, paddr, value }      => mmu::Lbl::Read(core, paddr, value),
+            Step::Barrier { core }                      => mmu::Lbl::Barrier(core),
+            Step::Invlpg { core }                       => mmu::Lbl::Invlpg(core, pre.os_ext.shootdown_vec.vaddr as usize),
+            Step::MapOpStutter { core, paddr, value }   => mmu::Lbl::Write(core, paddr, value),
+            Step::MapOpChange { core, paddr, value }    => mmu::Lbl::Write(core, paddr, value),
+            Step::UnmapOpChange { core, paddr, value }  => mmu::Lbl::Write(core, paddr, value),
+            Step::UnmapOpStutter { core, paddr, value } => mmu::Lbl::Write(core, paddr, value),
+            _                                           => mmu::Lbl::Tau,
+        }
+    }
 }
 
 } // verus!
