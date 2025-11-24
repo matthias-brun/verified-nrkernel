@@ -813,7 +813,7 @@ pub proof fn next_step_preserves_tlb_inv(
             to_rl1::next_preserves_inv(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
             assert(bit!(0usize) == 1) by (bit_vector);
             lemma_bits_misc();
-            assume(s1.mmu@.pt_mem.read(paddr) & 1 == 1);
+            assert(s1.mmu@.pt_mem.read(paddr) & 1 == 1);
             assert(!s1.mmu@.pt_mem.is_prot_write(paddr, value));
             assert(s2.all_cores_nonpos_before_shootdown(c)) by {
                 assert(s2.mmu@.writes.nonpos =~= Set::new(|core| c.valid_core(core)));
