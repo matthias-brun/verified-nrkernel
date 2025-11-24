@@ -15,7 +15,8 @@ use crate::impl_u::l1;
 use crate::impl_u::indexing;
 use crate::spec_t::mmu::translation::{ PDE,GPDE, MASK_FLAG_P, MASK_FLAG_RW, MASK_FLAG_US,
 MASK_FLAG_PWT, MASK_FLAG_PCD, MASK_FLAG_XD, MASK_ADDR, MASK_PG_FLAG_PAT, MASK_L1_PG_FLAG_PS,
-MASK_DIR_ADDR, MASK_L1_PG_ADDR, MASK_L2_PG_ADDR, MASK_L3_PG_ADDR, MASK_NEG_DIRTY_ACCESS };
+MASK_DIR_ADDR, MASK_L1_PG_ADDR, MASK_L2_PG_ADDR, MASK_L3_PG_ADDR, MASK_NEG_DIRTY_ACCESS,
+MASK_L3_PG_FLAG_PAT };
 #[cfg(verus_keep_ghost)]
 use crate::extra;
 use crate::impl_u::wrapped_token::{ WrappedMapToken, WrappedUnmapToken, WrappedTokenView, OpArgs };
@@ -375,7 +376,8 @@ impl PDE {
         let or5 = if is_writethrough       { MASK_FLAG_PWT }       else { 0 };
         let or6 = if disable_cache         { MASK_FLAG_PCD }       else { 0 };
         let or7 = if disable_execute       { MASK_FLAG_XD }        else { 0 };
-        let e = address | or1 | or2 | or3 | or4 | or5 | or6 | or7;
+        let or8 = if layer == 3            { MASK_L3_PG_FLAG_PAT } else { 0 };
+        let e = address | or1 | or2 | or3 | or4 | or5 | or6 | or7 | or8;
         let mw: usize = MAX_PHYADDR_WIDTH;
         axiom_max_phyaddr_width_facts();
         assert(forall|a:usize,x:usize| x < 64 && (a & bit!(x) == 0) ==> a & bit!(x) != bit!(x)) by (bit_vector);
@@ -960,6 +962,7 @@ pub broadcast proof fn lemma_inv_implies_interp_inv(tok: WrappedTokenView, pt: P
     assert(interp.directories_are_in_next_layer());
     assert(interp.directories_match_arch());
     assert(interp.directories_obey_invariant());
+    assert(interp_at(tok, pt, layer, ptr, base).inv());
 }
 
 /// The token has changed but the relevant views are unchanged.
