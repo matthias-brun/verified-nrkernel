@@ -770,7 +770,7 @@ impl State {
         &&& self.hist.pending_unmaps === map![]
         &&& self.writes.nonpos === set![] ==> self.hist.pending_protects === map![]
         &&& self.writes.tso !== set![] ==> self.writes.nonpos === Set::new(|core| c.valid_core(core))
-        &&& self.writes.tso.len() <= 1
+        &&& self.writer_sbuf().len() <= 1
     }
 
     pub open spec fn inv(self, c: Constants) -> bool {
@@ -1069,6 +1069,7 @@ proof fn next_step_preserves_inv_protect__core_walks(pre: State, post: State, c:
         post.polarity is Protect,
         pre.inv_sbuf_facts(c),
         pre.inv_protect__core_walks(c),
+        pre.writer_sbuf().len() <= 1,
         pre.writes.nonpos === set![] ==> pre.hist.pending_protects === map![],
         next_step(pre, post, c, step, lbl),
     ensures post.inv_protect__core_walks(c)
@@ -1122,7 +1123,7 @@ proof fn next_step_preserves_inv_protect__core_walks(pre: State, post: State, c:
         Step::Writeback { core } => {
             lemma_step_Writeback_preserves_writer_mem(pre, post, c, core, lbl);
             broadcast use lemma_writes_tso_empty_implies_sbuf_empty;
-            assume(post.writer_sbuf() === seq![]);
+            assert(post.writer_sbuf() === seq![]);
             assert(post.inv_protect__core_walks(c));
         },
         Step::Invlpg => {
@@ -1155,6 +1156,7 @@ proof fn next_step_preserves_inv_protect__core_walks_invalid(pre: State, post: S
         post.polarity is Protect,
         pre.inv_sbuf_facts(c),
         pre.inv_protect__core_walks_invalid(c),
+        pre.writer_sbuf().len() <= 1,
         next_step(pre, post, c, step, lbl),
     ensures post.inv_protect__core_walks_invalid(c)
 {
@@ -1170,7 +1172,7 @@ proof fn next_step_preserves_inv_protect__core_walks_invalid(pre: State, post: S
         Step::Writeback { core } => {
             lemma_step_Writeback_preserves_writer_mem(pre, post, c, core, lbl);
             broadcast use lemma_writes_tso_empty_implies_sbuf_empty;
-            assume(post.writer_sbuf() === seq![]);
+            assert(post.writer_sbuf() === seq![]);
             assert(post.inv_protect__core_walks_invalid(c));
         },
         _ => {
@@ -1187,6 +1189,7 @@ proof fn next_step_preserves_inv_protect__pending_pte_is_different(pre: State, p
         post.polarity is Protect,
         pre.inv_sbuf_facts(c),
         pre.inv_protect__pending_pte_is_different(c),
+        pre.writer_sbuf().len() <= 1,
         pre.writes.nonpos === set![] ==> pre.hist.pending_protects === map![],
         next_step(pre, post, c, step, lbl),
     ensures post.inv_protect__pending_pte_is_different(c)
@@ -1204,7 +1207,7 @@ proof fn next_step_preserves_inv_protect__pending_pte_is_different(pre: State, p
         Step::Writeback { core } => {
             lemma_step_Writeback_preserves_writer_mem(pre, post, c, core, lbl);
             broadcast use lemma_writes_tso_empty_implies_sbuf_empty;
-            assume(post.writer_sbuf() === seq![]);
+            assert(post.writer_sbuf() === seq![]);
             assert(post.inv_protect__pending_pte_is_different(c));
         },
         _ => {
@@ -1913,6 +1916,8 @@ proof fn next_step_preserves_inv_inflight_walks_are_prefixes_during_prot(pre: St
         pre.happy,
         post.happy,
         post.polarity is Protect,
+        pre.inv_sbuf_facts(c),
+        post.inv_sbuf_facts(c),
         pre.inv_inflight_walks_are_prefixes(c),
         pre.inv_protect__sbuf_implies_bit7(c),
         next_step(pre, post, c, step, lbl),
