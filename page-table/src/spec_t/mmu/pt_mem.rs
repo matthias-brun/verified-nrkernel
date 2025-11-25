@@ -71,9 +71,11 @@ impl PTMem {
 
     /// The RW/US/XD permission bits are in the same place for all mappings. Modifying these bits
     /// can only change permissions for existing entries but never add or remove entries.
+    /// We also require bit 7 to be set, which excludes permission changes for any directories.
     pub open spec fn is_prot_write(self, addr: usize, value: usize) -> bool {
         &&& value & MASK_PROT_FLAGS     != self.read(addr) & MASK_PROT_FLAGS
         &&& value & MASK_NEG_PROT_FLAGS == self.read(addr) & MASK_NEG_PROT_FLAGS
+        &&& self.read(addr) & bit!(7usize) == 1
     }
 
     pub open spec fn pt_walk(self, vaddr: usize) -> Walk {
@@ -214,8 +216,7 @@ impl PTMem {
         &&& vbase == vaddr
     }
 
-    /// Making this opaque so `pt_walk` isn't immediately visible in all the OS state machine
-    /// proofs.
+    /// Making this opaque so `pt_walk` isn't immediately visible in all the OS state machine proofs.
     #[verifier(opaque)]
     pub open spec fn view(self) -> Map<usize,PTE> {
         Map::new(

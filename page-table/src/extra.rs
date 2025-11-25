@@ -3,21 +3,54 @@ use vstd::prelude::*;
 
 use vstd::map::*;
 #[cfg(verus_keep_ghost)]
-use crate::spec_t::mmu::defs::{ aligned, bit, };
-use crate::spec_t::mmu::translation::{ MASK_NEG_PROT_FLAGS, };
+use crate::spec_t::mmu::defs::{ aligned, bit, bitmask_inc };
+use crate::spec_t::mmu::translation::{ MASK_NEG_PROT_FLAGS, MASK_NEG_DIRTY_ACCESS };
 
 
 verus! {
 
+pub proof fn lemma_bits_prot()
+    ensures
+        forall|v1: usize, v2: usize, b: usize|
+            ((v1 & MASK_NEG_PROT_FLAGS) == #[trigger] (v2 & MASK_NEG_PROT_FLAGS))
+                && b < 64 && b != 1 && b != 2 && b != 63
+                ==> #[trigger] (v1 & bit!(b)) == v2 & bit!(b),
+        forall|v1: usize, v2: usize, b1: usize, b2: usize|
+            (#[trigger] (v1 & MASK_NEG_PROT_FLAGS) == #[trigger] (v2 & MASK_NEG_PROT_FLAGS))
+                && 2 < b1 <= b2 < 63
+                // The line below is just bitmask_inc!(b1, b2) but we can't trigger on that directly
+                // (due to arith/non-arith mixing rules).
+                ==> (v1 & ((!(!0usize << #[trigger] (((b2+1usize)-b1) as usize))) << b1))
+                    == v2 & bitmask_inc!(b1,b2),
+        forall|v1: usize, v2: usize, mw: usize| #![auto]
+            v1 & MASK_NEG_PROT_FLAGS == v2 & MASK_NEG_PROT_FLAGS && 32 <= mw <= 52
+            ==> v1 & bitmask_inc!(mw, 51) == v2 & bitmask_inc!(mw, 51),
+{
+        assert(forall|v1: usize, v2: usize, b: usize|
+            ((v1 & MASK_NEG_PROT_FLAGS) == #[trigger] (v2 & MASK_NEG_PROT_FLAGS))
+                && b < 64 && b != 1 && b != 2 && b != 63
+                ==> #[trigger] (v1 & bit!(b)) == v2 & bit!(b)) by (bit_vector);
+        assert(forall|v1: usize, v2: usize, b1: usize, b2: usize|
+            (#[trigger] (v1 & MASK_NEG_PROT_FLAGS) == #[trigger] (v2 & MASK_NEG_PROT_FLAGS))
+                && 2 < b1 <= b2 < 63
+                // The line below is just bitmask_inc!(b1, b2) but we can't trigger on that directly
+                // (due to arith/non-arith mixing rules).
+                ==> (v1 & ((!(!0usize << #[trigger] (((b2+1usize)-b1) as usize))) << b1))
+                    == v2 & bitmask_inc!(b1,b2)) by (bit_vector);
+        assert(forall|v1: usize, v2: usize, mw: usize| #![auto]
+            v1 & MASK_NEG_PROT_FLAGS == v2 & MASK_NEG_PROT_FLAGS && 32 <= mw <= 52
+            ==> v1 & bitmask_inc!(mw, 51) == v2 & bitmask_inc!(mw, 51)) by (bit_vector);
+}
+
 pub proof fn lemma_bits_misc()
     ensures
         bit!(0usize) == 1,
-        forall|v: usize| v & bit!(0) == #[trigger] (v & !(bit!(5) | bit!(6)) & bit!(0)),
+        forall|v: usize| v & bit!(0) == #[trigger] (v & MASK_NEG_DIRTY_ACCESS & bit!(0)),
         forall|v1: usize, v2: usize| #![auto]
             (v2 & 1) != (v1 & 1) ==> v2 & MASK_NEG_PROT_FLAGS != v1 & MASK_NEG_PROT_FLAGS,
 {
         assert(bit!(0usize) == 1) by (bit_vector);
-        assert(forall|v: usize| v & bit!(0) == #[trigger] (v & !(bit!(5) | bit!(6)) & bit!(0))) by (bit_vector);
+        assert(forall|v: usize| v & bit!(0) == #[trigger] (v & MASK_NEG_DIRTY_ACCESS & bit!(0))) by (bit_vector);
         assert(forall|v1: usize, v2: usize| #![auto] (v2 & 1) != (v1 & 1) ==>
             v2 & !(bit!(63usize) | bit!(2usize) | bit!(1usize)) !=
             v1 & !(bit!(63usize) | bit!(2usize) | bit!(1usize))) by (bit_vector);

@@ -393,7 +393,7 @@ pub open spec fn step_MapOpChange(
     &&& c.valid_core(core)
     &&& s1.core_states[core] matches CoreState::MapExecuting { ult_id, vaddr, pte }
     &&& !candidate_mapping_overlaps_existing_vmem(s1.interp_pt_mem(), vaddr, pte)
-    &&& value & 1 == 1
+    &&& s1.mmu@.pt_mem.is_nonneg_write(paddr, value)
     &&& s1.os_ext.is_in_allocated_region(paddr as nat)
     &&& s2.interp_pt_mem() == s1.interp_pt_mem().insert(vaddr, pte)
 
@@ -518,7 +518,7 @@ pub open spec fn step_UnmapOpChange(
     //enabling conditions
     &&& c.valid_core(core)
     &&& s1.core_states[core] matches CoreState::UnmapExecuting { ult_id, vaddr, result: None }
-    &&& value & 1 == 0
+    &&& s1.mmu@.pt_mem.is_nonpos_write(paddr, value)
     // mmu statemachine steps
     &&& rl3::next(s1.mmu, s2.mmu, c.common, mmu::Lbl::Write(core, paddr, value))
     &&& s2.mmu@.happy == s1.mmu@.happy
