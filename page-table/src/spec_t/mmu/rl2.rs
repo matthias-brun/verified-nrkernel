@@ -754,11 +754,18 @@ impl State {
                     <==> self.writer_mem().pt_walk(va).result() is Invalid)
     }
 
+    pub open spec fn inv_protect__pending_pte_is_different(self, c: Constants) -> bool {
+        forall|vbase: usize, pte| self.hist.pending_protects.contains_pair(vbase, pte)
+            && self.writer_mem().pt_walk(vbase).result() is Valid
+            ==> pte != self.writer_mem().pt_walk(vbase).result()->Valid_pte
+    }
+
     pub open spec fn inv_protect(self, c: Constants) -> bool {
         &&& self.inv_inflight_walks_are_prefixes(c)
         &&& self.inv_protect__sbuf_implies_bit7(c)
         &&& self.inv_protect__core_walks(c)
         &&& self.inv_protect__core_walks_invalid(c)
+        &&& self.inv_protect__pending_pte_is_different(c)
         &&& self.hist.pending_maps === map![]
         &&& self.hist.pending_unmaps === map![]
         &&& self.writes.nonpos === set![] ==> self.hist.pending_protects === map![]
@@ -861,6 +868,7 @@ proof fn next_step_preserves_inv_protect(pre: State, post: State, c: Constants, 
     next_step_preserves_inv_protect__sbuf_implies_bit7(pre, post, c, step, lbl);
     next_step_preserves_inv_protect__core_walks(pre, post, c, step, lbl);
     next_step_preserves_inv_protect__core_walks_invalid(pre, post, c, step, lbl);
+    next_step_preserves_inv_protect__pending_pte_is_different(pre, post, c, step, lbl);
 }
 
 proof fn next_step_preserves_inv_unmapping(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
@@ -1060,8 +1068,6 @@ proof fn next_step_preserves_inv_protect__core_walks(pre: State, post: State, c:
         post.happy,
         post.polarity is Protect,
         pre.inv_sbuf_facts(c),
-        pre.inv_protect__sbuf_implies_bit7(c),
-        pre.inv_inflight_walks_are_prefixes(c),
         pre.inv_protect__core_walks(c),
         pre.writes.nonpos === set![] ==> pre.hist.pending_protects === map![],
         next_step(pre, post, c, step, lbl),
@@ -1148,10 +1154,7 @@ proof fn next_step_preserves_inv_protect__core_walks_invalid(pre: State, post: S
         post.happy,
         post.polarity is Protect,
         pre.inv_sbuf_facts(c),
-        pre.inv_protect__sbuf_implies_bit7(c),
-        pre.inv_inflight_walks_are_prefixes(c),
         pre.inv_protect__core_walks_invalid(c),
-        pre.writes.nonpos === set![] ==> pre.hist.pending_protects === map![],
         next_step(pre, post, c, step, lbl),
     ensures post.inv_protect__core_walks_invalid(c)
 {
@@ -1172,6 +1175,40 @@ proof fn next_step_preserves_inv_protect__core_walks_invalid(pre: State, post: S
         },
         _ => {
             assert(post.inv_protect__core_walks_invalid(c));
+        },
+    }
+}
+
+proof fn next_step_preserves_inv_protect__pending_pte_is_different(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
+    requires
+        pre.wf(c),
+        pre.happy,
+        post.happy,
+        post.polarity is Protect,
+        pre.inv_sbuf_facts(c),
+        pre.inv_protect__pending_pte_is_different(c),
+        pre.writes.nonpos === set![] ==> pre.hist.pending_protects === map![],
+        next_step(pre, post, c, step, lbl),
+    ensures post.inv_protect__pending_pte_is_different(c)
+{
+    broadcast use
+        group_ambient,
+        lemma_step_core_mem;
+    match step {
+        Step::WriteProtect => {
+            lemma_mem_view_after_step_write(pre, post, c, lbl);
+            broadcast use lemma_step_writeprotect_walk_mostly_unchanged;
+            reveal(PTMem::view);
+            assert(post.inv_protect__pending_pte_is_different(c));
+        },
+        Step::Writeback { core } => {
+            lemma_step_Writeback_preserves_writer_mem(pre, post, c, core, lbl);
+            broadcast use lemma_writes_tso_empty_implies_sbuf_empty;
+            assume(post.writer_sbuf() === seq![]);
+            assert(post.inv_protect__pending_pte_is_different(c));
+        },
+        _ => {
+            assert(post.inv_protect__pending_pte_is_different(c));
         },
     }
 }
@@ -1876,8 +1913,6 @@ proof fn next_step_preserves_inv_inflight_walks_are_prefixes_during_prot(pre: St
         pre.happy,
         post.happy,
         post.polarity is Protect,
-        pre.inv_sbuf_facts(c),
-        post.inv_sbuf_facts(c),
         pre.inv_inflight_walks_are_prefixes(c),
         pre.inv_protect__sbuf_implies_bit7(c),
         next_step(pre, post, c, step, lbl),
@@ -2906,23 +2941,14 @@ pub mod refinement {
                 } else {
                     assert(pre.polarity is Protect);
                     if pre.hist.pending_protects.contains_pair(vbase, pte) {
-                        // TODO:
-                        // * We know the walk's prefix is equal to the atomic one
-                        // * So the final read must differ between core and writer mem
-                        // * That means writer's sbuf contains an entry with this address
-                        // * Thus, pre.writer_sbuf() !== seq![]
-                        // * Thus, pre.writes.nonpos.contains(core)
-                        //
-                        // assume(forall|core| c.valid_core(core) && pre.writes.tso === set![]
-                        //     ==> pre.core_mem(core) == pre.writer_mem()); // TODO: should be easy
-                        // assert_by_contradiction!(pre.writes.nonpos.contains(core), {
-                        //     assert(c.valid_core(core));
-                        //     assert(pre.writes.tso === set![]);
-                        // });
-                        assume(pre.writes.nonpos.contains(core));
-                        // The walk's result matches an entry in `pending_protects` and this core
-                        // has not yet performed invalidation, so we can directly do a non-atomic
-                        // TLB fill.
+                        assert(pre.writer_mem().pt_walk(vbase).result()->Valid_pte != pte);
+                        assert_by_contradiction!(pre.writes.nonpos.contains(core), {
+                            assert(pre.writes.tso === set![]);
+                            assert(pre.writes.tso !~= set![]) by {
+                                assert(pre.writer_sbuf() !== seq![]);
+                                assert(pre.writes.tso.contains(pre.writer_sbuf()[0].0));
+                            };
+                        });
                         assert(rl1::step_TLBFillNA2(pre.interp(), post.interp(), c, core, vbase, lbl));
                     } else {
                         if pre.hist.pending_protects.contains_key(vbase) {
