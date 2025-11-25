@@ -80,7 +80,8 @@ impl State {
         // could observe all 4 possibilities: RW/XD, (not RW)/XD, RW/(not XD), (not RW)/(not XD)
         // Our implementation only makes one modification, so we choose the simpler option, where the
         // only possible outcomes are that we see the new or the old translation.
-        &&& self.writes.tso.is_empty()
+        &&& self.writes.tso === set![]
+        &&& self.writes.nonpos === set![]
     }
 
     pub open spec fn is_tso_read_deterministic(self, core: Core, addr: usize) -> bool {

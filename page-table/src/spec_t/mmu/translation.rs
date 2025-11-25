@@ -7,6 +7,7 @@ use vstd::prelude::*;
 use crate::spec_t::mmu::defs::{ Flags, MAX_PHYADDR_WIDTH, bit, bitmask_inc, };
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::defs::{ aligned, axiom_max_phyaddr_width_facts, };
+use crate::extra;
 
 verus!{
 
@@ -208,23 +209,8 @@ impl PDE {
             other@ matches GPDE::Page { addr, .. }      ==> self@->Page_addr == addr,
     {
         reveal(PDE::all_mb0_bits_are_zero);
-        let v1 = self.entry;
-        let v2 = other.entry;
-        assert(forall|v1: usize, v2: usize, b: usize|
-            ((v1 & MASK_NEG_PROT_FLAGS) == #[trigger] (v2 & MASK_NEG_PROT_FLAGS))
-                && b < 64 && b != 1 && b != 2 && b != 63
-                ==> #[trigger] (v1 & bit!(b)) == v2 & bit!(b)) by (bit_vector);
-        assert(forall|v1: usize, v2: usize, b1: usize, b2: usize|
-            (#[trigger] (v1 & MASK_NEG_PROT_FLAGS) == #[trigger] (v2 & MASK_NEG_PROT_FLAGS))
-                && 2 < b1 <= b2 < 63
-                // The line below is just bitmask_inc!(b1, b2) but we can't trigger on that directly
-                // (due to arith/non-arith mixing rules).
-                ==> (v1 & ((!(!0usize << #[trigger] (((b2+1usize)-b1) as usize))) << b1))
-                    == v2 & bitmask_inc!(b1,b2)) by (bit_vector);
+        extra::lemma_bits_prot();
         axiom_max_phyaddr_width_facts();
-        assert(forall|v1: usize, v2: usize, mw: usize| #![auto]
-            v1 & MASK_NEG_PROT_FLAGS == v2 & MASK_NEG_PROT_FLAGS && 32 <= mw <= 52
-            ==> v1 & bitmask_inc!(mw, 51) == v2 & bitmask_inc!(mw, 51)) by (bit_vector);
     }
 
 
