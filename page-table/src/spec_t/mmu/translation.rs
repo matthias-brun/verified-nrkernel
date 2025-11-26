@@ -166,7 +166,7 @@ pub struct PDE {
 // PDE is reused in the implementation, which has an additional impl block for it in
 // `impl_u::l2_impl`.
 impl PDE {
-    // Could prove that the address is smaller than MAX_PHYADDR but this bound is sufficient sof ar
+    // Could prove that the address is smaller than MAX_PHYADDR but this bound is sufficient so far
     pub broadcast proof fn lemma_view_addr_aligned(self)
         requires self.layer@ < 4
         ensures #![trigger self.view()]

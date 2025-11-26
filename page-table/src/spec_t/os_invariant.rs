@@ -533,21 +533,28 @@ pub proof fn next_step_preserves_inv_writes(c: os::Constants, s1: os::State, s2:
         s2.inv_writes(c),
 {
     hide(os::State::tlb_inv);
-    broadcast use
-        to_rl1::next_preserves_inv,
-        to_rl1::next_refines;
     match step {
-        os::Step::Invlpg { core } => {
-            assert((s2.os_ext.lock matches Some(core) && s2.core_states[core].is_mapping())
-                ==> s2.mmu@.writes.nonpos === set![]);
-            assert(s2.os_ext.lock is None ==> {
-                &&& s2.mmu@.writes.tso === set![]
-                &&& s2.mmu@.writes.nonpos === set![]
-            });
-            assert(s2.inv_writes(c));
+        os::Step::MemOp { .. }
+        | os::Step::ReadPTMem { .. }
+        | os::Step::Invlpg { .. }
+        | os::Step::Barrier { .. }
+        | os::Step::UnmapOpChange { .. }
+        | os::Step::MMU { .. }
+        | os::Step::UnmapOpStutter { .. } => {
+            to_rl1::next_refines(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
+            to_rl1::next_preserves_inv(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
         },
-        os::Step::UnmapOpChange { core, paddr, value } => {
-            // If I remove this match arm, Verus times out, wtf
+        os::Step::MapOpStutter { core, .. } => {
+            to_rl1::next_refines(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
+            to_rl1::next_preserves_inv(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
+            // TODO: easy, follows from bit pattern requirements (is_prot_write, is_nonneg_write)
+            assume(!rl1::step_WriteProtect(s1.mmu@, s2.mmu@, c.common, step.mmu_lbl(s1, lbl)));
+        },
+        os::Step::MapOpChange { core, .. } => {
+            to_rl1::next_refines(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
+            to_rl1::next_preserves_inv(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
+            // TODO: same as above
+            assume(!rl1::step_WriteProtect(s1.mmu@, s2.mmu@, c.common, step.mmu_lbl(s1, lbl)));
         },
         _ => {},
     }

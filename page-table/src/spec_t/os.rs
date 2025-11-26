@@ -7,7 +7,7 @@ use vstd::prelude::*;
 use crate::spec_t::mmu::{ rl3, rl1 };
 use crate::spec_t::{ hlspec, mmu };
 use crate::spec_t::mmu::defs::{
-    MemRegion, PTE, L1_ENTRY_SIZE, L2_ENTRY_SIZE, L3_ENTRY_SIZE, MAX_PHYADDR, Core
+    MemRegion, PTE, L1_ENTRY_SIZE, L2_ENTRY_SIZE, L3_ENTRY_SIZE, MAX_PHYADDR, Core, Flags
 };
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::defs::{
@@ -49,6 +49,7 @@ pub enum CoreState {
     UnmapExecuting { ult_id: nat, vaddr: nat, result: Option<Result<PTE, ()>> },
     UnmapOpDone { ult_id: nat, vaddr: nat, result: Result<PTE, ()> },
     UnmapShootdownWaiting { ult_id: nat, vaddr: nat, result: Result<PTE, ()> },
+    // ProtectWaiting { ult_id: nat, vaddr: nat, flags: Flags },
 }
 
 #[allow(inconsistent_fields)]
@@ -231,14 +232,13 @@ pub open spec fn step_MMU(c: Constants, s1: State, s2: State, lbl: RLbl) -> bool
 pub open spec fn step_MemOp(c: Constants, s1: State, s2: State, core: Core, lbl: RLbl) -> bool {
     &&& lbl matches RLbl::MemOp { thread_id, vaddr, op }
     &&& aligned(vaddr, 8)
+    &&& vaddr <= usize::MAX
     &&& core == c.ult2core[thread_id]
     &&& c.valid_ult(thread_id)
     &&& s1.core_states[core] is Idle
     //mmu statemachine steps
     &&& rl3::next(s1.mmu, s2.mmu, c.common, mmu::Lbl::MemOp(core, vaddr as usize, op))
     &&& s2.os_ext == s1.os_ext
-    // FIXME(MB): This additional enabling condition here is kind of fishy
-    &&& vaddr <= usize::MAX
     //new state
     &&& s2.core_states == s1.core_states
     &&& s2.sound == s1.sound
@@ -1404,12 +1404,6 @@ impl State {
     ///////////////////////////////////////////////////////////////////////////////////////////////
     // Invariants about overlapping
     ///////////////////////////////////////////////////////////////////////////////////////////////
-    /*
-    the overlap invariants need to be strengthened.
-    
-    - In particular, pmem invariants need to be extended to include unmap (as many of the code comments suggest). 
-    
-    */
     pub open spec fn inv_inflight_map_no_overlap_inflight_vmem(self, c: Constants) -> bool {
         forall|core1: Core, core2: Core|
             (c.valid_core(core1) && c.valid_core(core2)
