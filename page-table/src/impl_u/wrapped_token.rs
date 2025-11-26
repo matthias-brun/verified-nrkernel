@@ -24,7 +24,6 @@ use crate::spec_t::mmu::rl3::refinement::to_rl1;
 use crate::spec_t::os_code_vc::Token;
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::os_code_vc::{ lemma_concurrent_trs, unchanged_state_during_concurrent_trs, lemma_concurrent_trs_no_lock };
-use crate::impl_u::wrapped_token;
 use crate::impl_u::l2_impl::{ PT, PTDir };
 
 verus! {
@@ -1048,7 +1047,7 @@ pub exec fn start_map_and_acquire_lock(Tracked(tok): Tracked<&mut Token>, Ghost(
         tok.steps_taken() == seq![old(tok).steps().first()],
         !tok.on_first_step(),
         // From `inv_impl`:
-        forall|wtok: wrapped_token::WrappedTokenView| ({
+        forall|wtok: WrappedTokenView| ({
             &&& wtok.pt_mem == tok.st().mmu@.pt_mem
             &&& wtok.regions.dom() == tok.st().os_ext.allocated
             &&& #[trigger] wtok.regions_derived_from_view()
@@ -1759,7 +1758,7 @@ pub exec fn start_unmap_and_acquire_lock(Tracked(tok): Tracked<&mut Token>, Ghos
         tok.steps_taken() == seq![old(tok).steps().first()],
         !tok.on_first_step(),
         // From `inv_impl`:
-        forall|wtok: wrapped_token::WrappedTokenView| ({
+        forall|wtok: WrappedTokenView| ({
             &&& wtok.pt_mem == tok.st().mmu@.pt_mem
             &&& wtok.regions.dom() == tok.st().os_ext.allocated
             &&& #[trigger] wtok.regions_derived_from_view()
