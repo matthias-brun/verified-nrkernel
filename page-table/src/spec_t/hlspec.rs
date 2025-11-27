@@ -6,7 +6,7 @@
 
 use vstd::prelude::*;
 use crate::spec_t::mmu::defs::{
-    MemRegion, PTE, MemOp, L1_ENTRY_SIZE, L2_ENTRY_SIZE, L3_ENTRY_SIZE, MAX_PHYADDR,
+    MemRegion, PTE, MemOp, L1_ENTRY_SIZE, L2_ENTRY_SIZE, L3_ENTRY_SIZE, MAX_PHYADDR, Flags,
 };
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::defs::{
@@ -38,6 +38,7 @@ pub struct State {
     /// `mappings` constrains the domain of mem and tracks the flags. We could instead move the
     /// flags into `map` as well and write the specification exclusively in terms of `map` but that
     /// also makes some of the enabling conditions awkward, e.g. full mappings have the same flags, etc.
+    /// But this is *not* a page table. It's not used for any sort of translation.
     pub mappings: Map<nat, PTE>,
     pub sound: bool,
 }
@@ -57,6 +58,7 @@ pub enum Step {
 pub enum ThreadState {
     Map { vaddr: nat, pte: PTE },
     Unmap { vaddr: nat, pte: Option<PTE> },
+    Protect { vaddr: nat, flags: Flags },
     Idle,
 }
 
@@ -153,36 +155,34 @@ pub open spec fn unsound_state(s1: State, s2: State) -> bool {
 ///////////////////////////////////////////////////////////////////////////////////////////////
 // Overlapping inflight memory helper functions
 ///////////////////////////////////////////////////////////////////////////////////////////////
+impl ThreadState {
+    pub open spec fn inflight_vmem_region(self, mappings: Map<nat, PTE>) -> MemRegion
+        recommends self !is Idle
+    {
+        match self {
+            ThreadState::Map { vaddr, pte } => MemRegion { base: vaddr, size: pte.frame.size },
+            ThreadState::Unmap { vaddr, pte: None } => MemRegion { base: vaddr, size: 0 },
+            ThreadState::Unmap { vaddr, pte: Some(pte) } => MemRegion { base: vaddr, size: pte.frame.size },
+            ThreadState::Protect { vaddr, flags } => {
+                let size = if mappings.contains_key(vaddr) { mappings[vaddr].frame.size } else { 0 };
+                MemRegion { base: vaddr, size }
+            },
+            ThreadState::Idle => arbitrary(),
+        }
+    }
+}
+
 pub open spec fn candidate_mapping_overlaps_inflight_vmem(
+    mappings: Map<nat, PTE>,
     inflightargs: Set<ThreadState>,
     base: nat,
     candidate_size: nat,
 ) -> bool {
-    &&& exists|b: ThreadState|
-        #![auto]
-        {
-            &&& inflightargs.contains(b)
-            &&& match b {
-                ThreadState::Map { vaddr, pte } => {
-                    overlap(
-                        MemRegion { base: vaddr, size: pte.frame.size },
-                        MemRegion { base: base, size: candidate_size },
-                    )
-                },
-                ThreadState::Unmap { vaddr, pte } => {
-                    let size = if pte.is_some() {
-                        pte.unwrap().frame.size
-                    } else {
-                        0
-                    };
-                    overlap(
-                        MemRegion { base: vaddr, size: size },
-                        MemRegion { base: base, size: candidate_size },
-                    )
-                },
-                _ => { false },
-            }
-        }
+    exists|ts: ThreadState| {
+        &&& #[trigger] inflightargs.contains(ts)
+        &&& ts !is Idle
+        &&& overlap(ts.inflight_vmem_region(mappings), MemRegion { base, size: candidate_size })
+    }
 }
 
 pub open spec fn candidate_mapping_overlaps_inflight_pmem(
@@ -197,7 +197,7 @@ pub open spec fn candidate_mapping_overlaps_inflight_pmem(
                 &&& pte.is_some()
                 &&& overlap(candidate.frame, pte.unwrap().frame)
             },
-            _ => { false },
+            _ => false,
         }
     }
 }
@@ -319,7 +319,7 @@ pub open spec fn step_Map_sound(
     vaddr: nat,
     pte: PTE,
 ) -> bool {
-    &&& !candidate_mapping_overlaps_inflight_vmem(inflights, vaddr, pte.frame.size)
+    &&& !candidate_mapping_overlaps_inflight_vmem(mappings, inflights, vaddr, pte.frame.size)
     &&& !candidate_mapping_overlaps_existing_pmem(mappings, pte)
     &&& !candidate_mapping_overlaps_inflight_pmem(inflights, pte)
 }
@@ -380,7 +380,7 @@ pub open spec fn step_MapEnd(c: Constants, s1: State, s2: State, lbl: RLbl) -> b
 // Unmap
 ///////////////////////////////////////////////////////////////////////////////////////////////
 pub open spec fn step_Unmap_sound(s1: State, vaddr: nat, pte_size: nat) -> bool {
-    !candidate_mapping_overlaps_inflight_vmem(s1.thread_state.values(), vaddr, pte_size)
+    !candidate_mapping_overlaps_inflight_vmem(s1.mappings, s1.thread_state.values(), vaddr, pte_size)
 }
 
 pub open spec fn step_Unmap_enabled(vaddr: nat) -> bool {
@@ -392,10 +392,6 @@ pub open spec fn step_Unmap_enabled(vaddr: nat) -> bool {
     }
 }
 
-// TODO:
-// shouldnt need to check for overlapping pmem because:
-// - if currently being mapped it will cause Err anyways
-// - if currently being unmapped then vmem is the way to go (?)
 pub open spec fn step_UnmapStart(c: Constants, s1: State, s2: State, lbl: RLbl) -> bool {
     &&& lbl matches RLbl::UnmapStart { thread_id, vaddr }
     &&& {

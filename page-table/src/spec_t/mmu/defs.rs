@@ -130,7 +130,7 @@ pub open spec fn candidate_mapping_overlaps_existing_vmem(
 
 pub open spec fn candidate_mapping_overlaps_existing_pmem(mappings: Map<nat, PTE>, pte: PTE) -> bool {
     exists|b: nat| #![auto] {
-            &&& mappings.dom().contains(b)
+            &&& mappings.contains_key(b)
             &&& overlap(pte.frame, mappings.index(b).frame)
         }
 }

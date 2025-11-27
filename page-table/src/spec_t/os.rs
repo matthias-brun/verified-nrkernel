@@ -49,7 +49,7 @@ pub enum CoreState {
     UnmapExecuting { ult_id: nat, vaddr: nat, result: Option<Result<PTE, ()>> },
     UnmapOpDone { ult_id: nat, vaddr: nat, result: Result<PTE, ()> },
     UnmapShootdownWaiting { ult_id: nat, vaddr: nat, result: Result<PTE, ()> },
-    // ProtectWaiting { ult_id: nat, vaddr: nat, flags: Flags },
+    ProtectWaiting { ult_id: nat, vaddr: nat, flags: Flags },
 }
 
 #[allow(inconsistent_fields)]
@@ -128,11 +128,6 @@ impl CoreState {
             _ => arbitrary(),
         }
     }
-
-    #[verifier(inline)]
-    pub open spec fn is_idle(self) -> bool {
-        self is Idle
-    }
 }
 
 impl Constants {
@@ -153,54 +148,45 @@ pub open spec fn candidate_mapping_overlaps_inflight_pmem(
     inflightargs: Set<CoreState>,
     candidate: PTE,
 ) -> bool {
-    exists|b: CoreState| #![auto] {
-        &&& inflightargs.contains(b)
-        &&& match b {
-            CoreState::MapWaiting { vaddr, pte, .. }
-            | CoreState::MapExecuting { vaddr, pte, .. }
-            | CoreState::MapDone { vaddr, pte, .. } => {
-                overlap(candidate.frame, pte.frame)
-            },
-            CoreState::UnmapWaiting { ult_id, vaddr }
-            | CoreState::UnmapExecuting { ult_id, vaddr, result: None, .. } => {
-                &&& pt.contains_key(vaddr)
-                &&& overlap(candidate.frame, pt[vaddr].frame)
-            },
-            CoreState::UnmapExecuting { ult_id, vaddr, result: Some(result), .. }
-            | CoreState::UnmapOpDone { ult_id, vaddr, result, .. }
-            | CoreState::UnmapShootdownWaiting { ult_id, vaddr, result, .. } => {
-                &&& result is Ok
-                &&& overlap(candidate.frame, result->Ok_0.frame)
-            },
-            CoreState::Idle => false,
-        }
+    exists|cs: CoreState| #![auto] {
+        &&& inflightargs.contains(cs)
+        &&& candidate_mapping_overlaps_inflight_pmem_corestate(pt, cs, candidate)
     }
 }
 
-pub open spec fn inflight_vmem_region(pt: Map<nat, PTE>, core_state: CoreState) -> MemRegion
-    recommends !(core_state is Idle)
-{
-    match core_state {
-        CoreState::Idle => arbitrary(),
+// TODO: Can this use something like inflight_vmem_region to be closer to
+// candidate_mapping_overlaps_inflight_vmem?
+pub open spec fn candidate_mapping_overlaps_inflight_pmem_corestate(
+    pt: Map<nat, PTE>,
+    cs: CoreState,
+    candidate: PTE,
+) -> bool {
+    match cs {
         CoreState::MapWaiting { vaddr, pte, .. }
         | CoreState::MapExecuting { vaddr, pte, .. }
         | CoreState::MapDone { vaddr, pte, .. } => {
-            MemRegion { base: vaddr, size: pte.frame.size }
-        }
-
-        CoreState::UnmapWaiting { vaddr, .. }
-        | CoreState::UnmapExecuting { vaddr, result: None, .. } => {
-            let size = if pt.contains_key(vaddr) { pt[vaddr].frame.size } else { 0 };
-            MemRegion { base: vaddr, size: size }
-        }
-
-        CoreState::UnmapExecuting { ult_id: ult_id2, vaddr, result: Some(result) }
-        | CoreState::UnmapOpDone { ult_id: ult_id2, vaddr, result }
-        | CoreState::UnmapShootdownWaiting { ult_id: ult_id2, vaddr, result } => {
-            let size = if result is Ok { result->Ok_0.frame.size } else { 0 };
-            MemRegion { base: vaddr, size: size }
-        }
+            overlap(candidate.frame, pte.frame)
+        },
+        CoreState::UnmapWaiting { ult_id, vaddr }
+        | CoreState::UnmapExecuting { ult_id, vaddr, result: None, .. }
+        | CoreState::ProtectWaiting { ult_id, vaddr, .. } => {
+            &&& pt.contains_key(vaddr)
+            &&& overlap(candidate.frame, pt[vaddr].frame)
+        },
+        CoreState::UnmapExecuting { ult_id, vaddr, result: Some(result), .. }
+        | CoreState::UnmapOpDone { ult_id, vaddr, result, .. }
+        | CoreState::UnmapShootdownWaiting { ult_id, vaddr, result, .. } => {
+            &&& result is Ok
+            &&& overlap(candidate.frame, result->Ok_0.frame)
+        },
+        CoreState::Idle => false,
     }
+}
+
+pub open spec fn inflight_vmem_region(pt: Map<nat, PTE>, cs: CoreState) -> MemRegion
+    recommends cs !is Idle
+{
+    MemRegion { base: cs.vaddr(), size: cs.pte_size(pt) }
 }
 
 pub open spec fn candidate_mapping_overlaps_inflight_vmem(
@@ -209,13 +195,10 @@ pub open spec fn candidate_mapping_overlaps_inflight_vmem(
     base: nat,
     candidate_size: nat,
 ) -> bool {
-    exists|core_state: CoreState| #![auto] {
-        &&& inflightargs.contains(core_state)
-        &&& !(core_state is Idle)
-        &&& overlap(
-                inflight_vmem_region(pt, core_state),
-                MemRegion { base: base, size: candidate_size },
-            )
+    exists|cs: CoreState| {
+        &&& #[trigger] inflightargs.contains(cs)
+        &&& cs !is Idle
+        &&& overlap(inflight_vmem_region(pt, cs), MemRegion { base, size: candidate_size })
     }
 }
 
@@ -729,7 +712,7 @@ impl Constants {
 
 impl CoreState {
     pub open spec fn pte_size(self, pt: Map<nat, PTE>) -> nat
-        recommends !self.is_idle(),
+        recommends self !is Idle
     {
         match self {
             CoreState::MapWaiting { pte, .. }
@@ -746,12 +729,15 @@ impl CoreState {
             | CoreState::UnmapShootdownWaiting { result, .. } => {
                 if result is Ok { result->Ok_0.frame.size } else { 0 }
             },
+            | CoreState::ProtectWaiting { vaddr, .. } => {
+                if pt.contains_key(vaddr) { pt[vaddr].frame.size } else { 0 }
+            },
             CoreState::Idle => arbitrary(),
         }
     }
 
     pub open spec fn vaddr(self) -> nat
-        recommends !self.is_idle(),
+        recommends self !is Idle
     {
         match self {
             CoreState::MapWaiting { vaddr, .. }
@@ -760,7 +746,8 @@ impl CoreState {
             | CoreState::UnmapWaiting { vaddr, .. }
             | CoreState::UnmapExecuting { vaddr, .. }
             | CoreState::UnmapOpDone { vaddr, .. }
-            | CoreState::UnmapShootdownWaiting { vaddr, .. } => { vaddr },
+            | CoreState::UnmapShootdownWaiting { vaddr, .. }
+            | CoreState::ProtectWaiting { vaddr, .. } => vaddr,
             CoreState::Idle => arbitrary(),
         }
     }
@@ -820,7 +807,7 @@ impl CoreState {
     }
 
     pub open spec fn ult_id(self) -> nat
-        recommends !self.is_idle(),
+        recommends self !is Idle
     {
         match self {
             CoreState::MapWaiting { ult_id, .. }
@@ -829,7 +816,8 @@ impl CoreState {
             | CoreState::UnmapWaiting { ult_id, .. }
             | CoreState::UnmapExecuting { ult_id, .. }
             | CoreState::UnmapOpDone { ult_id, .. }
-            | CoreState::UnmapShootdownWaiting { ult_id, .. } => { ult_id },
+            | CoreState::UnmapShootdownWaiting { ult_id, .. }
+            | CoreState::ProtectWaiting { ult_id, .. } => ult_id,
             CoreState::Idle => arbitrary(),
         }
     }
@@ -1011,40 +999,47 @@ impl State {
     pub open spec fn interp_thread_state(self, c: Constants) -> Map<nat, hlspec::ThreadState> {
         Map::new(
             |ult_id: nat| c.valid_ult(ult_id),
-            |ult_id: nat| {
-                    match self.core_states[c.ult2core[ult_id]] {
-                        CoreState::MapWaiting { ult_id: ult_id2, vaddr, pte }
-                        | CoreState::MapExecuting { ult_id: ult_id2, vaddr, pte }
-                        | CoreState::MapDone { ult_id: ult_id2, vaddr, pte, .. } => {
-                            if ult_id2 == ult_id {
+            |ult_id2: nat| {
+                    match self.core_states[c.ult2core[ult_id2]] {
+                        CoreState::MapWaiting { ult_id, vaddr, pte }
+                        | CoreState::MapExecuting { ult_id, vaddr, pte }
+                        | CoreState::MapDone { ult_id, vaddr, pte, .. } => {
+                            if ult_id == ult_id2 {
                                 hlspec::ThreadState::Map { vaddr, pte }
                             } else {
                                 hlspec::ThreadState::Idle
                             }
                         },
-                        CoreState::UnmapWaiting { ult_id: ult_id2, vaddr }
-                        | CoreState::UnmapExecuting { ult_id: ult_id2, vaddr, result: None } => {
+                        CoreState::UnmapWaiting { ult_id, vaddr }
+                        | CoreState::UnmapExecuting { ult_id, vaddr, result: None } => {
                             let pte = if self.interp_pt_mem().contains_key(vaddr) {
                                 Some(self.interp_pt_mem()[vaddr])
                             } else {
                                 None
                             };
-                            if ult_id2 == ult_id {
+                            if ult_id == ult_id2 {
                                 hlspec::ThreadState::Unmap { vaddr, pte }
                             } else {
                                 hlspec::ThreadState::Idle
                             }
                         },
-                        CoreState::UnmapExecuting { ult_id: ult_id2, vaddr, result: Some(result) }
-                        | CoreState::UnmapOpDone { ult_id: ult_id2, vaddr, result }
-                        | CoreState::UnmapShootdownWaiting { ult_id: ult_id2, vaddr, result } => {
-                            if ult_id2 == ult_id {
+                        CoreState::UnmapExecuting { ult_id, vaddr, result: Some(result) }
+                        | CoreState::UnmapOpDone { ult_id, vaddr, result }
+                        | CoreState::UnmapShootdownWaiting { ult_id, vaddr, result } => {
+                            if ult_id == ult_id2 {
                                 hlspec::ThreadState::Unmap { vaddr, pte:
                                     match result {
                                         Ok(pte) => Some(pte),
                                         Err(_) => None,
                                     }
                                 }
+                            } else {
+                                hlspec::ThreadState::Idle
+                            }
+                        },
+                        CoreState::ProtectWaiting { ult_id, vaddr, flags } => {
+                            if ult_id == ult_id2 {
+                                hlspec::ThreadState::Protect { vaddr, flags }
                             } else {
                                 hlspec::ThreadState::Idle
                             }
@@ -1069,17 +1064,12 @@ impl State {
     pub open spec fn valid_ids(self, c: Constants) -> bool {
         forall|core: Core|
             c.valid_core(core) ==> match self.core_states[core] {
-                CoreState::MapWaiting { ult_id, .. }
-                | CoreState::MapExecuting { ult_id, .. }
-                | CoreState::MapDone { ult_id, .. }
-                | CoreState::UnmapWaiting { ult_id, .. }
-                | CoreState::UnmapExecuting { ult_id, .. }
-                | CoreState::UnmapOpDone { ult_id, .. }
-                | CoreState::UnmapShootdownWaiting { ult_id, .. } => {
+                CoreState::Idle => true,
+                cs => {
+                    let ult_id = cs.ult_id();
                     &&& c.valid_ult(ult_id)
                     &&& c.ult2core[ult_id] === core
                 },
-                CoreState::Idle => true,
             }
     }
 
@@ -1177,15 +1167,15 @@ impl State {
     }
 
     pub open spec fn inv_pending_maps(self, c: Constants) -> bool {
-        &&& forall |base| #[trigger] self.mmu@.pending_maps.dom().contains(base) ==>
+        &&& forall |base| #[trigger] self.mmu@.pending_maps.contains_key(base) ==>
             exists |core| Self::is_pending_for_core(c, base, core,
                 self.core_states, self.mmu@.pending_maps)
     }
 
     pub open spec fn is_pending_for_core(c: Constants, base: usize, core: Core, core_states: Map<Core, CoreState>, pending_maps: Map<usize, PTE>) -> bool
-        recommends pending_maps.dom().contains(base)
+        recommends pending_maps.contains_key(base)
     {
-        core_states.dom().contains(core)
+        core_states.contains_key(core)
             && match core_states[core] {
                 CoreState::MapDone { ult_id, vaddr, pte, result } =>
                     vaddr == base
@@ -1356,15 +1346,15 @@ impl State {
     pub open spec fn TLB_interp_pt_mem_agree(self, c: Constants) -> bool {
         forall|core: Core, v: usize|
             #[trigger] c.valid_core(core)
-            && #[trigger] self.mmu@.tlbs[core].dom().contains(v)
-            && self.interp_pt_mem().dom().contains(v as nat)
+            && #[trigger] self.mmu@.tlbs[core].contains_key(v)
+            && self.interp_pt_mem().contains_key(v as nat)
             ==> self.mmu@.tlbs[core][v] == self.interp_pt_mem()[v as nat]
     }
 
     pub open spec fn TLB_unmap_agree(self, c: Constants) -> bool {
         forall|core: Core, core2: Core, v: usize|
             #[trigger] c.valid_core(core)
-            && #[trigger] self.mmu@.tlbs[core].dom().contains(v)
+            && #[trigger] self.mmu@.tlbs[core].contains_key(v)
             && #[trigger] c.valid_core(core2)
             && self.is_unmap_vaddr_core(core2, v as nat)
             ==> self.mmu@.tlbs[core][v] == self.core_states[core2].PTE()
@@ -1407,7 +1397,7 @@ impl State {
     pub open spec fn inv_inflight_map_no_overlap_inflight_vmem(self, c: Constants) -> bool {
         forall|core1: Core, core2: Core|
             (c.valid_core(core1) && c.valid_core(core2)
-                && !self.core_states[core1].is_idle() && !self.core_states[core2].is_idle()
+                && self.core_states[core1] !is Idle && self.core_states[core2] !is Idle
                 && overlap(
                 MemRegion {
                     base: self.core_states[core1].vaddr(),
@@ -1508,7 +1498,7 @@ impl Step {
                     rl1::Step::MemOpNoTr => hlspec::Step::MemOp { pte: None },
                     rl1::Step::MemOpNoTrNA { .. } => hlspec::Step::MemOpNA,
                     rl1::Step::MemOpTLB { tlb_va } =>
-                        if pre.effective_mappings().dom().contains(tlb_va as nat) {
+                        if pre.effective_mappings().contains_key(tlb_va as nat) {
                             hlspec::Step::MemOp {
                                 pte: Some((tlb_va as nat, pre.effective_mappings()[tlb_va as nat]))
                             }
