@@ -1717,9 +1717,7 @@ pub proof fn lemma_candidate_mapping_inflight_vmem_overlap_os_implies_hl(
         s.inv_basic(c),
     ensures
         os::candidate_mapping_overlaps_inflight_vmem(s.interp_pt_mem(), s.core_states.values(), base, candidate_size)
-            // XXX: This should maybe be s.effective_mappings() rather than s.interp_pt_mem()
-            // because that matches what we use in hlspec
-            ==> hlspec::candidate_mapping_overlaps_inflight_vmem(s.interp_pt_mem(), s.interp(c).thread_state.values(), base, candidate_size),
+            ==> hlspec::candidate_mapping_overlaps_inflight_vmem(s.interp(c).thread_state.values(), base, candidate_size),
 {
     if os::candidate_mapping_overlaps_inflight_vmem(s.interp_pt_mem(), s.core_states.values(), base, candidate_size) {
         let cs = choose|cs: os::CoreState| #![auto] {
@@ -1754,8 +1752,6 @@ pub proof fn lemma_candidate_mapping_inflight_vmem_overlap_hl_implies_os(
         s.inv_basic(c),
     ensures
         hlspec::candidate_mapping_overlaps_inflight_vmem(
-            // XXX: maybe effective_mappings?
-            s.interp_pt_mem(),
             s.interp(c).thread_state.values(),
             base,
             candidate_size
@@ -1767,7 +1763,6 @@ pub proof fn lemma_candidate_mapping_inflight_vmem_overlap_hl_implies_os(
                 ),
 {
     if hlspec::candidate_mapping_overlaps_inflight_vmem(
-        s.interp_pt_mem(),
         s.interp(c).thread_state.values(),
         base,
         candidate_size,
@@ -1775,7 +1770,7 @@ pub proof fn lemma_candidate_mapping_inflight_vmem_overlap_hl_implies_os(
         let ts = choose|ts: hlspec::ThreadState| {
             &&& #[trigger] s.interp(c).thread_state.values().contains(ts)
             &&& ts !is Idle
-            &&& overlap(ts.inflight_vmem_region(s.interp_pt_mem()), MemRegion { base, size: candidate_size })
+            &&& overlap(ts.inflight_vmem_region(), MemRegion { base, size: candidate_size })
         };
         let ult_id = choose|id| #[trigger] c.valid_ult(id) && s.interp(c).thread_state[id] == ts;
         assert(c.valid_ult(ult_id));
@@ -1796,26 +1791,17 @@ pub proof fn lemma_candidate_mapping_inflight_pmem_overlap_os_implies_hl(
         candidate.frame.size > 0,
     ensures
         os::candidate_mapping_overlaps_inflight_pmem(s.interp_pt_mem(), s.core_states.values(), candidate)
-            ==> hlspec::candidate_mapping_overlaps_inflight_pmem(
-                s.interp(c).thread_state.values(),
-                candidate),
+            ==> hlspec::candidate_mapping_overlaps_inflight_pmem(s.interp(c).thread_state.values(), candidate),
 {
     if os::candidate_mapping_overlaps_inflight_pmem(s.interp_pt_mem(), s.core_states.values(), candidate) {
         let cs = choose|cs: os::CoreState| #![auto] {
             &&& s.core_states.values().contains(cs)
             &&& os::candidate_mapping_overlaps_inflight_pmem_corestate(s.interp_pt_mem(), cs, candidate)
         };
-        // TODO(MB): Maybe it's better to phrase the overlap properties with the core_states map
-        // directly, rather than with core_states.values() where we then have to map it back to the
-        // corresponding core.
         let core = choose|core| #[trigger] s.core_states.contains_key(core) && s.core_states[core] == cs;
         assert(c.valid_core(core));
         match cs {
             os::CoreState::Idle => {},
-            os::CoreState::ProtectWaiting { .. } => {
-                // XXX
-                admit();
-            },
             _ => {
                 let ult_id = cs.ult_id();
                 assert(c.valid_ult(ult_id));
@@ -1841,23 +1827,17 @@ pub proof fn lemma_candidate_mapping_inflight_pmem_overlap_hl_implies_os(
         hlspec::candidate_mapping_overlaps_inflight_pmem(s.interp(c).thread_state.values(), candidate)
             ==> os::candidate_mapping_overlaps_inflight_pmem(s.interp_pt_mem(), s.core_states.values(), candidate),
 {
-    // XXX: Modify the pmem overlap stuff the same way i did vmem
     if hlspec::candidate_mapping_overlaps_inflight_pmem(s.interp(c).thread_state.values(), candidate) {
         let thread_state = choose|b| {
-                &&& s.interp(c).thread_state.values().contains(b)
+                &&& #[trigger] s.interp(c).thread_state.values().contains(b)
                 &&& match b {
-                    hlspec::ThreadState::Map { vaddr, pte } => {
-                        overlap(candidate.frame, pte.frame)
-                    },
-                    hlspec::ThreadState::Unmap { vaddr, pte } => {
-                        &&& pte.is_some()
-                        &&& overlap(candidate.frame, pte.unwrap().frame)
-                    },
-                    _ => { false },
+                    hlspec::ThreadState::Map { vaddr, pte } => overlap(candidate.frame, pte.frame),
+                    hlspec::ThreadState::Unmap { vaddr, pte: Some(pte) } => overlap(candidate.frame, pte.frame),
+                    hlspec::ThreadState::Protect { vaddr, pte: Some(pte), .. } => overlap(candidate.frame, pte.frame),
+                    _ => false,
                 }
             };
-        let ult_id = choose|id| #[trigger]
-            c.valid_ult(id) && s.interp(c).thread_state[id] == thread_state;
+        let ult_id = choose|id| #[trigger] c.valid_ult(id) && s.interp(c).thread_state[id] == thread_state;
         assert(c.valid_ult(ult_id));
         let core = c.ult2core[ult_id];
         assert(c.valid_core(core));

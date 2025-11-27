@@ -161,7 +161,7 @@ pub open spec fn unsound_state(s1: State, s2: State) -> bool {
 // Overlapping inflight memory helper functions
 ///////////////////////////////////////////////////////////////////////////////////////////////
 impl ThreadState {
-    pub open spec fn inflight_vmem_region(self, mappings: Map<nat, PTE>) -> MemRegion
+    pub open spec fn inflight_vmem_region(self) -> MemRegion
         recommends self !is Idle
     {
         match self {
@@ -176,7 +176,6 @@ impl ThreadState {
 }
 
 pub open spec fn candidate_mapping_overlaps_inflight_vmem(
-    mappings: Map<nat, PTE>,
     inflightargs: Set<ThreadState>,
     base: nat,
     candidate_size: nat,
@@ -184,7 +183,7 @@ pub open spec fn candidate_mapping_overlaps_inflight_vmem(
     exists|ts: ThreadState| {
         &&& #[trigger] inflightargs.contains(ts)
         &&& ts !is Idle
-        &&& overlap(ts.inflight_vmem_region(mappings), MemRegion { base, size: candidate_size })
+        &&& overlap(ts.inflight_vmem_region(), MemRegion { base, size: candidate_size })
     }
 }
 
@@ -192,14 +191,12 @@ pub open spec fn candidate_mapping_overlaps_inflight_pmem(
     inflightargs: Set<ThreadState>,
     candidate: PTE,
 ) -> bool {
-    exists|b: ThreadState| #![auto] {
-        &&& inflightargs.contains(b)
+    exists|b: ThreadState| {
+        &&& #[trigger] inflightargs.contains(b)
         &&& match b {
             ThreadState::Map { vaddr, pte } => overlap(candidate.frame, pte.frame),
-            ThreadState::Unmap { vaddr, pte } => {
-                &&& pte is Some
-                &&& overlap(candidate.frame, pte.unwrap().frame)
-            },
+            ThreadState::Unmap { vaddr, pte: Some(pte) } => overlap(candidate.frame, pte.frame),
+            ThreadState::Protect { vaddr, pte: Some(pte), .. } => overlap(candidate.frame, pte.frame),
             _ => false,
         }
     }
@@ -324,7 +321,7 @@ pub open spec fn step_Map_sound(
 ) -> bool {
     &&& !candidate_mapping_overlaps_existing_pmem(mappings, pte)
     &&& !candidate_mapping_overlaps_inflight_pmem(inflights, pte)
-    &&& !candidate_mapping_overlaps_inflight_vmem(mappings, inflights, vaddr, pte.frame.size)
+    &&& !candidate_mapping_overlaps_inflight_vmem(inflights, vaddr, pte.frame.size)
 }
 
 pub open spec fn step_Map_enabled(
@@ -383,7 +380,7 @@ pub open spec fn step_MapEnd(c: Constants, s1: State, s2: State, lbl: RLbl) -> b
 // Unmap
 ///////////////////////////////////////////////////////////////////////////////////////////////
 pub open spec fn step_Unmap_sound(s1: State, vaddr: nat, pte_size: nat) -> bool {
-    !candidate_mapping_overlaps_inflight_vmem(s1.mappings, s1.thread_state.values(), vaddr, pte_size)
+    !candidate_mapping_overlaps_inflight_vmem(s1.thread_state.values(), vaddr, pte_size)
 }
 
 pub open spec fn step_Unmap_enabled(vaddr: nat) -> bool {
@@ -432,7 +429,7 @@ pub open spec fn step_UnmapEnd(c: Constants, s1: State, s2: State, lbl: RLbl) ->
 // Protect
 ///////////////////////////////////////////////////////////////////////////////////////////////
 pub open spec fn step_Protect_sound(s1: State, vaddr: nat, pte_size: nat) -> bool {
-    !candidate_mapping_overlaps_inflight_vmem(s1.mappings, s1.thread_state.values(), vaddr, pte_size)
+    !candidate_mapping_overlaps_inflight_vmem(s1.thread_state.values(), vaddr, pte_size)
 }
 
 pub open spec fn step_Protect_enabled(vaddr: nat) -> bool {
