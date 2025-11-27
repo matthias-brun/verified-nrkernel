@@ -1350,22 +1350,6 @@ proof fn vaddr_mapping_is_being_modified_from_vaddr_unmap(
         let thread1 = s.core_states[core1].ult_id();
         assert(c.interp().valid_thread(thread1));
 
-        /*match s.interp(c).thread_state[thread1] {
-            ThreadState::Map { vaddr: vaddr1, pte } => {
-                assert(vaddr1 == tlb_va);
-                assert(pte.frame.size == s.mmu@.tlbs[core][tlb_va].frame.size);
-                assert(between(vaddr, vaddr1, vaddr1 + pte.frame.size));
-            }
-            ThreadState::Unmap { vaddr: vaddr1, pte: Some(pte) } => {
-                assert(vaddr1 == tlb_va);
-                assert(pte.frame.size == s.mmu@.tlbs[core][tlb_va].frame.size);
-                assert(between(vaddr, vaddr1, vaddr1 + pte.frame.size));
-            }
-            _ => {
-                assert(false);
-            }
-        }*/
-
         assert(s.interp(c).vaddr_mapping_is_being_modified(c.interp(), vaddr));
 
         let t = s.interp(c);
@@ -1401,50 +1385,14 @@ proof fn vaddr_mapping_is_being_modified_from_vaddr_unmap(
             s.core_states[core1] !is Idle &&
             s.core_states[core1].vaddr() == tlb_va;
         assert(s.core_states.contains_key(core1));
-        // assert(!s.core_states[core1].is_idle());
-        // assert(s.core_states[core1].vaddr() == tlb_va);
         assert(c.valid_core(core1));
 
         let thread1 = s.core_states[core1].ult_id();
         assert(c.interp().valid_thread(thread1));
         
-        match s.core_states[core1] {
-            CoreState::Idle => {},
-            CoreState::MapWaiting { pte, .. }
-            | CoreState::MapExecuting { pte, .. } => {
-                // extra_mappings case
 
-                // this should be impossible because then tlb_va wouldn't be in the interp_pt_mem
-                // yet
-                
-                // from definition of extra_mappings:
-                assert(!candidate_mapping_overlaps_existing_vmem(
-                    s.effective_mappings(),
-                    tlb_va as nat,
-                    pte,
-                ));
-                // this is impossible since tlb_va would be a trivial point of overlap
-
-                // trigger quantifier in definition of candidate_mapping_overlaps_existing_vmem:
-                assert(s.effective_mappings().contains_key(tlb_va as nat));
-                assert(false);
-            },
-            CoreState::MapDone { .. } => {
-                // inflight_vaddr case
-                assert(s.core_states[core1].PTE() == s.interp_pt_mem()[tlb_va as nat]);
-            },
-            CoreState::UnmapWaiting { ult_id, vaddr }
-            | CoreState::UnmapExecuting { ult_id, vaddr, result: None } => {
-                // thread state interp uses PTE from the interp_pt_mem
-            },
-            CoreState::UnmapExecuting { ult_id, vaddr, result: Some(result) }
-            | CoreState::UnmapOpDone { ult_id, vaddr, result }
-            | CoreState::UnmapShootdownWaiting { ult_id, vaddr, result } => {
-                assert(false); // case handled earlier
-                //assert(s.core_states[core1].PTE() == s.interp_pt_mem()[tlb_va as nat]);
-            }
-            CoreState::ProtectWaiting { .. } => {},
-        }
+        // Trigger in candidate_mapping_overlaps_existing_vmem
+        let _ = s.effective_mappings().contains_key(tlb_va as nat);
 
         assert(s.interp_pt_mem()[tlb_va as nat] == s.mmu@.tlbs[core][tlb_va]);
 
@@ -1951,14 +1899,11 @@ proof fn step_MapOpChange_refines(c: os::Constants, s1: os::State, s2: os::State
     let ult_id = s1.core_states[core]->MapExecuting_ult_id;
     let vaddr = s1.core_states[core]->MapExecuting_vaddr;
     let pte = s1.core_states[core]->MapExecuting_pte;
-    let result: std::result::Result<(), ()> = Ok(());
 
     //First goal prove soundess
     assert(hl_s2.sound);
 
     //Second goal: prove  //assert(hl_s1.thread_state === hl_s2.thread_state);
-    assert(hl_c.valid_thread(ult_id));
-    assert(s1.interp(c).thread_state[ult_id] is Map);
     assert(s1.core_states[core] is MapExecuting);
     assert(hl_s1.thread_state.dom() === hl_s2.thread_state.dom());
     assert forall|key| #[trigger]
@@ -1974,10 +1919,24 @@ proof fn step_MapOpChange_refines(c: os::Constants, s1: os::State, s2: os::State
         } else {
             assert(!(core_of_key === core));
             assert(!s1.core_states[core_of_key].is_in_crit_sect());
-            assert(s1.core_states.index(core_of_key) == s2.core_states.index(core_of_key));
+            assert(s1.core_states[core_of_key] == s2.core_states[core_of_key]);
             assert(s1.core_states[c.ult2core[key]] === s2.core_states[c.ult2core[key]]);
             if s1.core_states.index(core_of_key) is UnmapWaiting {
                 let vaddr_of_key = s1.core_states[core_of_key]->UnmapWaiting_vaddr;
+                if vaddr_of_key == vaddr {
+                    assert(overlap(
+                        MemRegion {
+                            base: s2.core_states[core_of_key].vaddr(),
+                            size: s2.core_states[core_of_key].pte_size(s2.interp_pt_mem()),
+                        },
+                        MemRegion {
+                            base: s2.core_states[core].vaddr(),
+                            size: s2.core_states[core].pte_size(s2.interp_pt_mem()),
+                        },
+                    ));
+                }
+            } else if s1.core_states.index(core_of_key) is ProtectWaiting {
+                let vaddr_of_key = s1.core_states[core_of_key]->ProtectWaiting_vaddr;
                 if vaddr_of_key == vaddr {
                     assert(overlap(
                         MemRegion {

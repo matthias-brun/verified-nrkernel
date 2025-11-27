@@ -42,14 +42,17 @@ pub struct State {
 #[allow(inconsistent_fields)]
 pub enum CoreState {
     Idle,
-    MapWaiting { ult_id: nat, vaddr: nat, pte: PTE },
-    MapExecuting { ult_id: nat, vaddr: nat, pte: PTE },
-    MapDone { ult_id: nat, vaddr: nat, pte: PTE, result: Result<(), ()> },
-    UnmapWaiting { ult_id: nat, vaddr: nat },
-    UnmapExecuting { ult_id: nat, vaddr: nat, result: Option<Result<PTE, ()>> },
-    UnmapOpDone { ult_id: nat, vaddr: nat, result: Result<PTE, ()> },
-    UnmapShootdownWaiting { ult_id: nat, vaddr: nat, result: Result<PTE, ()> },
-    ProtectWaiting { ult_id: nat, vaddr: nat, flags: Flags },
+    MapWaiting              { ult_id: nat, vaddr: nat, pte: PTE },
+    MapExecuting            { ult_id: nat, vaddr: nat, pte: PTE },
+    MapDone                 { ult_id: nat, vaddr: nat, pte: PTE, result: Result<(), ()> },
+    UnmapWaiting            { ult_id: nat, vaddr: nat },
+    UnmapExecuting          { ult_id: nat, vaddr: nat, result: Option<Result<PTE, ()>> },
+    UnmapOpDone             { ult_id: nat, vaddr: nat, result: Result<PTE, ()> },
+    UnmapShootdownWaiting   { ult_id: nat, vaddr: nat, result: Result<PTE, ()> },
+    ProtectWaiting          { ult_id: nat, vaddr: nat, flags: Flags },
+    ProtectExecuting        { ult_id: nat, vaddr: nat, flags: Flags, result: Option<Result<PTE, ()>> },
+    ProtectOpDone           { ult_id: nat, vaddr: nat, flags: Flags, result: Result<PTE, ()> },
+    ProtectShootdownWaiting { ult_id: nat, vaddr: nat, flags: Flags, result: Result<PTE, ()> },
 }
 
 #[allow(inconsistent_fields)]
@@ -169,14 +172,24 @@ pub open spec fn candidate_mapping_overlaps_inflight_pmem_corestate(
             overlap(candidate.frame, pte.frame)
         },
         CoreState::UnmapWaiting { ult_id, vaddr }
-        | CoreState::UnmapExecuting { ult_id, vaddr, result: None, .. }
-        | CoreState::ProtectWaiting { ult_id, vaddr, .. } => {
+        | CoreState::UnmapExecuting { ult_id, vaddr, result: None, .. } => {
             &&& pt.contains_key(vaddr)
             &&& overlap(candidate.frame, pt[vaddr].frame)
         },
         CoreState::UnmapExecuting { ult_id, vaddr, result: Some(result), .. }
         | CoreState::UnmapOpDone { ult_id, vaddr, result, .. }
         | CoreState::UnmapShootdownWaiting { ult_id, vaddr, result, .. } => {
+            &&& result is Ok
+            &&& overlap(candidate.frame, result->Ok_0.frame)
+        },
+        CoreState::ProtectWaiting { ult_id, vaddr, .. }
+        | CoreState::ProtectExecuting { ult_id, vaddr, result: None, .. } => {
+            &&& pt.contains_key(vaddr)
+            &&& overlap(candidate.frame, pt[vaddr].frame)
+        },
+        CoreState::ProtectExecuting { ult_id, vaddr, result: Some(result), .. }
+        | CoreState::ProtectOpDone { ult_id, vaddr, result, .. }
+        | CoreState::ProtectShootdownWaiting { ult_id, vaddr, result, .. } => {
             &&& result is Ok
             &&& overlap(candidate.frame, result->Ok_0.frame)
         },
@@ -730,8 +743,14 @@ impl CoreState {
             | CoreState::UnmapShootdownWaiting { result, .. } => {
                 if result is Ok { result->Ok_0.frame.size } else { 0 }
             },
-            | CoreState::ProtectWaiting { vaddr, .. } => {
+            CoreState::ProtectWaiting { vaddr, .. }
+            | CoreState::ProtectExecuting { vaddr, result: None, .. } => {
                 if pt.contains_key(vaddr) { pt[vaddr].frame.size } else { 0 }
+            },
+            CoreState::ProtectExecuting { result: Some(result), .. }
+            | CoreState::ProtectOpDone { result, .. }
+            | CoreState::ProtectShootdownWaiting { result, .. } => {
+                if result is Ok { result->Ok_0.frame.size } else { 0 }
             },
             CoreState::Idle => arbitrary(),
         }
@@ -748,7 +767,10 @@ impl CoreState {
             | CoreState::UnmapExecuting { vaddr, .. }
             | CoreState::UnmapOpDone { vaddr, .. }
             | CoreState::UnmapShootdownWaiting { vaddr, .. }
-            | CoreState::ProtectWaiting { vaddr, .. } => vaddr,
+            | CoreState::ProtectWaiting { vaddr, .. }
+            | CoreState::ProtectExecuting { vaddr, .. }
+            | CoreState::ProtectOpDone { vaddr, .. }
+            | CoreState::ProtectShootdownWaiting { vaddr, .. } => vaddr,
             CoreState::Idle => arbitrary(),
         }
     }
@@ -763,6 +785,11 @@ impl CoreState {
             CoreState::UnmapExecuting { result: Some(Ok(_)), .. }
             | CoreState::UnmapOpDone { result: Ok(_), .. }
             | CoreState::UnmapShootdownWaiting { result: Ok(_), .. } => true,
+            CoreState::ProtectWaiting { vaddr, .. }  
+            | CoreState::ProtectExecuting { vaddr, result: None, .. } => pt.contains_key(vaddr),
+            CoreState::ProtectExecuting { result: Some(Ok(pte)), .. }
+            | CoreState::ProtectOpDone { result: Ok(pte), .. }
+            | CoreState::ProtectShootdownWaiting { result: Ok(pte), .. } => true,
             _ => false,
         }
     }
@@ -773,16 +800,17 @@ impl CoreState {
         match self {
             CoreState::MapWaiting { pte, .. }
             | CoreState::MapExecuting { pte, .. }
-            | CoreState::MapDone { pte, .. } => {
-                pte.frame.base
-            }
+            | CoreState::MapDone { pte, .. } => pte.frame.base,
             CoreState::UnmapWaiting { vaddr, .. }  
             | CoreState::UnmapExecuting { vaddr, result: None, .. } => pt[vaddr].frame.base,
-            | CoreState::UnmapExecuting { result: Some(Ok(pte)), .. }
+            CoreState::UnmapExecuting { result: Some(Ok(pte)), .. }
             | CoreState::UnmapOpDone { result: Ok(pte), .. }
-            | CoreState::UnmapShootdownWaiting { result: Ok(pte), .. } => {
-               pte.frame.base
-            }
+            | CoreState::UnmapShootdownWaiting { result: Ok(pte), .. } => pte.frame.base,
+            CoreState::ProtectWaiting { vaddr, .. }  
+            | CoreState::ProtectExecuting { vaddr, result: None, .. } => pt[vaddr].frame.base,
+            CoreState::ProtectExecuting { result: Some(Ok(pte)), .. }
+            | CoreState::ProtectOpDone { result: Ok(pte), .. }
+            | CoreState::ProtectShootdownWaiting { result: Ok(pte), .. } => pte.frame.base,
             _ => arbitrary(),
         }
     }
@@ -797,9 +825,9 @@ impl CoreState {
             | CoreState::UnmapExecuting { result: Some(Ok(pte)), .. }
             | CoreState::UnmapOpDone { result: Ok(pte), .. }
             | CoreState::UnmapShootdownWaiting { result: Ok(pte), .. }
-            => {
-                pte
-            }
+            | CoreState::ProtectExecuting { result: Some(Ok(pte)), .. }
+            | CoreState::ProtectOpDone { result: Ok(pte), .. }
+            | CoreState::ProtectShootdownWaiting { result: Ok(pte), .. } => pte,
             _ => arbitrary(),
         }
     }
@@ -815,7 +843,10 @@ impl CoreState {
             | CoreState::UnmapExecuting { ult_id, .. }
             | CoreState::UnmapOpDone { ult_id, .. }
             | CoreState::UnmapShootdownWaiting { ult_id, .. }
-            | CoreState::ProtectWaiting { ult_id, .. } => ult_id,
+            | CoreState::ProtectWaiting { ult_id, .. }
+            | CoreState::ProtectExecuting { ult_id, .. }
+            | CoreState::ProtectOpDone { ult_id, .. }
+            | CoreState::ProtectShootdownWaiting { ult_id, .. } => ult_id,
             CoreState::Idle => arbitrary(),
         }
     }
@@ -896,8 +927,7 @@ impl State {
         // something in the MapStart state which conflicts with something in interp_pt_mem.
         // In that case the map will eventually end in an error;
         // we want to use the mapping from interp_pt_mem instead.
-        self.extra_mappings()
-            .union_prefer_right(self.interp_pt_mem())
+        self.extra_mappings().union_prefer_right(self.interp_pt_mem())
     }
 
     pub open spec fn interp_vmem(self, c: Constants) -> Seq<u8> {
@@ -1025,17 +1055,13 @@ impl State {
                         | CoreState::UnmapOpDone { ult_id, vaddr, result }
                         | CoreState::UnmapShootdownWaiting { ult_id, vaddr, result } => {
                             if ult_id == ult_id2 {
-                                hlspec::ThreadState::Unmap { vaddr, pte:
-                                    match result {
-                                        Ok(pte) => Some(pte),
-                                        Err(_) => None,
-                                    }
-                                }
+                                hlspec::ThreadState::Unmap { vaddr, pte: result.ok() }
                             } else {
                                 hlspec::ThreadState::Idle
                             }
                         },
-                        CoreState::ProtectWaiting { ult_id, vaddr, flags } => {
+                        CoreState::ProtectWaiting { ult_id, vaddr, flags }
+                        | CoreState::ProtectExecuting { ult_id, vaddr, flags, result: None } => {
                             let pte = if self.interp_pt_mem().contains_key(vaddr) {
                                 Some(self.interp_pt_mem()[vaddr])
                             } else {
@@ -1043,6 +1069,15 @@ impl State {
                             };
                             if ult_id == ult_id2 {
                                 hlspec::ThreadState::Protect { vaddr, flags, pte }
+                            } else {
+                                hlspec::ThreadState::Idle
+                            }
+                        },
+                        CoreState::ProtectExecuting { ult_id, vaddr, flags, result: Some(result) }
+                        | CoreState::ProtectOpDone { ult_id, vaddr, flags, result }
+                        | CoreState::ProtectShootdownWaiting { ult_id, vaddr, flags, result } => {
+                            if ult_id == ult_id2 {
+                                hlspec::ThreadState::Protect { vaddr, flags, pte: result.ok() }
                             } else {
                                 hlspec::ThreadState::Idle
                             }
@@ -1078,8 +1113,10 @@ impl State {
 
     pub open spec fn inv_inflight_pte_wf(self, c: Constants) -> bool {
         forall|core: Core| #![auto] c.valid_core(core) && self.core_states[core].has_pte(self.interp_pt_mem()) 
-        && !(self.core_states[core] matches CoreState::UnmapExecuting {result: None, ..})
-        && self.core_states[core] !is UnmapWaiting ==> {
+        && !(self.core_states[core] matches CoreState::UnmapExecuting { result: None, .. })
+        && self.core_states[core] !is UnmapWaiting
+        && !(self.core_states[core] matches CoreState::ProtectExecuting { result: None, .. })
+        && self.core_states[core] !is ProtectWaiting ==> {
             let pte = self.core_states[core].PTE();
             let vaddr = self.core_states[core].vaddr();
             &&& aligned(vaddr, pte.frame.size)
@@ -1438,40 +1475,36 @@ impl State {
     pub open spec fn inv_inflight_pmem_no_overlap_inflight_pmem(self, c: Constants) -> bool {
         forall|core1: Core, core2: Core|
             (c.valid_core(core1) && c.valid_core(core2)
-                //might also need unmaps
                 && self.core_states[core1].has_pte(self.interp_pt_mem()) && self.core_states[core2].has_pte(self.interp_pt_mem())
                 && overlap(
-                MemRegion {
-                    base: self.core_states[core1].paddr(self.interp_pt_mem()),
-                    size: self.core_states[core1].pte_size(self.interp_pt_mem()),
-                },
-                MemRegion {
-                    base: self.core_states[core2].paddr(self.interp_pt_mem()),
-                    size: self.core_states[core2].pte_size(self.interp_pt_mem()),
-                },
+                    MemRegion {
+                        base: self.core_states[core1].paddr(self.interp_pt_mem()),
+                        size: self.core_states[core1].pte_size(self.interp_pt_mem()),
+                    },
+                    MemRegion {
+                        base: self.core_states[core2].paddr(self.interp_pt_mem()),
+                        size: self.core_states[core2].pte_size(self.interp_pt_mem()),
+                    },
             )) ==> core1 === core2
     }
 
 
     pub open spec fn inv_inflight_pmem_no_overlap_existing_pmem(self, c: Constants) -> bool {
         forall|core| #![auto](c.valid_core(core) && self.core_states[core].has_pte(self.interp_pt_mem())) 
-                    && !(self.core_states[core] is MapDone && self.core_states[core]->MapDone_result is Ok)
-                    && !(self.core_states[core] is UnmapExecuting && self.core_states[core]->UnmapExecuting_result is None)
-                    && !(self.core_states[core] is UnmapWaiting)
-                ==> !candidate_mapping_overlaps_existing_pmem(
-                        self.interp_pt_mem(),
-                        self.core_states[core].PTE(),
-            )
+                    && !(self.core_states[core] matches CoreState::MapDone { result: Ok(_), ..})
+                    && !(self.core_states[core] matches CoreState::UnmapExecuting { result: None, .. })
+                    && self.core_states[core] !is UnmapWaiting
+                    && !(self.core_states[core] matches CoreState::ProtectExecuting { result: None, .. })
+                    && self.core_states[core] !is ProtectWaiting
+            ==> !candidate_mapping_overlaps_existing_pmem(self.interp_pt_mem(), self.core_states[core].PTE())
     }
 
     pub open spec fn inv_mapped_pmem_no_overlap(self, c: Constants) -> bool {
         forall|vaddr1, vaddr2|
-            (self.interp_pt_mem().contains_key(vaddr1)
-                && self.interp_pt_mem().contains_key(vaddr2)
-                && overlap(
-                    self.interp_pt_mem()[vaddr1].frame,
-                    self.interp_pt_mem()[vaddr2].frame)
-                ) ==> vaddr1 === vaddr2
+            self.interp_pt_mem().contains_key(vaddr1)
+            && self.interp_pt_mem().contains_key(vaddr2)
+            && overlap(self.interp_pt_mem()[vaddr1].frame, self.interp_pt_mem()[vaddr2].frame)
+                ==> vaddr1 === vaddr2
     }
 
 
