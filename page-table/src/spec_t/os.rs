@@ -93,7 +93,8 @@ impl CoreState {
         match self {
             CoreState::Idle
             | CoreState::MapWaiting { .. }
-            | CoreState::UnmapWaiting { .. } => false,
+            | CoreState::UnmapWaiting { .. }
+            | CoreState::ProtectWaiting { .. } => false,
             _ => true,
         }
     }
@@ -752,14 +753,11 @@ impl CoreState {
         }
     }
 
-    pub open spec fn has_pte(self, pt: Map<nat, PTE>) -> bool
-    {
+    pub open spec fn has_pte(self, pt: Map<nat, PTE>) -> bool {
         match self {
             CoreState::MapWaiting { pte, .. }
             | CoreState::MapExecuting { pte, .. }
-            | CoreState::MapDone { pte, .. } => {
-                true
-            }
+            | CoreState::MapDone { pte, .. } => true,
             CoreState::UnmapWaiting { vaddr, .. }  
             | CoreState::UnmapExecuting { vaddr, result: None, .. } => pt.contains_key(vaddr),
             CoreState::UnmapExecuting { result: Some(Ok(_)), .. }
@@ -1038,8 +1036,13 @@ impl State {
                             }
                         },
                         CoreState::ProtectWaiting { ult_id, vaddr, flags } => {
+                            let pte = if self.interp_pt_mem().contains_key(vaddr) {
+                                Some(self.interp_pt_mem()[vaddr])
+                            } else {
+                                None
+                            };
                             if ult_id == ult_id2 {
-                                hlspec::ThreadState::Protect { vaddr, flags }
+                                hlspec::ThreadState::Protect { vaddr, flags, pte }
                             } else {
                                 hlspec::ThreadState::Idle
                             }
@@ -1076,7 +1079,7 @@ impl State {
     pub open spec fn inv_inflight_pte_wf(self, c: Constants) -> bool {
         forall|core: Core| #![auto] c.valid_core(core) && self.core_states[core].has_pte(self.interp_pt_mem()) 
         && !(self.core_states[core] matches CoreState::UnmapExecuting {result: None, ..})
-        && !(self.core_states[core] is UnmapWaiting)==> {
+        && self.core_states[core] !is UnmapWaiting ==> {
             let pte = self.core_states[core].PTE();
             let vaddr = self.core_states[core].vaddr();
             &&& aligned(vaddr, pte.frame.size)
