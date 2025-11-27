@@ -46,9 +46,6 @@ pub ghost enum GPDE {
         //A: bool,
         ///// Dirty; indicates whether software has written to the page referenced by this entry
         //D: bool,
-        // /// Page size; must be 1 (otherwise, this entry references a directory)
-        // PS: Option<bool>,
-        // PS is entirely determined by the Page variant and the layer
         /// Global; if CR4.PGE = 1, determines whether the translation is global; ignored otherwise
         G: bool,
         /// Indirectly determines the memory type used to access the page referenced by this entry

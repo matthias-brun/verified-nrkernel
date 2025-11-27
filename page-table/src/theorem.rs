@@ -2,7 +2,7 @@
 use vstd::prelude::*;
 use crate::spec_t::hlspec;
 use crate::spec_t::os;
-use crate::spec_t::mmu::defs::{ MemOp, PTE, Core };
+use crate::spec_t::mmu::defs::{ MemOp, PTE, Core, Flags };
 use crate::spec_t::os_code_vc::{ CodeVC, HandlerVC };
 use crate::impl_u::verified_impl::PTImpl;
 
@@ -65,11 +65,13 @@ pub enum TokState {
 
 pub enum RLbl {
     Tau,
-    MemOp      { thread_id: nat, vaddr: nat, op: MemOp },
-    MapStart   { thread_id: nat, vaddr: nat, pte: PTE },
-    MapEnd     { thread_id: nat, vaddr: nat, result: Result<(), ()> },
-    UnmapStart { thread_id: nat, vaddr: nat },
-    UnmapEnd   { thread_id: nat, vaddr: nat, result: Result<(), ()> },
+    MemOp           { thread_id: nat, vaddr: nat, op: MemOp },
+    MapStart        { thread_id: nat, vaddr: nat, pte: PTE },
+    MapEnd          { thread_id: nat, vaddr: nat, result: Result<(), ()> },
+    UnmapStart      { thread_id: nat, vaddr: nat },
+    UnmapEnd        { thread_id: nat, vaddr: nat, result: Result<(), ()> },
+    ProtectStart    { thread_id: nat, vaddr: nat, flags: Flags },
+    ProtectEnd      { thread_id: nat, vaddr: nat, result: Result<(), ()> },
     AckShootdownIPI { core: Core },
 }
 
