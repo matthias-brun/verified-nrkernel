@@ -983,10 +983,10 @@ impl State {
             &&& self.interp_pt_mem().contains_key(va)
             &&& exists|core: Core|
                 self.core_states.contains_key(core) && match self.core_states[core] {
-                    CoreState::UnmapWaiting { ult_id, vaddr }
-                    | CoreState::UnmapExecuting { ult_id, vaddr, .. }
-                    | CoreState::UnmapOpDone { ult_id, vaddr, .. }
-                    | CoreState::UnmapShootdownWaiting { ult_id, vaddr, .. }
+                    CoreState::UnmapWaiting { vaddr, .. }
+                    | CoreState::UnmapExecuting { vaddr, .. }
+                    | CoreState::UnmapOpDone { vaddr, .. }
+                    | CoreState::UnmapShootdownWaiting { vaddr, .. }
                         => vaddr == va,
                     _ => false,
                 }
@@ -1024,31 +1024,63 @@ impl State {
         })
     }
 
-    pub open spec fn inflight_protect(self) -> Set<(nat, PTE)> {
-        Set::new(|tup: (nat, PTE)| {
-            let va = tup.0; let pte2 = tup.1;
-            &&& self.interp_pt_mem().contains_key(va)
-            &&& exists|core: Core|
-                self.core_states.contains_key(core) && match self.core_states[core] {
-                    CoreState::ProtectWaiting { ult_id, vaddr, flags }
-                    | CoreState::ProtectExecuting { ult_id, vaddr, flags, result: None, .. } => {
-                        &&& vaddr == va
-                        &&& pte2 == PTE { frame: self.interp_pt_mem()[va].frame, flags }
-                    },
-                    CoreState::ProtectExecuting { ult_id, vaddr, result: Some(Ok(pte)), .. }
-                    | CoreState::ProtectOpDone { ult_id, vaddr, result: Ok(pte), .. }
-                    | CoreState::ProtectShootdownWaiting { ult_id, vaddr, result: Ok(pte), .. } => {
-                        &&& vaddr == va
-                        &&& pte2 == pte
-                    },
-                    _ => false,
-                }
-        })
+    pub open spec fn is_inflight_protect_vaddr_core(self, va: nat, core: Core) -> bool {
+        &&& self.interp_pt_mem().contains_key(va)
+        &&& self.core_states.contains_key(core)
+        &&& match self.core_states[core] {
+                CoreState::ProtectWaiting { vaddr, .. }
+                | CoreState::ProtectExecuting { vaddr, .. }
+                | CoreState::ProtectOpDone { vaddr, .. }
+                | CoreState::ProtectShootdownWaiting { vaddr, .. }
+                    => vaddr == va,
+                _ => false,
+            }
     }
 
+    pub open spec fn is_inflight_protect_vaddr_pte_core(self, va: nat, pte: PTE, core: Core) -> bool {
+        &&& self.interp_pt_mem().contains_key(va)
+        &&& self.core_states.contains_key(core)
+        &&& match self.core_states[core] {
+            CoreState::ProtectWaiting { vaddr, flags, .. }
+            | CoreState::ProtectExecuting { vaddr, flags, result: None, .. } => {
+                &&& vaddr == va
+                &&& pte == PTE { frame: self.interp_pt_mem()[va].frame, flags }
+            },
+            CoreState::ProtectExecuting { vaddr, result: Some(Ok(pte2)), .. }
+            | CoreState::ProtectOpDone { vaddr, result: Ok(pte2), .. }
+            | CoreState::ProtectShootdownWaiting { vaddr, result: Ok(pte2), .. } => {
+                &&& vaddr == va
+                &&& pte == pte2
+            },
+            _ => false,
+        }
+    }
+
+    pub open spec fn is_inflight_protect_vaddr(self, va: nat) -> bool {
+        exists|core: Core| self.is_inflight_protect_vaddr_core(va, core)
+    }
+
+    pub open spec fn inflight_protect_vaddrs(self) -> Set<nat> {
+        Set::new(|va: nat| self.is_inflight_protect_vaddr(va))
+    }
+
+    pub open spec fn inflight_protect_params(self) -> Set<(nat, PTE)> {
+        Set::new(|tup: (nat, PTE)|
+            exists|core: Core| self.is_inflight_protect_vaddr_pte_core(tup.0, tup.1, core))
+    }
+
+    // TODO(MB): There's surely a better way of doing this without the choose.
+    pub open spec fn inflight_protect_params_map(self) -> Map<nat, PTE> {
+        Map::new(
+            |va| self.inflight_protect_vaddrs().contains(va),
+            |va| choose|pte| self.inflight_protect_params().contains((va, pte))
+        )
+    }
 
     pub open spec fn effective_mappings(self) -> Map<nat, PTE> {
-        self.interp_pt_mem().remove_keys(self.inflight_mapunmap_vaddr())
+        self.interp_pt_mem()
+            .remove_keys(self.inflight_mapunmap_vaddr())
+            .union_prefer_right(self.inflight_protect_params_map())
     }
 
     pub open spec fn has_base_and_pte_for_vaddr(applied_mappings: Map<nat, PTE>, vaddr: int) -> bool {
@@ -1076,6 +1108,14 @@ impl State {
         })
     }
 
+    /// The applied mappings here are what's used to interpret the memory. This is distinct from
+    /// effective_mappings, which is used to interpret the mappings. For example, when unmapping,
+    /// the hlspec's view immediately changes to reflect the removed mapping. Hence,
+    /// effective_mappings has to change but applied_mappings has to stay the same because we may
+    /// still be able to access the corresponding memory addresses.
+    /// TODO(MB): Arguably, we shouldn't have to give guarantees for what values are read from
+    /// those addresses while their mappings are being modified. That would allow us to use
+    /// effective_mappings for the memory as well.
     pub open spec fn applied_mappings(self) -> Map<nat, PTE> {
         // Prefer interp_pt_mem because there might be a situation where we have
         // something in the MapStart state which conflicts with something in interp_pt_mem.

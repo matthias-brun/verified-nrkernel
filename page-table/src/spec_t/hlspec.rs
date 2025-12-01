@@ -61,7 +61,7 @@ pub enum ThreadState {
     Map { vaddr: nat, pte: PTE },
     Unmap { vaddr: nat, pte: Option<PTE> },
     // Protect takes flags as argument but in the thread state we also track the affected PTE,
-    // similar to the Unmap thread state.
+    // similar to the Unmap thread state. pte is the old pte.
     Protect { vaddr: nat, flags: Flags, pte: Option<PTE> },
     Idle,
 }
@@ -401,7 +401,7 @@ pub open spec fn step_Unmap_enabled(vaddr: nat) -> bool {
 pub open spec fn step_UnmapStart(c: Constants, s1: State, s2: State, lbl: RLbl) -> bool {
     &&& lbl matches RLbl::UnmapStart { thread_id, vaddr }
     &&& {
-    let pte = if s1.mappings.contains_key(vaddr) { Some(s1.mappings[vaddr]) } else { Option::None };
+    let pte = if s1.mappings.contains_key(vaddr) { Some(s1.mappings[vaddr]) } else { None };
     let pte_size = if pte is Some { pte.unwrap().frame.size } else { 0 };
     &&& step_Unmap_enabled(vaddr)
     &&& c.valid_thread(thread_id)
@@ -451,7 +451,7 @@ pub open spec fn step_ProtectStart(c: Constants, s1: State, s2: State, lbl: RLbl
     &&& lbl matches RLbl::ProtectStart { thread_id, vaddr, flags }
     &&& {
     let pte = if s1.mappings.contains_key(vaddr) { Some(s1.mappings[vaddr]) } else { None };
-    let pte_size = if pte is Some { pte.unwrap().frame.size } else { 0 };
+    let pte_size = if pte is Some { pte->Some_0.frame.size } else { 0 };
     &&& step_Protect_enabled(vaddr)
     &&& c.valid_thread(thread_id)
     &&& s1.thread_state[thread_id] is Idle
