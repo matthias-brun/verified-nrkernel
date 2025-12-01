@@ -78,20 +78,20 @@ pub enum Step {
     UnmapOpStutter { core: Core, paddr: usize, value: usize },
     UnmapOpFail { core: Core },
     UnmapInitiateShootdown { core: Core },
-    UnmapWaitShootdown { core: Core },
-    AckShootdownIPI { core: Core },
     UnmapEnd { core: Core },
+    // Protect
+    ProtectStart { core: Core },
+    ProtectOpStart { core: Core },
+    ProtectOpChange { core: Core, paddr: usize, value: usize },
+    ProtectOpFail { core: Core },
+    ProtectInitiateShootdown { core: Core },
+    ProtectEnd { core: Core },
+    // Shootdown
+    WaitShootdown { core: Core },
+    AckShootdownIPI { core: Core },
 }
 
 impl CoreState {
-    pub open spec fn is_mapping(self) -> bool {
-        match self {
-            CoreState::MapExecuting { .. }
-            | CoreState::MapDone { .. } => true,
-            _ => false,
-        }
-    }
-
     pub open spec fn is_in_crit_sect(self) -> bool {
         match self {
             CoreState::Idle
@@ -102,7 +102,7 @@ impl CoreState {
         }
     }
 
-    pub open spec fn is_map(self) -> bool {
+    pub open spec fn is_mapping(self) -> bool {
         match self {
             CoreState::MapWaiting { .. }
             | CoreState::MapExecuting { .. }
@@ -118,18 +118,6 @@ impl CoreState {
             | CoreState::UnmapOpDone { .. }
             | CoreState::UnmapShootdownWaiting { .. } => true,
             _ => false,
-        }
-    }
-
-    pub open spec fn unmap_vaddr(self) -> nat
-        recommends self.is_unmapping()
-    {
-        match self {
-            CoreState::UnmapWaiting { vaddr, .. }
-            | CoreState::UnmapExecuting { vaddr, .. }
-            | CoreState::UnmapOpDone { vaddr, .. }
-            | CoreState::UnmapShootdownWaiting { vaddr, .. } => vaddr,
-            _ => arbitrary(),
         }
     }
 }
@@ -221,7 +209,7 @@ pub open spec fn step_MMU(c: Constants, s1: State, s2: State, lbl: RLbl) -> bool
     //mmu statemachine steps
     &&& rl3::next(s1.mmu, s2.mmu, c.common, mmu::Lbl::Tau)
     &&& s2.os_ext == s1.os_ext
-    //new state
+    // new state
     &&& s2.core_states == s1.core_states
     &&& s2.sound == s1.sound
 }
@@ -236,7 +224,7 @@ pub open spec fn step_MemOp(c: Constants, s1: State, s2: State, core: Core, lbl:
     //mmu statemachine steps
     &&& rl3::next(s1.mmu, s2.mmu, c.common, mmu::Lbl::MemOp(core, vaddr as usize, op))
     &&& s2.os_ext == s1.os_ext
-    //new state
+    // new state
     &&& s2.core_states == s1.core_states
     &&& s2.sound == s1.sound
 }
@@ -248,7 +236,7 @@ pub open spec fn step_ReadPTMem(c: Constants, s1: State, s2: State, core: Core, 
     //mmu statemachine steps
     &&& rl3::next(s1.mmu, s2.mmu, c.common, mmu::Lbl::Read(core, paddr, value))
     &&& s2.os_ext == s1.os_ext
-    //new state
+    // new state
     &&& s2.core_states == s1.core_states
     &&& s2.sound == s1.sound
 }
@@ -259,7 +247,7 @@ pub open spec fn step_Barrier(c: Constants, s1: State, s2: State, core: Core, lb
     //mmu statemachine steps
     &&& rl3::next(s1.mmu, s2.mmu, c.common, mmu::Lbl::Barrier(core))
     &&& s2.os_ext == s1.os_ext
-    //new state
+    // new state
     &&& s2.core_states == s1.core_states
     &&& s2.sound == s1.sound
 }
@@ -270,7 +258,7 @@ pub open spec fn step_Invlpg(c: Constants, s1: State, s2: State, core: Core, lbl
     //mmu statemachine steps
     &&& rl3::next(s1.mmu, s2.mmu, c.common, mmu::Lbl::Invlpg(core, s1.os_ext.shootdown_vec.vaddr as usize))
     &&& s2.os_ext == s1.os_ext
-    //new state
+    // new state
     &&& s2.core_states == s1.core_states
     &&& s2.sound == s1.sound
 }
@@ -305,7 +293,7 @@ pub open spec fn step_Map_enabled(c: Constants, vaddr: nat, pte: PTE) -> bool {
 pub open spec fn step_MapStart(c: Constants, s1: State, s2: State, core: Core, lbl: RLbl) -> bool {
     &&& lbl matches RLbl::MapStart { thread_id, vaddr, pte }
     &&& core == c.ult2core[thread_id]
-    //enabling conditions
+    // enabling conditions
     &&& c.valid_ult(thread_id)
     &&& s1.core_states[core] is Idle
     &&& step_Map_enabled(c, vaddr, pte)
@@ -313,14 +301,14 @@ pub open spec fn step_MapStart(c: Constants, s1: State, s2: State, core: Core, l
     // mmu statemachine steps
     &&& s2.mmu == s1.mmu
     &&& s2.os_ext == s1.os_ext
-    //new state
+    // new state
     &&& s2.core_states == s1.core_states.insert(core, CoreState::MapWaiting { ult_id: thread_id, vaddr, pte })
     &&& s2.sound == (s1.sound && step_Map_sound(s1.interp_pt_mem(), s1.core_states.values(), vaddr, pte))
 }
 
 pub open spec fn step_MapOpStart(c: Constants, s1: State, s2: State, core: Core, lbl: RLbl) -> bool {
     &&& lbl is Tau
-    //enabling conditions
+    // enabling conditions
     &&& c.valid_core(core)
     &&& s1.core_states[core] matches CoreState::MapWaiting { ult_id, vaddr, pte }
 
@@ -328,7 +316,7 @@ pub open spec fn step_MapOpStart(c: Constants, s1: State, s2: State, core: Core,
     &&& s2.mmu == s1.mmu
     &&& os_ext::next(s1.os_ext, s2.os_ext, c.common, os_ext::Lbl::AcquireLock { core })
 
-    //new state
+    // new state
     &&& s2.core_states == s1.core_states.insert(core, CoreState::MapExecuting { ult_id, vaddr, pte })
     &&& s2.sound == s1.sound
 }
@@ -343,7 +331,7 @@ pub open spec fn step_MapOpStutter(
     lbl: RLbl,
 ) -> bool {
     &&& lbl is Tau
-    //enabling conditions
+    // enabling conditions
     &&& c.valid_core(core)
     &&& s1.core_states[core] is MapExecuting
     &&& value & 1 == 1
@@ -355,7 +343,7 @@ pub open spec fn step_MapOpStutter(
     &&& s2.interp_pt_mem() == s1.interp_pt_mem()
     &&& s2.os_ext == s1.os_ext
 
-    //new state
+    // new state
     &&& s2.core_states == s1.core_states
     &&& s2.sound == s1.sound
 }
@@ -371,7 +359,7 @@ pub open spec fn step_Allocate(c: Constants, s1: State, s2: State, core: Core, r
     //mmu statemachine steps
     &&& s2.mmu == s1.mmu
     &&& os_ext::next(s1.os_ext, s2.os_ext, c.common, os_ext::Lbl::Allocate { core, res })
-    //new state
+    // new state
     &&& s2.core_states == s1.core_states
     &&& s2.sound == s1.sound
 }
@@ -386,7 +374,7 @@ pub open spec fn step_MapOpChange(
     lbl: RLbl,
 ) -> bool {
     &&& lbl is Tau
-    //enabling conditions
+    // enabling conditions
     &&& c.valid_core(core)
     &&& s1.core_states[core] matches CoreState::MapExecuting { ult_id, vaddr, pte }
     &&& !candidate_mapping_overlaps_existing_vmem(s1.interp_pt_mem(), vaddr, pte)
@@ -398,14 +386,14 @@ pub open spec fn step_MapOpChange(
     &&& rl3::next(s1.mmu, s2.mmu, c.common, mmu::Lbl::Write(core, paddr, value))
     &&& s2.mmu@.happy == s1.mmu@.happy
     &&& s2.os_ext == s1.os_ext
-    //new state
+    // new state
     &&& s2.core_states == s1.core_states.insert(core, CoreState::MapDone { ult_id, vaddr, pte, result: Ok(()) })
     &&& s1.sound == s2.sound
 }
 
 pub open spec fn step_MapNoOp(c: Constants, s1: State, s2: State, core: Core, lbl: RLbl) -> bool {
     &&& lbl is Tau
-    //enabling conditions
+    // enabling conditions
     &&& c.valid_core(core)
     &&& s1.core_states[core] matches CoreState::MapExecuting { ult_id, vaddr, pte }
     &&& candidate_mapping_overlaps_existing_vmem(s1.interp_pt_mem(), vaddr, pte)
@@ -413,7 +401,7 @@ pub open spec fn step_MapNoOp(c: Constants, s1: State, s2: State, core: Core, lb
     // mmu statemachine steps
     &&& s2.mmu == s1.mmu
     &&& s2.os_ext == s1.os_ext
-    //new state
+    // new state
     &&& s2.core_states == s1.core_states.insert(core, CoreState::MapDone { ult_id, vaddr, pte, result: Err(()) })
     &&& s1.sound == s2.sound
 }
@@ -458,7 +446,7 @@ pub open spec fn step_UnmapStart(c: Constants, s1: State, s2: State, core: Core,
     &&& {
     let pt = s1.interp_pt_mem();
     let pte_size = if pt.contains_key(vaddr) { pt[vaddr].frame.size } else { 0 };
-    //enabling conditions
+    // enabling conditions
     &&& core == c.ult2core[thread_id]
     &&& c.valid_ult(thread_id)
     &&& s1.core_states[core] is Idle
@@ -466,7 +454,7 @@ pub open spec fn step_UnmapStart(c: Constants, s1: State, s2: State, core: Core,
     // mmu statemachine steps
     &&& s2.mmu == s1.mmu
     &&& s2.os_ext == s1.os_ext
-    //new state
+    // new state
     &&& s2.core_states == s1.core_states.insert(core, CoreState::UnmapWaiting { ult_id: thread_id, vaddr })
     &&& s2.sound == (s1.sound && step_Unmap_sound(s1, vaddr, pte_size))
     }
@@ -474,13 +462,13 @@ pub open spec fn step_UnmapStart(c: Constants, s1: State, s2: State, core: Core,
 
 pub open spec fn step_UnmapOpStart(c: Constants, s1: State, s2: State, core: Core, lbl: RLbl) -> bool {
     &&& lbl is Tau
-    //enabling conditions
+    // enabling conditions
     &&& c.valid_core(core)
     &&& s1.core_states[core] matches CoreState::UnmapWaiting { ult_id, vaddr }
     // mmu statemachine steps
     &&& s2.mmu == s1.mmu
     &&& os_ext::next(s1.os_ext, s2.os_ext, c.common, os_ext::Lbl::AcquireLock { core })
-    //new state
+    // new state
     &&& s2.core_states == s1.core_states.insert(core, CoreState::UnmapExecuting { ult_id, vaddr, result: None })
     &&& s2.sound == s1.sound
 }
@@ -497,22 +485,14 @@ pub open spec fn step_Deallocate(c: Constants, s1: State, s2: State, core: Core,
     //mmu statemachine steps
     &&& s2.mmu == s1.mmu
     &&& os_ext::next(s1.os_ext, s2.os_ext, c.common, os_ext::Lbl::Deallocate { core, reg })
-    //new state
+    // new state
     &&& s2.core_states == s1.core_states
     &&& s2.sound == s1.sound
 }
 
-pub open spec fn step_UnmapOpChange(
-    c: Constants,
-    s1: State,
-    s2: State,
-    core: Core,
-    paddr: usize,
-    value: usize,
-    lbl: RLbl,
-) -> bool {
+pub open spec fn step_UnmapOpChange(c: Constants, s1: State, s2: State, core: Core, paddr: usize, value: usize, lbl: RLbl) -> bool {
     &&& lbl is Tau
-    //enabling conditions
+    // enabling conditions
     &&& c.valid_core(core)
     &&& s1.core_states[core] matches CoreState::UnmapExecuting { ult_id, vaddr, result: None }
     &&& s1.mmu@.pt_mem.is_nonpos_write(paddr, value)
@@ -531,17 +511,9 @@ pub open spec fn step_UnmapOpChange(
     &&& s2.sound == s1.sound
 }
 
-pub open spec fn step_UnmapOpStutter(
-    c: Constants,
-    s1: State,
-    s2: State,
-    core: Core,
-    paddr: usize,
-    value: usize,
-    lbl: RLbl,
-) -> bool {
+pub open spec fn step_UnmapOpStutter(c: Constants, s1: State, s2: State, core: Core, paddr: usize, value: usize, lbl: RLbl) -> bool {
     &&& lbl is Tau
-    //enabling conditions
+    // enabling conditions
     &&& c.valid_core(core)
     &&& s1.core_states[core] matches CoreState::UnmapExecuting { ult_id, vaddr, result: Some(res) }
     &&& value & 1 == 0
@@ -551,21 +523,21 @@ pub open spec fn step_UnmapOpStutter(
     &&& rl3::next(s1.mmu, s2.mmu, c.common, mmu::Lbl::Write(core, paddr, value))
     &&& s2.mmu@.happy == s1.mmu@.happy
     &&& s2.os_ext == s1.os_ext
-    //new state
+    // new state
     &&& s2.core_states == s1.core_states
     &&& s2.sound == s1.sound
 }
 
 pub open spec fn step_UnmapOpFail(c: Constants, s1: State, s2: State, core: Core, lbl: RLbl) -> bool {
     &&& lbl is Tau
-    //enabling conditions
+    // enabling conditions
     &&& c.valid_core(core)
     &&& s1.core_states[core] matches CoreState::UnmapExecuting { ult_id, vaddr, result: None }
     &&& !s1.interp_pt_mem().contains_key(vaddr)
     // mmu statemachine steps
     &&& s2.mmu == s1.mmu
     &&& s2.os_ext == s1.os_ext
-    //new state
+    // new state
     &&& s2.core_states == s1.core_states.insert(
         core,
         CoreState::UnmapOpDone { ult_id, vaddr, result: Err(()) }
@@ -573,22 +545,16 @@ pub open spec fn step_UnmapOpFail(c: Constants, s1: State, s2: State, core: Core
     &&& s2.sound == s1.sound
 }
 
-pub open spec fn step_UnmapInitiateShootdown(
-    c: Constants,
-    s1: State,
-    s2: State,
-    core: Core,
-    lbl: RLbl,
-) -> bool {
+pub open spec fn step_UnmapInitiateShootdown(c: Constants, s1: State, s2: State, core: Core, lbl: RLbl) -> bool {
     &&& lbl is Tau
-    //enabling conditions
+    // enabling conditions
     &&& c.valid_core(core)
     &&& s1.core_states[core] matches CoreState::UnmapExecuting { ult_id, vaddr, result: Some(Ok(pte)) }
     &&& s1.mmu@.writes.tso === set![]
     // mmu statemachine steps
     &&& s2.mmu == s1.mmu
     &&& os_ext::next(s1.os_ext, s2.os_ext, c.common, os_ext::Lbl::InitShootdown { core, vaddr })
-    //new state
+    // new state
     &&& s2.core_states == s1.core_states.insert(
         core,
         CoreState::UnmapShootdownWaiting { ult_id, vaddr, result: Ok(pte) },
@@ -600,40 +566,34 @@ pub open spec fn step_UnmapInitiateShootdown(
 // check if tlb shootdown/unmap has happend and send ACK
 pub open spec fn step_AckShootdownIPI(c: Constants, s1: State, s2: State, core: Core, lbl: RLbl) -> bool {
     &&& lbl matches RLbl::AckShootdownIPI { core: score } && score == core
-    //enabling conditions
+    // enabling conditions
     &&& c.valid_core(core)
     &&& !s1.mmu@.writes.nonpos.contains(core)
     &&& !s1.mmu@.tlbs[core].contains_key(s1.os_ext.shootdown_vec.vaddr as usize)
     // mmu statemachine steps
     &&& s2.mmu == s1.mmu
     &&& os_ext::next(s1.os_ext, s2.os_ext, c.common, os_ext::Lbl::AckShootdown { core })
-    //new state
+    // new state
     &&& s2.core_states == s1.core_states
     &&& s2.sound == s1.sound
 }
 
-pub open spec fn step_UnmapWaitShootdown(
-    c: Constants,
-    s1: State,
-    s2: State,
-    core: Core,
-    lbl: RLbl,
-) -> bool {
+pub open spec fn step_WaitShootdown(c: Constants, s1: State, s2: State, core: Core, lbl: RLbl) -> bool {
     &&& lbl is Tau
-    //enabling conditions
+    // enabling conditions
     &&& c.valid_core(core)
-    &&& s1.core_states[core] is UnmapShootdownWaiting
+    &&& s1.core_states[core] is UnmapShootdownWaiting || s1.core_states[core] is ProtectShootdownWaiting
     // mmu statemachine steps
     &&& s2.mmu == s1.mmu
     &&& os_ext::next(s1.os_ext, s2.os_ext, c.common, os_ext::Lbl::WaitShootdown { core })
-    //new state
+    // new state
     &&& s2.core_states == s1.core_states
     &&& s2.sound == s1.sound
 }
 
 pub open spec fn step_UnmapEnd(c: Constants, s1: State, s2: State, core: Core, lbl: RLbl) -> bool {
     &&& lbl matches RLbl::UnmapEnd { thread_id, vaddr, result }
-    //enabling conditions
+    // enabling conditions
     &&& c.valid_core(core)
     &&& match s1.core_states[core] {
         CoreState::UnmapShootdownWaiting { result: r2, vaddr: v2, ult_id: id2, .. } => {
@@ -658,37 +618,179 @@ pub open spec fn step_UnmapEnd(c: Constants, s1: State, s2: State, core: Core, l
     // mmu statemachine steps
     &&& s2.mmu == s1.mmu
     &&& os_ext::next(s1.os_ext, s2.os_ext, c.common, os_ext::Lbl::ReleaseLock { core })
-    //new state
+    // new state
+    &&& s2.core_states == s1.core_states.insert(core, CoreState::Idle)
+    &&& s1.sound == s2.sound
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////
+// Protect
+///////////////////////////////////////////////////////////////////////////////////////////////
+pub open spec fn step_Protect_sound(s1: State, vaddr: nat, pte_size: nat) -> bool {
+    !candidate_mapping_overlaps_inflight_vmem(s1.interp_pt_mem(), s1.core_states.values(), vaddr, pte_size)
+}
+
+pub open spec fn step_Protect_enabled(vaddr: nat) -> bool {
+    &&& vaddr < x86_arch_spec.upper_vaddr(0, 0)
+    &&& { // The given vaddr must be aligned to some valid page size
+        ||| aligned(vaddr, L3_ENTRY_SIZE as nat)
+        ||| aligned(vaddr, L2_ENTRY_SIZE as nat)
+        ||| aligned(vaddr, L1_ENTRY_SIZE as nat)
+    }
+}
+
+pub open spec fn step_ProtectStart(c: Constants, s1: State, s2: State, core: Core, lbl: RLbl) -> bool {
+    &&& lbl matches RLbl::ProtectStart { thread_id, vaddr, flags }
+    &&& {
+    let pt = s1.interp_pt_mem();
+    let pte_size = if pt.contains_key(vaddr) { pt[vaddr].frame.size } else { 0 };
+    // enabling conditions
+    &&& core == c.ult2core[thread_id]
+    &&& c.valid_ult(thread_id)
+    &&& s1.core_states[core] is Idle
+    &&& step_Protect_enabled(vaddr)
+    // mmu statemachine steps
+    &&& s2.mmu == s1.mmu
+    &&& s2.os_ext == s1.os_ext
+    // new state
+    &&& s2.core_states == s1.core_states.insert(core, CoreState::ProtectWaiting { ult_id: thread_id, vaddr, flags })
+    &&& s2.sound == (s1.sound && step_Protect_sound(s1, vaddr, pte_size))
+    }
+}
+
+pub open spec fn step_ProtectOpStart(c: Constants, s1: State, s2: State, core: Core, lbl: RLbl) -> bool {
+    &&& lbl is Tau
+    // enabling conditions
+    &&& c.valid_core(core)
+    &&& s1.core_states[core] matches CoreState::ProtectWaiting { ult_id, vaddr, flags }
+    // mmu statemachine steps
+    &&& s2.mmu == s1.mmu
+    &&& os_ext::next(s1.os_ext, s2.os_ext, c.common, os_ext::Lbl::AcquireLock { core })
+    // new state
+    &&& s2.core_states == s1.core_states.insert(core, CoreState::ProtectExecuting { ult_id, vaddr, flags, result: None })
+    &&& s2.sound == s1.sound
+}
+
+pub open spec fn step_ProtectOpChange(c: Constants, s1: State, s2: State, core: Core, paddr: usize, value: usize, lbl: RLbl) -> bool {
+    &&& lbl is Tau
+    // enabling conditions
+    &&& c.valid_core(core)
+    &&& s1.core_states[core] matches CoreState::ProtectExecuting { ult_id, vaddr, flags, result: None }
+    &&& s1.mmu@.pt_mem.is_prot_write(paddr, value)
+    // mmu statemachine steps
+    &&& rl3::next(s1.mmu, s2.mmu, c.common, mmu::Lbl::Write(core, paddr, value))
+    &&& s2.mmu@.happy == s1.mmu@.happy
+    &&& s1.os_ext.is_in_allocated_region(paddr as nat)
+    &&& s1.interp_pt_mem().contains_key(vaddr)
+    &&& s2.interp_pt_mem() == s1.interp_pt_mem().insert(vaddr, PTE { flags, ..s1.interp_pt_mem()[vaddr] })
+    &&& s2.core_states == s1.core_states.insert(
+        core,
+        CoreState::ProtectExecuting { ult_id, vaddr, flags, result: Some(Ok(s1.interp_pt_mem()[vaddr])) }
+    )
+
+    &&& s2.os_ext == s1.os_ext
+    &&& s2.sound == s1.sound
+}
+
+pub open spec fn step_ProtectOpFail(c: Constants, s1: State, s2: State, core: Core, lbl: RLbl) -> bool {
+    &&& lbl is Tau
+    // enabling conditions
+    &&& c.valid_core(core)
+    &&& s1.core_states[core] matches CoreState::ProtectExecuting { ult_id, vaddr, flags, result: None }
+    &&& !s1.interp_pt_mem().contains_key(vaddr)
+    // mmu statemachine steps
+    &&& s2.mmu == s1.mmu
+    &&& s2.os_ext == s1.os_ext
+    // new state
+    &&& s2.core_states == s1.core_states.insert(
+        core,
+        CoreState::ProtectOpDone { ult_id, vaddr, flags, result: Err(()) }
+    )
+    &&& s2.sound == s1.sound
+}
+
+pub open spec fn step_ProtectInitiateShootdown(c: Constants, s1: State, s2: State, core: Core, lbl: RLbl) -> bool {
+    &&& lbl is Tau
+    // enabling conditions
+    &&& c.valid_core(core)
+    &&& s1.core_states[core] matches CoreState::ProtectExecuting { ult_id, vaddr, flags, result: Some(Ok(pte)) }
+    &&& s1.mmu@.writes.tso === set![]
+    // mmu statemachine steps
+    &&& s2.mmu == s1.mmu
+    &&& os_ext::next(s1.os_ext, s2.os_ext, c.common, os_ext::Lbl::InitShootdown { core, vaddr })
+    // new state
+    &&& s2.core_states == s1.core_states.insert(
+        core,
+        CoreState::ProtectShootdownWaiting { ult_id, vaddr, flags, result: Ok(pte) },
+    )
+    &&& s2.sound == s1.sound
+}
+
+pub open spec fn step_ProtectEnd(c: Constants, s1: State, s2: State, core: Core, lbl: RLbl) -> bool {
+    &&& lbl matches RLbl::ProtectEnd { thread_id, vaddr, result }
+    // enabling conditions
+    &&& c.valid_core(core)
+    &&& match s1.core_states[core] {
+        CoreState::ProtectShootdownWaiting { result: r2, vaddr: v2, flags, ult_id: id2, .. } => {
+            &&& result is Ok
+            &&& r2 is Ok
+            &&& vaddr == v2
+            &&& thread_id == id2
+            &&& s1.os_ext.shootdown_vec.open_requests.is_empty()
+        },
+        CoreState::ProtectOpDone { result: r2, vaddr: v2, flags, ult_id: id2, .. } => {
+            &&& result is Err
+            &&& r2 is Err
+            &&& vaddr == v2
+            &&& thread_id == id2
+        },
+        _ => false,
+    }
+    &&& s2.inv_impl() // impl invariant is re-established
+    &&& s1.mmu@.writes.tso === set![]
+    &&& s1.mmu@.writes.nonpos === set![]
+    &&& s1.mmu@.pending_unmaps === map![]
+    // mmu statemachine steps
+    &&& s2.mmu == s1.mmu
+    &&& os_ext::next(s1.os_ext, s2.os_ext, c.common, os_ext::Lbl::ReleaseLock { core })
+    // new state
     &&& s2.core_states == s1.core_states.insert(core, CoreState::Idle)
     &&& s1.sound == s2.sound
 }
 
 pub open spec fn next_step(c: Constants, s1: State, s2: State, step: Step, lbl: RLbl) -> bool {
     match step {
-        Step::MMU                                   => step_MMU(c, s1, s2, lbl),
-        Step::MemOp { core }                        => step_MemOp(c, s1, s2, core, lbl),
-        Step::ReadPTMem { core, paddr, value }      => step_ReadPTMem(c, s1, s2, core, paddr, value, lbl),
-        Step::Barrier { core }                      => step_Barrier(c, s1, s2, core, lbl),
-        Step::Invlpg { core }                       => step_Invlpg(c, s1, s2, core, lbl),
-        //Map steps
-        Step::MapStart { core }                     => step_MapStart(c, s1, s2, core, lbl),
-        Step::MapOpStart { core }                   => step_MapOpStart(c, s1, s2, core, lbl),
-        Step::Allocate { core, res }                => step_Allocate(c, s1, s2, core, res, lbl),
-        Step::MapOpStutter { core, paddr, value }   => step_MapOpStutter(c, s1, s2, core, paddr, value, lbl),
-        Step::MapOpChange { core, paddr, value }    => step_MapOpChange(c, s1, s2, core, paddr, value, lbl),
-        Step::MapNoOp { core }                      => step_MapNoOp(c, s1, s2, core, lbl),
-        Step::MapEnd { core }                       => step_MapEnd(c, s1, s2, core, lbl),
-        //Unmap steps
-        Step::UnmapStart { core }                   => step_UnmapStart(c, s1, s2, core, lbl),
-        Step::UnmapOpStart { core }                 => step_UnmapOpStart(c, s1, s2, core, lbl),
-        Step::Deallocate { core, reg }              => step_Deallocate(c, s1, s2, core, reg, lbl),
-        Step::UnmapOpChange { core, paddr, value }  => step_UnmapOpChange(c, s1, s2, core, paddr, value, lbl),
-        Step::UnmapOpStutter { core, paddr, value } => step_UnmapOpStutter(c, s1, s2, core, paddr, value, lbl),
-        Step::UnmapOpFail { core }                  => step_UnmapOpFail(c, s1, s2, core, lbl),
-        Step::UnmapInitiateShootdown { core }       => step_UnmapInitiateShootdown(c, s1, s2, core, lbl),
-        Step::UnmapWaitShootdown { core }           => step_UnmapWaitShootdown(c, s1, s2, core, lbl),
-        Step::AckShootdownIPI { core }              => step_AckShootdownIPI(c, s1, s2, core, lbl),
-        Step::UnmapEnd { core }                     => step_UnmapEnd(c, s1, s2, core, lbl),
+        Step::MMU                                     => step_MMU(c, s1, s2, lbl),
+        Step::MemOp { core }                          => step_MemOp(c, s1, s2, core, lbl),
+        Step::ReadPTMem { core, paddr, value }        => step_ReadPTMem(c, s1, s2, core, paddr, value, lbl),
+        Step::Barrier { core }                        => step_Barrier(c, s1, s2, core, lbl),
+        Step::Invlpg { core }                         => step_Invlpg(c, s1, s2, core, lbl),
+        // Map steps
+        Step::MapStart { core }                       => step_MapStart(c, s1, s2, core, lbl),
+        Step::MapOpStart { core }                     => step_MapOpStart(c, s1, s2, core, lbl),
+        Step::Allocate { core, res }                  => step_Allocate(c, s1, s2, core, res, lbl),
+        Step::MapOpStutter { core, paddr, value }     => step_MapOpStutter(c, s1, s2, core, paddr, value, lbl),
+        Step::MapOpChange { core, paddr, value }      => step_MapOpChange(c, s1, s2, core, paddr, value, lbl),
+        Step::MapNoOp { core }                        => step_MapNoOp(c, s1, s2, core, lbl),
+        Step::MapEnd { core }                         => step_MapEnd(c, s1, s2, core, lbl),
+        // Unmap steps
+        Step::UnmapStart { core }                     => step_UnmapStart(c, s1, s2, core, lbl),
+        Step::UnmapOpStart { core }                   => step_UnmapOpStart(c, s1, s2, core, lbl),
+        Step::Deallocate { core, reg }                => step_Deallocate(c, s1, s2, core, reg, lbl),
+        Step::UnmapOpChange { core, paddr, value }    => step_UnmapOpChange(c, s1, s2, core, paddr, value, lbl),
+        Step::UnmapOpStutter { core, paddr, value }   => step_UnmapOpStutter(c, s1, s2, core, paddr, value, lbl),
+        Step::UnmapOpFail { core }                    => step_UnmapOpFail(c, s1, s2, core, lbl),
+        Step::UnmapInitiateShootdown { core }         => step_UnmapInitiateShootdown(c, s1, s2, core, lbl),
+        Step::WaitShootdown { core }                  => step_WaitShootdown(c, s1, s2, core, lbl),
+        Step::AckShootdownIPI { core }                => step_AckShootdownIPI(c, s1, s2, core, lbl),
+        Step::UnmapEnd { core }                       => step_UnmapEnd(c, s1, s2, core, lbl),
+        // Protect steps
+        Step::ProtectStart { core }                   => step_ProtectStart(c, s1, s2, core, lbl),
+        Step::ProtectOpStart { core }                 => step_ProtectOpStart(c, s1, s2, core, lbl),
+        Step::ProtectOpChange { core, paddr, value }  => step_ProtectOpChange(c, s1, s2, core, paddr, value, lbl),
+        Step::ProtectOpFail { core }                  => step_ProtectOpFail(c, s1, s2, core, lbl),
+        Step::ProtectInitiateShootdown { core }       => step_ProtectInitiateShootdown(c, s1, s2, core, lbl),
+        Step::ProtectEnd { core }                     => step_ProtectEnd(c, s1, s2, core, lbl),
     }
 }
 
@@ -815,9 +917,7 @@ impl CoreState {
         }
     }
 
-    pub open spec fn PTE(self) -> PTE
-        recommends self.is_map(),
-    {
+    pub open spec fn PTE(self) -> PTE {
         match self {
             CoreState::MapWaiting { pte, .. }
             | CoreState::MapExecuting { pte, .. }
@@ -853,45 +953,102 @@ impl CoreState {
 }
 
 impl State {
+    // pub open spec fn any_core_mapping(self) -> bool {
+    //     exists|core|
+    //         #[trigger] self.core_states.contains_key(core)
+    //         && self.core_states[core].is_mapping()
+    //         && self.core_states[core] !is MapWaiting
+    // }
+    //
+    // pub open spec fn any_core_mapping_choose(self) -> Core {
+    //     choose|core|
+    //         #[trigger] self.core_states.contains_key(core)
+    //         && self.core_states[core].is_mapping()
+    //         && self.core_states[core] !is MapWaiting
+    // }
+    //
+    // pub open spec fn any_core_unmapping(self) -> bool {
+    //     exists|core|
+    //         #[trigger] self.core_states.contains_key(core)
+    //         && self.core_states[core].is_unmapping()
+    //         && self.core_states[core] !is UnmapWaiting
+    // }
+
     pub open spec fn interp_pt_mem(self) -> Map<nat, PTE> {
         crate::spec_t::mmu::defs::nat_keys(self.mmu@.pt_mem@)
     }
 
     pub open spec fn inflight_unmap_vaddr(self) -> Set<nat> {
-        Set::new(|v_address: nat| {
-            &&& self.interp_pt_mem().contains_key(v_address)
-            &&& exists|core: Core|
-                self.core_states.contains_key(core) && match self.core_states[core] {
-                    CoreState::UnmapWaiting { ult_id, vaddr }
-                    | CoreState::UnmapExecuting { ult_id, vaddr, .. }
-                    | CoreState::UnmapOpDone { ult_id, vaddr, .. }
-                    | CoreState::UnmapShootdownWaiting { ult_id, vaddr, .. } => {
-                        vaddr === v_address
-                    },
-                    _ => false,
-                }
-        })
-    }
-
-    pub open spec fn inflight_vaddr(self) -> Set<nat> {
-        Set::new(|v_address: nat| {
-            &&& self.interp_pt_mem().contains_key(v_address)
+        Set::new(|va: nat| {
+            &&& self.interp_pt_mem().contains_key(va)
             &&& exists|core: Core|
                 self.core_states.contains_key(core) && match self.core_states[core] {
                     CoreState::UnmapWaiting { ult_id, vaddr }
                     | CoreState::UnmapExecuting { ult_id, vaddr, .. }
                     | CoreState::UnmapOpDone { ult_id, vaddr, .. }
                     | CoreState::UnmapShootdownWaiting { ult_id, vaddr, .. }
-                    | CoreState::MapDone {ult_id, vaddr, result: Ok(()), .. } => {
-                        vaddr === v_address
+                        => vaddr == va,
+                    _ => false,
+                }
+        })
+    }
+
+    pub open spec fn inflight_mapunmap_vaddr_choose_core(self, va: nat) -> Core
+        recommends self.inflight_mapunmap_vaddr().contains(va)
+    {
+        choose|core: Core| self.core_states.contains_key(core) && match self.core_states[core] {
+            CoreState::UnmapWaiting { vaddr, .. }
+            | CoreState::UnmapExecuting { vaddr, .. }
+            | CoreState::UnmapOpDone { vaddr, .. }
+            | CoreState::UnmapShootdownWaiting { vaddr, .. }
+            | CoreState::MapDone { vaddr, result: Ok(()), .. } => {
+                vaddr === va
+            },
+            _ => false,
+        }
+    }
+
+    pub open spec fn inflight_mapunmap_vaddr(self) -> Set<nat> {
+        Set::new(|va: nat| {
+            &&& self.interp_pt_mem().contains_key(va)
+            &&& exists|core: Core|
+                self.core_states.contains_key(core) && match self.core_states[core] {
+                    CoreState::UnmapWaiting { vaddr, .. }
+                    | CoreState::UnmapExecuting { vaddr, .. }
+                    | CoreState::UnmapOpDone { vaddr, .. }
+                    | CoreState::UnmapShootdownWaiting { vaddr, .. }
+                    | CoreState::MapDone { vaddr, result: Ok(()), .. }
+                        => vaddr == va,
+                    _ => false,
+                }
+        })
+    }
+
+    pub open spec fn inflight_protect(self) -> Set<(nat, PTE)> {
+        Set::new(|tup: (nat, PTE)| {
+            let va = tup.0; let pte2 = tup.1;
+            &&& self.interp_pt_mem().contains_key(va)
+            &&& exists|core: Core|
+                self.core_states.contains_key(core) && match self.core_states[core] {
+                    CoreState::ProtectWaiting { ult_id, vaddr, flags }
+                    | CoreState::ProtectExecuting { ult_id, vaddr, flags, result: None, .. } => {
+                        &&& vaddr == va
+                        &&& pte2 == PTE { frame: self.interp_pt_mem()[va].frame, flags }
+                    },
+                    CoreState::ProtectExecuting { ult_id, vaddr, result: Some(Ok(pte)), .. }
+                    | CoreState::ProtectOpDone { ult_id, vaddr, result: Ok(pte), .. }
+                    | CoreState::ProtectShootdownWaiting { ult_id, vaddr, result: Ok(pte), .. } => {
+                        &&& vaddr == va
+                        &&& pte2 == pte
                     },
                     _ => false,
                 }
         })
     }
 
+
     pub open spec fn effective_mappings(self) -> Map<nat, PTE> {
-        self.interp_pt_mem().remove_keys(self.inflight_vaddr())
+        self.interp_pt_mem().remove_keys(self.inflight_mapunmap_vaddr())
     }
 
     pub open spec fn has_base_and_pte_for_vaddr(applied_mappings: Map<nat, PTE>, vaddr: int) -> bool {
@@ -906,10 +1063,7 @@ impl State {
             && between(vaddr as nat, base, base + pte.frame.size)
     }
 
-    pub open spec fn vmem_apply_mappings(
-        applied_mappings: Map<nat, PTE>,
-        phys_mem: Seq<u8>
-    ) -> Seq<u8> {
+    pub open spec fn vmem_apply_mappings(applied_mappings: Map<nat, PTE>, phys_mem: Seq<u8>) -> Seq<u8> {
         Seq::new(
             MAX_BASE,
             |vaddr: int| {
@@ -958,32 +1112,28 @@ impl State {
         Set::new(|vaddr: nat| self.is_unmap_vaddr(vaddr))
     }
 
-    //// "extra vaddrs"
-    //// This is for getting the PTEs that we want to be in the applied mappings,
-    //// but which aren't in the self.interp_pt_mem()
-    ////
-    //// The memory interpretation (interp_vmem) needs to include the memory for a given PTE
-    //// starting all the way at the beginning of the Map and ending at the end of the Unmap.
-    //// However, self.interp_pt_mem() only includes this memory from the
-    //// MapDone phase through the UnmapExecuting(result=None) phase.
-    ////
-    //// Therefore, anything before (MapWaiting, MapExecuting)
-    //// or after (UnmapExecuting(result=Some), UnmapOpDone)
-    //// needs to be included in the "extras".
+    // "extra vaddrs"
+    // This is for getting the PTEs that we want to be in the applied mappings,
+    // but which aren't in the self.interp_pt_mem()
+    //
+    // The memory interpretation (interp_vmem) needs to include the memory for a given PTE
+    // starting all the way at the beginning of the Map and ending at the end of the Unmap.
+    // However, self.interp_pt_mem() only includes this memory from the
+    // MapDone phase through the UnmapExecuting(result=None) phase.
+    //
+    // Therefore, anything before (MapWaiting, MapExecuting)
+    // or after (UnmapExecuting(result=Some), UnmapOpDone)
+    // needs to be included in the "extras".
 
     pub open spec fn is_extra_vaddr_core(self, core: Core, vaddr: nat) -> bool {
         self.core_states.contains_key(core) && match self.core_states[core] {
             CoreState::MapWaiting { vaddr: vaddr1, pte, .. }
             | CoreState::MapExecuting { vaddr: vaddr1, pte, .. }
-            => {
-                vaddr1 === vaddr
-            }
-
+                => vaddr1 == vaddr,
             CoreState::UnmapExecuting { vaddr: vaddr1, result: Some(result), .. }
             | CoreState::UnmapOpDone { vaddr: vaddr1, result, .. }
-            | CoreState::UnmapShootdownWaiting { vaddr: vaddr1, result, .. } => {
-                (result is Ok) && (vaddr1 === vaddr)
-            },
+            | CoreState::UnmapShootdownWaiting { vaddr: vaddr1, result, .. }
+                => (result is Ok) && (vaddr1 === vaddr),
             _ => false,
         }
     }
@@ -1004,12 +1154,8 @@ impl State {
     pub open spec fn candidate_vaddr_overlaps(self, vaddr: nat) -> bool {
         match self.core_states[self.get_extra_vaddr_core(vaddr)] {
             CoreState::MapWaiting { vaddr: vaddr1, pte, .. }
-            | CoreState::MapExecuting { vaddr: vaddr1, pte, .. } =>
-                candidate_mapping_overlaps_existing_vmem(
-                    self.effective_mappings(),
-                    vaddr,
-                    pte,
-                ),
+            | CoreState::MapExecuting { vaddr: vaddr1, pte, .. }
+                => candidate_mapping_overlaps_existing_vmem(self.effective_mappings(), vaddr, pte),
            _ => false,
         }
     }
@@ -1207,21 +1353,16 @@ impl State {
     }
 
     pub open spec fn inv_pending_maps(self, c: Constants) -> bool {
-        &&& forall |base| #[trigger] self.mmu@.pending_maps.contains_key(base) ==>
-            exists |core| Self::is_pending_for_core(c, base, core,
-                self.core_states, self.mmu@.pending_maps)
+        forall|base| #[trigger] self.mmu@.pending_maps.contains_key(base) ==>
+            exists|core| self.is_pending_for_core(c, base, core)
     }
 
-    pub open spec fn is_pending_for_core(c: Constants, base: usize, core: Core, core_states: Map<Core, CoreState>, pending_maps: Map<usize, PTE>) -> bool
-        recommends pending_maps.contains_key(base)
+    pub open spec fn is_pending_for_core(self, c: Constants, base: usize, core: Core) -> bool
+        recommends self.mmu@.pending_maps.contains_key(base)
     {
-        core_states.contains_key(core)
-            && match core_states[core] {
-                CoreState::MapDone { ult_id, vaddr, pte, result } =>
-                    vaddr == base
-                     && pte == pending_maps[base],
-                _ => false,
-            }
+        self.core_states.contains_key(core) &&
+            (self.core_states[core] matches CoreState::MapDone { vaddr, pte, .. } &&
+                    vaddr == base && pte == self.mmu@.pending_maps[base])
     }
 
     pub open spec fn inv_mmu(self, c: Constants) -> bool {
@@ -1253,14 +1394,6 @@ impl State {
 
     pub open spec fn unallocated_memory_zeroed(self, c: Constants) -> bool {
         forall|pa: usize|
-            // aligned(pa as nat, 8) && c.common.in_ptmem_range(pa as nat, 8) &&
-            // (forall|r| #[trigger] self.os_ext.allocated.contains(r) ==> !r.contains(pa))
-            //     ==> #[trigger] self.mmu@.pt_mem.read(pa) == 0
-            //
-            // aligned(pa as nat, 8) && c.common.in_ptmem_range(pa as nat, 8) &&
-            // !(exists|r| #[trigger] self.os_ext.allocated.contains(r) && r.contains(pa))
-            //     ==> #[trigger] self.mmu@.pt_mem.read(pa) == 0
-            //
             aligned(pa as nat, 8) && c.common.in_ptmem_range(pa as nat, 8) && #[trigger] self.mmu@.pt_mem.read(pa) != 0
                 ==> exists|r| #[trigger] self.os_ext.allocated.contains(r) && r.contains(pa as nat)
     }
@@ -1323,7 +1456,7 @@ impl State {
         &&& self.inv_shootdown(c)
         &&& self.inv_allocated_mem(c)
         &&& self.tlb_inv(c)
-        &&& self.overlapping_mem_inv(c)
+        &&& self.inv_overlapping_mem(c)
         &&& self.inv_pending_maps(c)
     }
 
@@ -1332,7 +1465,7 @@ impl State {
     ///////////////////////////////////////////////////////////////////////////////////////////////
     pub open spec fn inv_tlb_wf(self, c: Constants) -> bool {
         forall|core| #![auto] c.valid_core(core) && self.core_states[core].is_unmapping()
-            ==> self.core_states[core].unmap_vaddr() < MAX_BASE
+            ==> self.core_states[core].vaddr() < MAX_BASE
     }
 
     pub open spec fn inv_shootdown_wf(self, c: Constants) -> bool {
@@ -1490,7 +1623,7 @@ impl State {
 
 
     pub open spec fn inv_inflight_pmem_no_overlap_existing_pmem(self, c: Constants) -> bool {
-        forall|core| #![auto](c.valid_core(core) && self.core_states[core].has_pte(self.interp_pt_mem())) 
+        forall|core| #![auto] (c.valid_core(core) && self.core_states[core].has_pte(self.interp_pt_mem())) 
                     && !(self.core_states[core] matches CoreState::MapDone { result: Ok(_), ..})
                     && !(self.core_states[core] matches CoreState::UnmapExecuting { result: None, .. })
                     && self.core_states[core] !is UnmapWaiting
@@ -1508,7 +1641,7 @@ impl State {
     }
 
 
-    pub open spec fn overlapping_mem_inv(self, c: Constants) -> bool {
+    pub open spec fn inv_overlapping_mem(self, c: Constants) -> bool {
         self.sound ==> {
             &&& self.inv_inflight_map_no_overlap_inflight_vmem(c)
             &&& self.inv_unmapped_vmem_no_overlap_existing_vmem(c)
@@ -1550,6 +1683,9 @@ impl Step {
             // Unmap steps
             Step::UnmapStart { .. } => hlspec::Step::UnmapStart,
             Step::UnmapEnd { core } => hlspec::Step::UnmapEnd,
+            // Unmap steps
+            Step::ProtectStart { .. } => hlspec::Step::ProtectStart,
+            Step::ProtectEnd { core } => hlspec::Step::ProtectEnd,
             _ => hlspec::Step::Stutter,
         }
     }
@@ -1557,15 +1693,16 @@ impl Step {
     // The MMU label this transition corresponds to. (if the transition takes an MMU step)
     pub open spec fn mmu_lbl(self, pre: State, lbl: RLbl) -> mmu::Lbl {
         match self {
-            Step::MemOp { core }                        => mmu::Lbl::MemOp(core, lbl->MemOp_vaddr as usize, lbl->MemOp_op),
-            Step::ReadPTMem { core, paddr, value }      => mmu::Lbl::Read(core, paddr, value),
-            Step::Barrier { core }                      => mmu::Lbl::Barrier(core),
-            Step::Invlpg { core }                       => mmu::Lbl::Invlpg(core, pre.os_ext.shootdown_vec.vaddr as usize),
-            Step::MapOpStutter { core, paddr, value }   => mmu::Lbl::Write(core, paddr, value),
-            Step::MapOpChange { core, paddr, value }    => mmu::Lbl::Write(core, paddr, value),
-            Step::UnmapOpChange { core, paddr, value }  => mmu::Lbl::Write(core, paddr, value),
-            Step::UnmapOpStutter { core, paddr, value } => mmu::Lbl::Write(core, paddr, value),
-            _                                           => mmu::Lbl::Tau,
+            Step::MemOp { core }                         => mmu::Lbl::MemOp(core, lbl->MemOp_vaddr as usize, lbl->MemOp_op),
+            Step::ReadPTMem { core, paddr, value }       => mmu::Lbl::Read(core, paddr, value),
+            Step::Barrier { core }                       => mmu::Lbl::Barrier(core),
+            Step::Invlpg { core }                        => mmu::Lbl::Invlpg(core, pre.os_ext.shootdown_vec.vaddr as usize),
+            Step::MapOpStutter { core, paddr, value }    => mmu::Lbl::Write(core, paddr, value),
+            Step::MapOpChange { core, paddr, value }     => mmu::Lbl::Write(core, paddr, value),
+            Step::UnmapOpChange { core, paddr, value }   => mmu::Lbl::Write(core, paddr, value),
+            Step::UnmapOpStutter { core, paddr, value }  => mmu::Lbl::Write(core, paddr, value),
+            Step::ProtectOpChange { core, paddr, value } => mmu::Lbl::Write(core, paddr, value),
+            _                                            => mmu::Lbl::Tau,
         }
     }
 }

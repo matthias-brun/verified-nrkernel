@@ -1642,8 +1642,8 @@ impl WrappedUnmapToken {
                 osext_tok.prophesy_wait_shootdown();
                 let post = state9; // read-only step
                 assert(os_ext::next(tok.tok.st().os_ext, post.os_ext, tok.tok.consts().common, osext_tok.lbl()));
-                assert(os::step_UnmapWaitShootdown(tok.tok.consts(), tok.tok.st(), post, core, RLbl::Tau));
-                let step = os::Step::UnmapWaitShootdown { core };
+                assert(os::step_WaitShootdown(tok.tok.consts(), tok.tok.st(), post, core, RLbl::Tau));
+                let step = os::Step::WaitShootdown { core };
                 assert(os::next_step(tok.tok.consts(), tok.tok.st(), post, step, RLbl::Tau));
                 tok.tok.register_internal_step_osext(&mut osext_tok, post, step, RLbl::Tau);
             }

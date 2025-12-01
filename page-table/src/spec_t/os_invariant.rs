@@ -153,7 +153,6 @@ pub proof fn next_step_preserves_inv_basic(c: os::Constants, s1: os::State, s2: 
     };
 }
 
-#[verifier::rlimit(100)] #[verifier(spinoff_prover)]
 pub proof fn next_step_preserves_inv(c: os::Constants, s1: os::State, s2: os::State, step: os::Step, lbl: RLbl)
     requires
         s1.inv(c),
@@ -200,9 +199,16 @@ pub proof fn next_step_preserves_inv_mmu(c: os::Constants, s1: os::State, s2: os
         s2.inv_mmu(c),
 {
     x86_arch_spec_upper_bound();
-    broadcast use
-        to_rl1::next_preserves_inv,
-        to_rl1::next_refines;
+    match step { // Broadcasting these is very slow
+        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+        | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
+        | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
+        | os::Step::ProtectOpChange { .. } => {
+            to_rl1::next_refines(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
+            to_rl1::next_preserves_inv(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
+        },
+        _ => {},
+    }
     assert(s2.mmu@.pt_mem.mem.dom() =~= s1.mmu@.pt_mem.mem.dom());
     assert(s1.mmu@.phys_mem.len() == c.common.range_mem.1);
     match step {
@@ -253,162 +259,76 @@ pub proof fn next_step_preserves_inv_pending_maps(c: os::Constants, s1: os::Stat
     ensures
         s2.inv_pending_maps(c),
 {
-    broadcast use
-        to_rl1::next_preserves_inv,
-        to_rl1::next_refines;
-    match step {
-        // Map steps
-        os::Step::MMU => {
-            assert(s2.inv_pending_maps(c));
-        }
-        os::Step::MemOp { core } => {
-            assert(s2.inv_pending_maps(c));
-        }
-        os::Step::ReadPTMem { core, paddr, value } => {
-            assert(s2.inv_pending_maps(c));
-        }
-        os::Step::Barrier { core } => {
-            assert(s2.inv_pending_maps(c));
-        }
-        os::Step::Invlpg { core } => {
-            assert(s2.inv_pending_maps(c));
-        }
-
-        os::Step::MapStart { core } => {
-            assert forall |base| #[trigger] s2.mmu@.pending_maps.contains_key(base) implies
-                exists |core| os::State::is_pending_for_core(c, base, core,
-                    s2.core_states, s2.mmu@.pending_maps)
-            by {
-                assert(s1.mmu@.pending_maps.contains_key(base));
-                let core = choose |core| os::State::is_pending_for_core(c, base, core,
-                    s1.core_states, s1.mmu@.pending_maps);
-                assert(os::State::is_pending_for_core(c, base, core,
-                    s1.core_states, s1.mmu@.pending_maps));
-                assert(os::State::is_pending_for_core(c, base, core,
-                    s2.core_states, s2.mmu@.pending_maps));
-            }
-            assert(s2.inv_pending_maps(c));
+    match step { // Broadcasting these is very slow
+        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+        | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
+        | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
+        | os::Step::ProtectOpChange { .. } => {
+            to_rl1::next_refines(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
+            to_rl1::next_preserves_inv(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
         },
-        os::Step::MapOpStart { core } => {
-            assert(s2.inv_pending_maps(c));
-        },
-        os::Step::Allocate { core, res } => {
-            assert(s2.inv_pending_maps(c));
-        },
-        os::Step::MapOpStutter { core, paddr, value }
-        | os::Step::UnmapOpChange { core, paddr, value }
-        | os::Step::UnmapOpStutter { core, paddr, value } => {
-            let mlbl = mmu::Lbl::Write(core, paddr, value);
-            let mmu_step = choose|step| rl1::next_step(s1.mmu@, s2.mmu@, c.common, step, mlbl);
-            assert(rl1::next_step(s1.mmu@, s2.mmu@, c.common, mmu_step, mlbl));
-            match mmu_step {
-                rl1::Step::WriteNonneg => {
-                    assert forall |vbase| s2.mmu@.pt_mem@.contains_key(vbase) implies s1.mmu@.pt_mem@.contains_key(vbase) by {
-                        assert(s2.interp_pt_mem().contains_key(vbase as nat));
-                        assert(s1.interp_pt_mem().contains_key(vbase as nat));
+        _ => {},
+    }
+    assert forall |base| #[trigger] s2.mmu@.pending_maps.contains_key(base) implies
+        exists |core| s2.is_pending_for_core(c, base, core)
+    by {
+        match step {
+            os::Step::MapOpStutter { core, paddr, value }
+            | os::Step::UnmapOpChange { core, paddr, value }
+            | os::Step::UnmapOpStutter { core, paddr, value } => {
+                let mlbl = mmu::Lbl::Write(core, paddr, value);
+                let mmu_step = choose|step| rl1::next_step(s1.mmu@, s2.mmu@, c.common, step, mlbl);
+                assert(rl1::next_step(s1.mmu@, s2.mmu@, c.common, mmu_step, mlbl));
+                match mmu_step {
+                    rl1::Step::WriteNonneg => {
+                        assert forall |vbase| s2.mmu@.pt_mem@.contains_key(vbase) implies s1.mmu@.pt_mem@.contains_key(vbase) by {
+                            assert(s2.interp_pt_mem().contains_key(vbase as nat));
+                            assert(s1.interp_pt_mem().contains_key(vbase as nat));
+                        }
+                        assert(s1.mmu@.pending_maps =~= s2.mmu@.pending_maps);
+                        assert(s2.inv_pending_maps(c));
                     }
-                    assert(s1.mmu@.pending_maps =~= s2.mmu@.pending_maps);
-                    assert(s2.inv_pending_maps(c));
+                    _ => assert(false),
                 }
-                rl1::Step::WriteNonpos => {
-                    assert(s2.inv_pending_maps(c));
-                }
-                rl1::Step::WriteProtect => {
-                    assert(s2.inv_pending_maps(c));
-                }
-                _ => {
-                    assert(false);
-                }
-            }
-        },
-        os::Step::MapOpChange { core, paddr, value } => {
-            let mlbl = mmu::Lbl::Write(core, paddr, value);
-            let mmu_step = choose|step| rl1::next_step(s1.mmu@, s2.mmu@, c.common, step, mlbl);
-            assert(rl1::next_step(s1.mmu@, s2.mmu@, c.common, mmu_step, mlbl));
-            match mmu_step {
-                rl1::Step::WriteNonneg => {
-                    let vaddr = s1.core_states[core]->MapExecuting_vaddr;
-                    let pte = s1.core_states[core]->MapExecuting_pte;
-                    assert forall |base| #[trigger] s2.mmu@.pending_maps.contains_key(base) implies
-                        exists |core1| os::State::is_pending_for_core(c, base, core1,
-                            s2.core_states, s2.mmu@.pending_maps)
-                    by {
+            },
+            os::Step::MapOpChange { core, paddr, value } => {
+                let mlbl = mmu::Lbl::Write(core, paddr, value);
+                let mmu_step = choose|step| rl1::next_step(s1.mmu@, s2.mmu@, c.common, step, mlbl);
+                assert(rl1::next_step(s1.mmu@, s2.mmu@, c.common, mmu_step, mlbl));
+                match mmu_step {
+                    rl1::Step::WriteNonneg => {
+                        let vaddr = s1.core_states[core]->MapExecuting_vaddr;
+                        let pte = s1.core_states[core]->MapExecuting_pte;
                         if base == vaddr {
-                            assert(s2.interp_pt_mem().contains_key(base as nat));
                             assert(s2.interp_pt_mem()[base as nat] == pte);
                             assert(s2.mmu@.pending_maps.contains_key(base));
                             assert(s2.mmu@.pending_maps[base] == pte);
-                            assert(os::State::is_pending_for_core(c, base, core,
-                                s2.core_states, s2.mmu@.pending_maps));
+                            assert(s2.is_pending_for_core(c, base, core));
                         } else {
                             assert(s2.interp_pt_mem().contains_key(base as nat));
                             assert(s1.interp_pt_mem().contains_key(base as nat));
                             assert(s1.mmu@.pending_maps.contains_key(base));
-
-                            let core1 = choose |core1| os::State::is_pending_for_core(c, base, core1,
-                                s1.core_states, s1.mmu@.pending_maps);
-                            assert(os::State::is_pending_for_core(c, base, core1,
-                                s1.core_states, s1.mmu@.pending_maps));
-                            assert(os::State::is_pending_for_core(c, base, core1,
-                                s2.core_states, s2.mmu@.pending_maps));
                         }
-                    }
-                    assert(s2.inv_pending_maps(c));
+                    },
+                    _ => assert(false),
                 }
-                rl1::Step::WriteNonpos => {
-                    assert(s2.inv_pending_maps(c));
-                }
-                rl1::Step::WriteProtect => {
-                    assert(s2.inv_pending_maps(c));
-                }
-                _ => {
-                    assert(false);
-                }
-            }
-        },
-        os::Step::MapNoOp { core } => {
-            assert(s2.inv_pending_maps(c));
-        },
-        os::Step::MapEnd { core } => {
-            assert(s2.inv_pending_maps(c));
-        },
-
-        //Unmap steps
-        os::Step::UnmapStart { core } => {
-            assert forall |base| #[trigger] s2.mmu@.pending_maps.contains_key(base) implies
-                exists |core| os::State::is_pending_for_core(c, base, core,
-                    s2.core_states, s2.mmu@.pending_maps)
-            by {
-                assert(s1.mmu@.pending_maps.contains_key(base));
-                let core = choose |core| os::State::is_pending_for_core(c, base, core,
-                    s1.core_states, s1.mmu@.pending_maps);
-                assert(os::State::is_pending_for_core(c, base, core,
-                    s1.core_states, s1.mmu@.pending_maps));
-                assert(os::State::is_pending_for_core(c, base, core,
-                    s2.core_states, s2.mmu@.pending_maps));
-            }
-            assert(s2.inv_pending_maps(c));
-        },
-        os::Step::UnmapOpStart { core } => {
-            assert(s2.inv_pending_maps(c));
-        },
-        os::Step::Deallocate { core: Core, reg: MemRegion } => {
-            assert(s2.inv_pending_maps(c));
-        }
-        os::Step::UnmapOpFail { core } => {
-            assert(s2.inv_pending_maps(c));
-        },
-        os::Step::UnmapInitiateShootdown { core } => {
-            assert(s2.inv_pending_maps(c));
-        },
-        os::Step::UnmapWaitShootdown { core } => {
-            assert(s2.inv_pending_maps(c));
-        },
-        os::Step::AckShootdownIPI { core: Core } => {
-            assert(s2.inv_pending_maps(c));
-        }
-        os::Step::UnmapEnd { core: Core } => {
-            assert(s2.inv_pending_maps(c));
+            },
+            os::Step::ProtectOpChange { core, .. } => {
+                assume(!rl1::step_WriteNonneg(s1.mmu@, s2.mmu@, c.common, step.mmu_lbl(s1, lbl)));
+            },
+            os::Step::MMU
+            | os::Step::MemOp { .. }
+            | os::Step::ReadPTMem { .. }
+            | os::Step::Barrier { .. }
+            | os::Step::Invlpg { .. }
+            | os::Step::MapStart { .. }
+            | os::Step::UnmapStart { .. }
+            | os::Step::ProtectStart { .. } => {
+                let core = choose |core| s1.is_pending_for_core(c, base, core);
+                assert(s1.is_pending_for_core(c, base, core));
+                assert(s2.is_pending_for_core(c, base, core));
+            },
+            _ => {}
         }
     }
 }
@@ -422,9 +342,16 @@ pub proof fn next_step_preserves_inv_allocated_mem(c: os::Constants, s1: os::Sta
     ensures
         s2.inv_allocated_mem(c),
 {
-    broadcast use
-        to_rl1::next_preserves_inv,
-        to_rl1::next_refines;
+    match step { // Broadcasting these is very slow
+        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+        | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
+        | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
+        | os::Step::ProtectOpChange { .. } => {
+            to_rl1::next_refines(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
+            to_rl1::next_preserves_inv(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
+        },
+        _ => {},
+    }
     match step {
         os::Step::MapOpStart { core } => {
             assert(s2.os_ext.allocated == s1.os_ext.allocated);
@@ -441,20 +368,6 @@ pub proof fn next_step_preserves_inv_allocated_mem(c: os::Constants, s1: os::Sta
                 let r = choose|r| #[trigger] s1.os_ext.allocated.contains(r) && r.contains(pa as nat);
                 assert(s2.os_ext.allocated.contains(r));
             };
-        },
-        os::Step::MapOpStutter { core, paddr, value } => {
-            assert(s2.os_ext.allocated == s1.os_ext.allocated);
-            assert(forall|pa| pa != paddr ==> s2.mmu@.pt_mem.read(pa) == s1.mmu@.pt_mem.read(pa));
-        },
-        os::Step::MapOpChange { core, paddr, value } => {
-            assert(s2.os_ext.allocated == s1.os_ext.allocated);
-            assert(forall|pa| pa != paddr ==> s2.mmu@.pt_mem.read(pa) == s1.mmu@.pt_mem.read(pa));
-        },
-        os::Step::MapEnd { core } => {
-            assert(s2.os_ext.allocated == s1.os_ext.allocated);
-        },
-        os::Step::UnmapOpStart { core } => {
-            assert(s2.os_ext.allocated == s1.os_ext.allocated);
         },
         os::Step::Deallocate { core, reg } => {
             assert forall|pa: usize|
@@ -474,22 +387,12 @@ pub proof fn next_step_preserves_inv_allocated_mem(c: os::Constants, s1: os::Sta
                 }
             };
         },
-        os::Step::UnmapOpChange { core, paddr, value } => {
-            assert(s2.os_ext.allocated == s1.os_ext.allocated);
+        os::Step::MapOpStutter { core, paddr, value }
+        | os::Step::MapOpChange { core, paddr, value }
+        | os::Step::UnmapOpChange { core, paddr, value }
+        | os::Step::UnmapOpStutter { core, paddr, value }
+        | os::Step::ProtectOpChange { core, paddr, value } => {
             assert(forall|pa| pa != paddr ==> s2.mmu@.pt_mem.read(pa) == s1.mmu@.pt_mem.read(pa));
-        },
-        os::Step::UnmapOpStutter { core, paddr, value } => {
-            assert(s2.os_ext.allocated == s1.os_ext.allocated);
-            assert(forall|pa| pa != paddr ==> s2.mmu@.pt_mem.read(pa) == s1.mmu@.pt_mem.read(pa));
-        },
-        os::Step::UnmapInitiateShootdown { core } => {
-            assert(s2.os_ext.allocated == s1.os_ext.allocated);
-        },
-        os::Step::AckShootdownIPI { core } => {
-            assert(s2.os_ext.allocated == s1.os_ext.allocated);
-        },
-        os::Step::UnmapEnd { core } => {
-            assert(s2.os_ext.allocated == s1.os_ext.allocated);
         },
         _ => {},
     }
@@ -522,6 +425,23 @@ pub proof fn next_step_preserves_inv_shootdown(c: os::Constants, s1: os::State, 
     broadcast use
         to_rl1::next_preserves_inv,
         to_rl1::next_refines;
+
+    match step {
+        os::Step::ProtectInitiateShootdown { .. } => {
+            admit();
+        },
+        _ => {},
+    }
+    // match step { // Broadcasting these is very slow
+    //     os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+    //     | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
+    //     | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
+    //     | os::Step::ProtectOpChange { .. } => {
+    //         to_rl1::next_refines(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
+    //         to_rl1::next_preserves_inv(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
+    //     },
+    //     _ => {},
+    // }
 }
 
 #[verifier(spinoff_prover)]
@@ -533,29 +453,30 @@ pub proof fn next_step_preserves_inv_writes(c: os::Constants, s1: os::State, s2:
         s2.inv_writes(c),
 {
     hide(os::State::tlb_inv);
-    match step {
-        os::Step::MemOp { .. }
-        | os::Step::ReadPTMem { .. }
-        | os::Step::Invlpg { .. }
-        | os::Step::Barrier { .. }
-        | os::Step::UnmapOpChange { .. }
-        | os::Step::MMU { .. }
-        | os::Step::UnmapOpStutter { .. } => {
+    match step { // Broadcasting these is very slow
+        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+        | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
+        | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
+        | os::Step::ProtectOpChange { .. } => {
             to_rl1::next_refines(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
             to_rl1::next_preserves_inv(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
         },
+        _ => {},
+    }
+    match step {
         os::Step::MapOpStutter { core, .. } => {
-            to_rl1::next_refines(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
-            to_rl1::next_preserves_inv(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
             // TODO: easy, follows from bit pattern requirements (is_prot_write, is_nonneg_write)
             assume(!rl1::step_WriteProtect(s1.mmu@, s2.mmu@, c.common, step.mmu_lbl(s1, lbl)));
         },
         os::Step::MapOpChange { core, .. } => {
-            to_rl1::next_refines(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
-            to_rl1::next_preserves_inv(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
             // TODO: same as above
             assume(!rl1::step_WriteProtect(s1.mmu@, s2.mmu@, c.common, step.mmu_lbl(s1, lbl)));
         },
+        os::Step::ProtectOpChange { core, .. } => {
+            // TODO: easy
+            assume(!rl1::step_WriteNonneg(s1.mmu@, s2.mmu@, c.common, step.mmu_lbl(s1, lbl)));
+        },
+        os::Step::MapStart { core, .. } => assert(c.valid_core(core)), // Trigger inv_lock
         _ => {},
     }
 }
@@ -593,9 +514,8 @@ pub proof fn next_step_mmu_preserves_tlb_inv(
     ensures
         s2.tlb_inv(c),
 {
-    broadcast use
-        to_rl1::next_preserves_inv,
-        to_rl1::next_refines;
+    to_rl1::next_refines(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
+    to_rl1::next_preserves_inv(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
     assert(s2.shootdown_cores_valid(c));
     assert(forall|core, vaddr: nat| s2.is_unmap_vaddr_core(core, vaddr)
         <==> s1.is_unmap_vaddr_core(core, vaddr));
@@ -623,7 +543,7 @@ pub proof fn next_step_mmu_preserves_tlb_inv(
                 if handler == core {
                     assert(s2.core_states[dispatcher] == s1.core_states[dispatcher]);
                     assert(s1.core_states[dispatcher].is_unmapping());
-                    assert(shootdown_vaddr == s1.core_states[dispatcher].unmap_vaddr());
+                    assert(shootdown_vaddr == s1.core_states[dispatcher].vaddr());
                     assert(!s2.interp_pt_mem().contains_key(shootdown_vaddr));
                     assert(shootdown_vaddr < MAX_BASE);
                     assert(!s2.mmu@.pt_mem@.contains_key(shootdown_vaddr as usize));
@@ -705,8 +625,15 @@ pub proof fn next_step_preserves_tlb_inv(
     ensures
         s2.tlb_inv(c),
 {
-    broadcast use
-        to_rl1::next_refines;
+    match step { // Broadcasting these is very slow
+        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+        | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
+        | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
+        | os::Step::ProtectOpChange { .. } => {
+            to_rl1::next_refines(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
+        },
+        _ => {},
+    }
     match step {
         os::Step::MMU => {
             next_step_mmu_preserves_tlb_inv(c, s1, s2, step, lbl);
@@ -775,7 +702,7 @@ pub proof fn next_step_preserves_tlb_inv(
         | os::Step::MapNoOp { core }
         | os::Step::MapEnd { core }
         | os::Step::UnmapOpStart { core }
-        | os::Step::UnmapWaitShootdown { core }
+        | os::Step::WaitShootdown { core }
         | os::Step::Deallocate { core, .. }
         | os::Step::UnmapOpFail { core } => {
             assert(s2.shootdown_cores_valid(c));
@@ -865,11 +792,9 @@ pub proof fn next_step_preserves_tlb_inv(
             assert(s2.TLB_dom_subset_of_pt_and_inflight_unmap_vaddr(c));
         },
         os::Step::UnmapEnd { core } => {
-            let vaddr = s1.core_states[core].unmap_vaddr();
-            assert forall|tlb_core: Core|
-                #[trigger] c.valid_core(tlb_core)
-                implies
-                !s1.mmu@.tlbs[tlb_core].contains_key(vaddr as usize)
+            let vaddr = s1.core_states[core].vaddr();
+            assert forall|tlb_core: Core| #[trigger] c.valid_core(tlb_core)
+                implies !s1.mmu@.tlbs[tlb_core].contains_key(vaddr as usize)
             by {
                 if s1.core_states[core] is UnmapOpDone {
                     let tlb_set = s1.interp_pt_mem().dom().union(s1.unmap_vaddr_set());
@@ -885,6 +810,10 @@ pub proof fn next_step_preserves_tlb_inv(
             }
             assert(s2.TLB_dom_subset_of_pt_and_inflight_unmap_vaddr(c));
         },
+        _ => {
+            // XXX
+            admit();
+        }
     }
 }
 
@@ -902,22 +831,30 @@ pub proof fn next_step_preserves_overlap_mem_inv(
     requires
         s1.inv_basic(c),
         s1.inv_mmu(c),
-        s1.overlapping_mem_inv(c),
+        s1.inv_overlapping_mem(c),
         s2.inv_basic(c),
         s2.inv_mmu(c),
         os::next_step(c, s1, s2, step, lbl),
     ensures
-        s2.overlapping_mem_inv(c),
+        s2.inv_overlapping_mem(c),
 {
-    broadcast use
-        to_rl1::next_preserves_inv,
-        to_rl1::next_refines;
+    match step { // Broadcasting these is very slow
+        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+        | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
+        | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
+        | os::Step::ProtectOpChange { .. } => {
+            to_rl1::next_refines(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
+            to_rl1::next_preserves_inv(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
+        },
+        _ => {},
+    }
     let _ = s2.interp_pt_mem(); let _ = s1.interp_pt_mem();
 
     if s2.sound {
         match step {
             // Map steps
             os::Step::MapStart { core } => {
+                assert(c.valid_core(core));
                 let thread_id = lbl->MapStart_thread_id;
                 let vaddr = lbl->MapStart_vaddr;
                 let pte = lbl->MapStart_pte;
@@ -958,7 +895,7 @@ pub proof fn next_step_preserves_overlap_mem_inv(
                 }
                 assert(s2.inv_inflight_pmem_no_overlap_inflight_pmem(c));
                 assert(s2.inv_existing_map_no_overlap_existing_vmem(c));
-                assert(s2.overlapping_mem_inv(c));
+                assert(s2.inv_overlapping_mem(c));
             },
             os::Step::MapOpStart { core } => {
                 let vaddr = s1.core_states[core]->MapWaiting_vaddr;
@@ -1004,7 +941,7 @@ pub proof fn next_step_preserves_overlap_mem_inv(
                                 assert( core1 === core2);
                             }
                 }
-                assert(s2.overlapping_mem_inv(c));
+                assert(s2.inv_overlapping_mem(c));
             },
             os::Step::MapNoOp { core }
             | os::Step::MapOpChange { core, .. } => {
@@ -1056,7 +993,7 @@ pub proof fn next_step_preserves_overlap_mem_inv(
                     }
                 }
                 assert(s2.inv_existing_map_no_overlap_existing_vmem(c));
-                assert(s2.overlapping_mem_inv(c));
+                assert(s2.inv_overlapping_mem(c));
             },
             os::Step::UnmapOpStart { core } => {
                 let vaddr = s1.core_states[core]->UnmapWaiting_vaddr;
@@ -1101,7 +1038,7 @@ pub proof fn next_step_preserves_overlap_mem_inv(
                                 assert( core1 === core2);
                             }
                 }
-                assert(s2.overlapping_mem_inv(c));
+                assert(s2.inv_overlapping_mem(c));
             },
             os::Step::UnmapOpChange { core, .. } => {
                 let vaddr = s1.core_states[core]->UnmapExecuting_vaddr;
@@ -1181,7 +1118,7 @@ pub proof fn next_step_preserves_overlap_mem_inv(
                                     },));
                                 }
                 }
-                assert(s2.overlapping_mem_inv(c));
+                assert(s2.inv_overlapping_mem(c));
             },
             os::Step::UnmapOpFail { core } => {
                 let vaddr = s1.core_states[core]->UnmapExecuting_vaddr;
@@ -1233,13 +1170,25 @@ pub proof fn next_step_preserves_overlap_mem_inv(
                             }
                 }
                 assert(s2.inv_existing_map_no_overlap_existing_vmem(c));
-                assert(s2.overlapping_mem_inv(c));
+                assert(s2.inv_overlapping_mem(c));
             },
             os::Step::MapEnd { core } => {
-                assert(s2.overlapping_mem_inv(c));
+                assert(s2.inv_overlapping_mem(c));
+            },
+            os::Step::ProtectStart { core }
+            | os::Step::ProtectOpStart { core, .. }
+            | os::Step::ProtectOpChange { core, .. }
+            | os::Step::ProtectOpFail { core, .. }
+            | os::Step::ProtectInitiateShootdown { core, .. }
+            | os::Step::ProtectEnd { core, .. } => {
+                admit();
+            },
+            os::Step::Allocate { .. } => {
+                assert(s2.inv_overlapping_mem(c)); // possibly flaky? may have to split up this
+                                                   // function into smaller pieces
             },
             _ => {
-                assert(s2.overlapping_mem_inv(c));
+                assert(s2.inv_overlapping_mem(c));
             },
         }
     }
@@ -1256,14 +1205,14 @@ pub proof fn step_MapNoOp_and_step_MapOpChange_preserves_overlap_mem_inv(
     requires
         s1.inv_basic(c),
         s1.inv_mmu(c),
-        s1.overlapping_mem_inv(c),
+        s1.inv_overlapping_mem(c),
         s2.inv_basic(c),
         s2.inv_mmu(c),
         s2.sound,
         os::next_step(c, s1, s2, step, lbl),
         step is MapOpChange || step is MapNoOp
     ensures
-        s2.overlapping_mem_inv(c),
+        s2.inv_overlapping_mem(c),
 {
     broadcast use
         to_rl1::next_preserves_inv,
@@ -1408,7 +1357,9 @@ pub proof fn step_MapNoOp_and_step_MapOpChange_preserves_overlap_mem_inv(
     }
 
     assert(s2.inv_inflight_pmem_no_overlap_existing_pmem(c)) by {
-        assert forall|map_core| #![auto](c.valid_core(map_core) && s2.core_states[map_core].is_map()) && !(s2.core_states[map_core] is MapDone)
+        assert forall|map_core| #![auto]
+            c.valid_core(map_core) && s2.core_states[map_core].is_mapping()
+            && s2.core_states[map_core] !is MapDone
         implies !mmu::defs::candidate_mapping_overlaps_existing_pmem(
                 s2.interp_pt_mem(),
                 s2.core_states[map_core].PTE()
@@ -1435,7 +1386,7 @@ pub proof fn step_MapNoOp_and_step_MapOpChange_preserves_overlap_mem_inv(
         }
     };
     assert(s2.inv_mapped_pmem_no_overlap(c));
-    assert(s2.overlapping_mem_inv(c));
+    assert(s2.inv_overlapping_mem(c));
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1921,10 +1872,9 @@ pub proof fn lemma_map_insert_values_equality<A, B>(map: Map<A, B>, key: A, valu
     assert(map.values().insert(value) =~= map.insert(key, value).values().insert(map.index(key)));
 }
 
+// XXX: is this not in vstd?
 pub proof fn lemma_map_insert_value<A, B>(map: Map<A, B>, key: A, value: B)
-    requires
-    ensures
-        map.insert(key, value).values().contains(value),
+    ensures map.insert(key, value).values().contains(value),
 {
     assert(map.insert(key, value).contains_key(key));
     assert(map.insert(key, value)[key] == value);

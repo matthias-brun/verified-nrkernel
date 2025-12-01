@@ -347,10 +347,16 @@ pub open spec fn step_MapStart(c: Constants, s1: State, s2: State, lbl: RLbl) ->
     &&& c.valid_thread(thread_id)
     &&& s1.thread_state[thread_id] is Idle
     &&& if step_Map_sound(s1.mappings, s1.thread_state.values(), vaddr, pte) {
-        state_unchanged_besides_thread_state_and_mem(s1, s2, thread_id, ThreadState::Map { vaddr, pte })
-        && (if candidate_mapping_overlaps_existing_vmem(s1.mappings, vaddr, pte) {
+        &&& state_unchanged_besides_thread_state_and_mem(s1, s2, thread_id, ThreadState::Map { vaddr, pte })
+        &&& (if candidate_mapping_overlaps_existing_vmem(s1.mappings, vaddr, pte) {
             s1.mem == s2.mem
         } else {
+            // From this point onwards, we may non-atomically see succesful translations, which
+            // have normal memory semantics. That means the interpretation switches from mapping
+            // the affected memory addresses to 0, to mapping them to actual memory contents.
+            // Because of that the memory may change here in unmapped regions.
+            // TODO(MB): Ideally, MapStart would directly apply the new mapping and then we just
+            // allow non-atomic translation failures.
             forall|vaddr: nat| #[trigger] is_in_mapped_region(c.phys_mem_size, s1.mappings, vaddr)
                 ==> s2.mem[vaddr as int] === s1.mem[vaddr as int]
         })
