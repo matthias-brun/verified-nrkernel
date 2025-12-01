@@ -43,9 +43,15 @@ impl os::Step {
             os::Step::UnmapOpStutter { core, .. } |
             os::Step::UnmapOpFail { core, .. } |
             os::Step::UnmapInitiateShootdown { core, .. } |
-            os::Step::UnmapWaitShootdown { core } |
+            os::Step::WaitShootdown { core } |
             os::Step::AckShootdownIPI { core, .. } |
-            os::Step::UnmapEnd { core, .. } => core == c,
+            os::Step::UnmapEnd { core, .. } |
+            os::Step::ProtectStart { core, .. } |
+            os::Step::ProtectOpStart { core, .. } |
+            os::Step::ProtectOpChange { core, .. } |
+            os::Step::ProtectOpFail { core, .. } |
+            os::Step::ProtectInitiateShootdown { core, .. } |
+            os::Step::ProtectEnd { core, .. } => core == c,
         }
     }
 }
@@ -134,7 +140,15 @@ pub proof fn lemma_concurrent_trs_no_lock(pre: os::State, post: os::State, c: os
     by {
         if pre.inv(c) {
             os_invariant::next_preserves_inv(c, mid, post, lbl);
-            broadcast use to_rl1::next_refines;
+            match step { // Broadcasting these is very slow
+                os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+                | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
+                | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
+                | os::Step::ProtectOpChange { .. } => {
+                    to_rl1::next_refines(mid.mmu, post.mmu, c.common, step.mmu_lbl(mid, lbl));
+                },
+                _ => {},
+            }
         }
     };
     lemma_concurrent_trs_induct(pre, post, c, core, pidx, pred);
@@ -187,7 +201,15 @@ pub proof fn lemma_concurrent_trs_during_shootdown(pre: os::State, post: os::Sta
             && pre.os_ext.shootdown_vec.open_requests.contains(core)
         {
             os_invariant::next_preserves_inv(c, mid, post, lbl);
-            broadcast use to_rl1::next_refines;
+            match step { // Broadcasting these is very slow
+                os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+                | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
+                | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
+                | os::Step::ProtectOpChange { .. } => {
+                    to_rl1::next_refines(mid.mmu, post.mmu, c.common, step.mmu_lbl(mid, lbl));
+                },
+                _ => {},
+            }
         }
     };
     lemma_concurrent_trs_induct(pre, post, c, core, pidx, pred);
@@ -224,7 +246,15 @@ pub proof fn lemma_concurrent_trs(pre: os::State, post: os::State, c: os::Consta
     by {
         if pre.inv(c) && pre.os_ext.lock == Some(core) {
             os_invariant::next_preserves_inv(c, mid, post, lbl);
-            broadcast use to_rl1::next_refines;
+            match step { // Broadcasting these is very slow
+                os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+                | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
+                | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
+                | os::Step::ProtectOpChange { .. } => {
+                    to_rl1::next_refines(mid.mmu, post.mmu, c.common, step.mmu_lbl(mid, lbl));
+                },
+                _ => {},
+            }
             assert(unchanged_state_during_concurrent_trs(pre, mid, core));
         }
     };
