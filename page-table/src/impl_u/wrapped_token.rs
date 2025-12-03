@@ -1760,8 +1760,8 @@ impl WrappedProtectToken {
     pub proof fn new(tracked tok: Token) -> (tracked res: WrappedProtectToken)
         requires
             tok.consts().valid_ult(tok.thread()),
-            tok.st().core_states[tok.core()] is UnmapExecuting,
-            tok.thread() == tok.st().core_states[tok.core()]->UnmapExecuting_ult_id,
+            tok.st().core_states[tok.core()] is ProtectExecuting,
+            tok.thread() == tok.st().core_states[tok.core()]->ProtectExecuting_ult_id,
             tok.st().core_states[tok.core()]->ProtectExecuting_result is None,
             tok.st().core_states[tok.core()]->ProtectExecuting_vaddr <= usize::MAX,
             tok.steps().len() == 1,
@@ -1985,11 +1985,11 @@ impl WrappedProtectToken {
         requires
             (if shootdown is Yes {
                 &&& tok@.change_made
-                &&& shootdown->Yes_vaddr == tok@.args->Unmap_base
+                &&& shootdown->Yes_vaddr == tok@.args->Protect_base
             } else {
                 &&& !tok@.change_made
                 &&& PT::inv(tok@, root_pt)
-                &&& !PT::interp_to_l0(tok@, root_pt).contains_key(tok@.args->Unmap_base as nat)
+                &&& !PT::interp_to_l0(tok@, root_pt).contains_key(tok@.args->Protect_base as nat)
             }),
             tok.inv(),
             forall|wtok: WrappedTokenView| ({
