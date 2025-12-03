@@ -71,10 +71,10 @@ impl State {
         exists|thread| {
             &&& c.valid_thread(thread)
             &&& match self.thread_state[thread] {
-                ThreadState::Map { vaddr, pte } => between(va, vaddr, vaddr + pte.frame.size),
-                ThreadState::Unmap { vaddr, pte: Some(pte) } => between(va, vaddr, vaddr + pte.frame.size),
+                ThreadState::Map { vaddr, pte }                    => between(va, vaddr, vaddr + pte.frame.size),
+                ThreadState::Unmap { vaddr, pte: Some(pte) }       => between(va, vaddr, vaddr + pte.frame.size),
                 ThreadState::Protect { vaddr, pte: Some(pte), .. } => between(va, vaddr, vaddr + pte.frame.size),
-                _ => false,
+                _                                                  => false,
             }
         }
     }
@@ -85,10 +85,10 @@ impl State {
         choose|thread| {
             &&& c.valid_thread(thread)
             &&& match self.thread_state[thread] {
-                ThreadState::Map { vaddr, pte } => between(va, vaddr, vaddr + pte.frame.size),
-                ThreadState::Unmap { vaddr, pte: Some(pte) } => between(va, vaddr, vaddr + pte.frame.size),
+                ThreadState::Map { vaddr, pte }                    => between(va, vaddr, vaddr + pte.frame.size),
+                ThreadState::Unmap { vaddr, pte: Some(pte) }       => between(va, vaddr, vaddr + pte.frame.size),
                 ThreadState::Protect { vaddr, pte: Some(pte), .. } => between(va, vaddr, vaddr + pte.frame.size),
-                _ => false,
+                _                                                  => false,
             }
         }
     }

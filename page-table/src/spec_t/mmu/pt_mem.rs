@@ -184,8 +184,7 @@ impl PTMem {
             self.is_base_pt_walk(vbase),
             vbase <= vaddr < vbase + self.pt_walk(vbase).result()->pte.frame.size,
         ensures
-            self.pt_walk(vaddr).result() 
-                == self.pt_walk(vbase).result(),
+            self.pt_walk(vaddr).result() == self.pt_walk(vbase).result(),
     {
         assert(sub(vbase, vbase % PAGE_SIZE) == vbase
             && vbase <= vaddr < vbase + PAGE_SIZE

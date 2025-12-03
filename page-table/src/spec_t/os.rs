@@ -120,6 +120,16 @@ impl CoreState {
             _ => false,
         }
     }
+
+    pub open spec fn is_protecting(self) -> bool {
+        match self {
+            CoreState::ProtectWaiting { .. }
+            | CoreState::ProtectExecuting { .. }
+            | CoreState::ProtectOpDone { .. }
+            | CoreState::ProtectShootdownWaiting { .. } => true,
+            _ => false,
+        }
+    }
 }
 
 impl Constants {
@@ -1079,20 +1089,21 @@ impl State {
 
     pub open spec fn effective_mappings(self) -> Map<nat, PTE> {
         self.interp_pt_mem()
-            .remove_keys(self.inflight_mapunmap_vaddr())
             .union_prefer_right(self.inflight_protect_params_map())
+            .remove_keys(self.inflight_mapunmap_vaddr())
     }
 
     pub open spec fn has_base_and_pte_for_vaddr(applied_mappings: Map<nat, PTE>, vaddr: int) -> bool {
-        exists|base: nat, pte: PTE| #![auto]
-            applied_mappings.contains_pair(base, pte)
-            && between(vaddr as nat, base, base + pte.frame.size)
+        exists|base: nat|
+            #[trigger] applied_mappings.contains_key(base)
+            && between(vaddr as nat, base, base + applied_mappings[base].frame.size)
     }
 
     pub open spec fn base_and_pte_for_vaddr(applied_mappings: Map<nat, PTE>, vaddr: int) -> (nat, PTE) {
-        choose|base: nat, pte: PTE| #![auto]
-            applied_mappings.contains_pair(base, pte)
-            && between(vaddr as nat, base, base + pte.frame.size)
+        let base = choose|base: nat|
+            #[trigger] applied_mappings.contains_key(base)
+            && between(vaddr as nat, base, base + applied_mappings[base].frame.size);
+        (base, applied_mappings[base])
     }
 
     pub open spec fn vmem_apply_mappings(applied_mappings: Map<nat, PTE>, phys_mem: Seq<u8>) -> Seq<u8> {
@@ -1113,9 +1124,9 @@ impl State {
     /// the hlspec's view immediately changes to reflect the removed mapping. Hence,
     /// effective_mappings has to change but applied_mappings has to stay the same because we may
     /// still be able to access the corresponding memory addresses.
-    /// TODO(MB): Arguably, we shouldn't have to give guarantees for what values are read from
-    /// those addresses while their mappings are being modified. That would allow us to use
-    /// effective_mappings for the memory as well.
+    ///
+    /// This definition ignores inflight mprotects. We disregard the permissions when interpreting
+    /// the memory, so mprotects have no effect.
     pub open spec fn applied_mappings(self) -> Map<nat, PTE> {
         // Prefer interp_pt_mem because there might be a situation where we have
         // something in the MapStart state which conflicts with something in interp_pt_mem.
@@ -1157,7 +1168,7 @@ impl State {
     // but which aren't in the self.interp_pt_mem()
     //
     // The memory interpretation (interp_vmem) needs to include the memory for a given PTE
-    // starting all the way at the beginning of the Map and ending at the end of the Unmap.
+    // from the beginning of a Map operation and for Unmap, from when it is removed to the end.
     // However, self.interp_pt_mem() only includes this memory from the
     // MapDone phase through the UnmapExecuting(result=None) phase.
     //
@@ -1165,25 +1176,30 @@ impl State {
     // or after (UnmapExecuting(result=Some), UnmapOpDone)
     // needs to be included in the "extras".
 
-    pub open spec fn is_extra_vaddr_core(self, core: Core, vaddr: nat) -> bool {
-        self.core_states.contains_key(core) && match self.core_states[core] {
-            CoreState::MapWaiting { vaddr: vaddr1, pte, .. }
-            | CoreState::MapExecuting { vaddr: vaddr1, pte, .. }
-                => vaddr1 == vaddr,
-            CoreState::UnmapExecuting { vaddr: vaddr1, result: Some(result), .. }
-            | CoreState::UnmapOpDone { vaddr: vaddr1, result, .. }
-            | CoreState::UnmapShootdownWaiting { vaddr: vaddr1, result, .. }
-                => (result is Ok) && (vaddr1 === vaddr),
+    pub open spec fn is_extra_vaddr_core(self, core: Core, va: nat) -> bool {
+        &&& self.core_states.contains_key(core)
+        &&& match self.core_states[core] {
+            CoreState::MapWaiting { vaddr, .. }
+            | CoreState::MapExecuting { vaddr, .. }
+            | CoreState::UnmapExecuting { vaddr, result: Some(Ok(_)), .. }
+            | CoreState::UnmapOpDone { vaddr, result: Ok(_), .. }
+            | CoreState::UnmapShootdownWaiting { vaddr, result: Ok(_), .. }
+            // Protect is disregarded because we ignore permissions when interpreting the memory,
+            // so inflight protects cannot have any effect.
+            // | CoreState::ProtectExecuting { vaddr, result: Some(Ok(_)), .. }
+            // | CoreState::ProtectOpDone { vaddr, result: Ok(_), .. }
+            // | CoreState::ProtectShootdownWaiting { vaddr, result: Ok(_), .. }
+                => va == vaddr,
             _ => false,
         }
     }
 
     pub open spec fn get_extra_vaddr_core(self, vaddr: nat) -> Core {
-        choose |core: Core| self.is_extra_vaddr_core(core, vaddr)
+        choose|core: Core| self.is_extra_vaddr_core(core, vaddr)
     }
 
     pub open spec fn is_extra_vaddr(self, vaddr: nat) -> bool {
-        exists |core: Core| self.is_extra_vaddr_core(core, vaddr)
+        exists|core: Core| self.is_extra_vaddr_core(core, vaddr)
     }
 
     pub open spec fn extra_mapping_for_vaddr(self, vaddr: nat) -> PTE {
@@ -1191,10 +1207,13 @@ impl State {
         self.core_states[self.get_extra_vaddr_core(vaddr)].PTE()
     }
 
+    // Mapping operations can overlap existing virtual memory but if they do, they will fail and
+    // not have any effect. Hence, we need to not add them to the extra mappings. For unmap, this
+    // is not a problem because `is_extra_vaddr_core` is only true for succeeding unmaps.
     pub open spec fn candidate_vaddr_overlaps(self, vaddr: nat) -> bool {
         match self.core_states[self.get_extra_vaddr_core(vaddr)] {
-            CoreState::MapWaiting { vaddr: vaddr1, pte, .. }
-            | CoreState::MapExecuting { vaddr: vaddr1, pte, .. }
+            CoreState::MapWaiting { vaddr, pte, .. }
+            | CoreState::MapExecuting { vaddr, pte, .. }
                 => candidate_mapping_overlaps_existing_vmem(self.effective_mappings(), vaddr, pte),
            _ => false,
         }
