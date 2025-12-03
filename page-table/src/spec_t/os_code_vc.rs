@@ -6,7 +6,7 @@ use crate::spec_t::os;
 use crate::spec_t::os_invariant;
 use crate::spec_t::mmu;
 use crate::spec_t::os_ext;
-use crate::spec_t::mmu::defs::{ PageTableEntryExec, Core, MemRegionExec };
+use crate::spec_t::mmu::defs::{ PageTableEntryExec, Core, MemRegionExec, Flags, MemRegion };
 use crate::theorem::RLbl;
 use crate::spec_t::mmu::rl3::refinement::to_rl1;
 
@@ -64,7 +64,7 @@ pub open spec fn concurrent_trs(pre: os::State, post: os::State, c: os::Constant
         post == pre
     } else {
         exists|state: os::State, step, lbl| {
-            &&& concurrent_trs(pre, state, c, core, sub(pidx, 1)) 
+            &&& concurrent_trs(pre, state, c, core, sub(pidx, 1))
             &&& os::next_step(c, state, post, step, lbl)
             &&& !step.is_actor_step(core)
         }
@@ -103,7 +103,7 @@ proof fn lemma_concurrent_trs_induct(pre: os::State, post: os::State, c: os::Con
     if pre == post {
     } else {
         let (state, step, lbl): (os::State, os::Step, RLbl) = choose|state: os::State, step, lbl| {
-            &&& concurrent_trs(pre, state, c, core, sub(pidx, 1)) 
+            &&& concurrent_trs(pre, state, c, core, sub(pidx, 1))
             &&& os::next_step(c, state, post, step, lbl)
             &&& !step.is_actor_step(core)
         };
@@ -552,6 +552,35 @@ pub trait CodeVC {
             pml4 == tok.st().mmu@.pt_mem.pml4,
         ensures
             res.0 is Ok <==> res.1@.steps_taken().last()->UnmapEnd_result is Ok,
+            res.1@.steps() === seq![],
+            res.1@.progress() is Unready,
+    ;
+
+    /// This function changes the protection flags of a mapped region
+    exec fn sys_do_protect(
+        Tracked(tok): Tracked<Token>,
+        pml4: usize,
+        vaddr: usize,
+        flags: Flags,
+        // Ghost(frame): Ghost<MemRegion>,
+    ) -> (res: (Result<(),()>, Tracked<Token>))
+        requires
+            // State machine VC preconditions
+            os::step_Protect_enabled(vaddr as nat),
+            tok.st().inv(tok.consts()),
+            tok.consts().valid_ult(tok.thread()),
+            tok.st().core_states[tok.core()] is Idle,
+            tok.steps() === seq![
+                RLbl::ProtectStart { thread_id: tok.thread(), vaddr: vaddr as nat, flags},
+                RLbl::ProtectEnd { thread_id: tok.thread(), vaddr: vaddr as nat, result: arbitrary() }
+            ],
+            tok.steps_taken() === seq![],
+            tok.on_first_step(),
+            tok.progress() is Unready,
+            // Caller preconditions
+            pml4 == tok.st().mmu@.pt_mem.pml4,
+        ensures
+            res.0 == res.1@.steps_taken().last()->ProtectEnd_result,
             res.1@.steps() === seq![],
             res.1@.progress() is Unready,
     ;
