@@ -23,7 +23,7 @@ use crate::spec_t::mmu::translation::{
 };
 #[cfg(verus_keep_ghost)]
 use crate::extra;
-use crate::impl_u::wrapped_token::{ WrappedMapToken, WrappedUnmapToken, WrappedTokenView, OpArgs };
+use crate::impl_u::wrapped_token::{ WrappedMapToken, WrappedUnmapToken, WrappedProtectToken, WrappedTokenView, OpArgs };
 
 
 verus! {
@@ -732,6 +732,37 @@ fn entry_at_unmap(Tracked(tok): Tracked<&mut WrappedUnmapToken>, Ghost(pt): Ghos
     }
     e
 }
+
+fn entry_at_protect(Tracked(tok): Tracked<&mut WrappedProtectToken>, Ghost(pt): Ghost<PTDir>, layer: usize, ptr: usize, i: usize) -> (res: PDE)
+    requires
+        i < 512,
+        old(tok).inv(),
+        inv_at(old(tok)@, pt, layer as nat, ptr),
+    ensures
+        res.layer@ == layer as nat,
+        res == entry_at_spec(tok@, pt, layer as nat, ptr, i as nat),
+        res.hp_pat_is_zero(),
+        tok@ == old(tok)@,
+        tok.inv(),
+        (res@ is Page ==> 0 < res.layer()),
+{
+    assert(aligned((ptr + i * WORD_SIZE) as nat, 8)) by {
+        assert(inv_at(tok@, pt, layer as nat, ptr));
+        assert(ptr % PAGE_SIZE == 0);
+    };
+    // triggering
+    proof { let _ = entry_at_spec(tok@, pt, layer as nat, ptr, i as nat); }
+    let e = PDE {
+        entry: WrappedProtectToken::read(Tracked(tok), ptr, i, Ghost(pt.region)),
+        layer: Ghost(layer as nat),
+    };
+    proof {
+        let es = PDE { entry: tok@.read(i, pt.region), layer: Ghost(layer as nat) };
+        assert(es == e);
+    }
+    e
+}
+
 
 pub open spec fn ghost_pt_matches_structure(tok: WrappedTokenView, pt: PTDir, layer: nat, ptr: usize) -> bool {
     forall|i: nat| #![trigger pt.entries[i as int], entry_at_spec(tok, pt, layer, ptr, i)@]
@@ -3264,7 +3295,7 @@ pub fn unmap(Tracked(tok): Tracked<&mut WrappedUnmapToken>, pt: &mut Ghost<PTDir
 // TODO: pt remains unchanged
 #[verifier(spinoff_prover)]
 fn protect_aux(
-    Tracked(tok): Tracked<&mut WrappedUnmapToken>,
+    Tracked(tok): Tracked<&mut WrappedProtectToken>,
     Ghost(pt): Ghost<PTDir>,
     layer: usize,
     ptr: usize,
@@ -3272,7 +3303,7 @@ fn protect_aux(
     vaddr: usize,
     permissions: Flags,
     Ghost(rebuild_root_pt): Ghost<spec_fn(PTDir, Set<MemRegion>) -> PTDir>,
-) -> (res: Result<(),()>)
+) -> (res: Result<usize,()>)
     requires
         // old(tok).inv(),
         // !old(tok)@.change_made,
@@ -3345,7 +3376,7 @@ fn protect_aux(
     // };
     let idx: usize = x86_arch_exec.index_for_vaddr(layer, base, vaddr);
     // proof { indexing::lemma_index_from_base_and_addr(base as nat, vaddr as nat, x86_arch_spec.entry_size(layer as nat), X86_NUM_ENTRIES as nat); }
-    let entry = entry_at_unmap(Tracked(tok), Ghost(pt), layer, ptr, idx);
+    let entry = entry_at_protect(Tracked(tok), Ghost(pt), layer, ptr, idx);
     let entry_base: usize = x86_arch_exec.entry_base(layer, base, idx);
     // proof {
     //     indexing::lemma_entry_base_from_index(base as nat, idx as nat, x86_arch_spec.entry_size(layer as nat));
@@ -3550,7 +3581,7 @@ fn protect_aux(
                     //         lemma_no_empty_directories_framing(old(tok)@, pt, tok@, pt_res, layer as nat, ptr, base as nat, idx as nat);
                     //     };
                     // }
-                    Ok(())
+                    Ok(x86_arch_exec.entry_size(layer))
                     // Ok(Ghost((pt_res, removed_regions)))
                 },
                 Err(e) => {
@@ -3618,7 +3649,7 @@ fn protect_aux(
                 // }
 
                 let new_entry = entry.change_page_permissions(permissions);
-                WrappedUnmapToken::write_change(Tracked(tok), ptr, idx, new_entry.entry, Ghost(pt.region), Ghost(arbitrary()));
+                WrappedProtectToken::write_change(Tracked(tok), ptr, idx, new_entry.entry, Ghost(pt.region), Ghost(arbitrary()));
                 // WrappedUnmapToken::write_change(Tracked(tok), ptr, idx, 0usize, Ghost(pt.region), Ghost(root_pt));
 
                 // let ghost removed_regions = Set::empty();
@@ -3630,7 +3661,7 @@ fn protect_aux(
                 //     assert(tok@.regions.dom() =~= old(tok)@.regions.dom().difference(removed_regions));
                 //     assert(pt.used_regions =~= pt.used_regions.difference(removed_regions));
                 // }
-                Ok(())
+                Ok(x86_arch_exec.entry_size(layer))
                 // Ok(Ghost((pt, removed_regions)))
             } else {
                 // proof {
@@ -3656,6 +3687,42 @@ fn protect_aux(
     }
 }
 
+
+/// `frame` will be set to the frame that was unmapped.
+pub fn protect(Tracked(tok): Tracked<&mut WrappedProtectToken>, pt: &mut Ghost<PTDir>, pml4: usize, vaddr: usize, permissions: Flags) -> (res: Result<usize,()>)
+    requires
+        !old(tok)@.change_made,
+        inv_and_nonempty(old(tok)@, old(pt)@),
+        old(tok).inv(),
+        // accepted_protect(vaddr as nat, 0, 0),
+        vaddr < MAX_BASE,
+        pml4 == old(tok)@.pt_mem.pml4,
+        old(tok)@.args == (OpArgs::Protect { base: vaddr, flags: permissions }),
+    ensures
+        inv_and_nonempty(tok@, pt@),
+        match res {
+            Ok(_) => {
+                &&& tok@.change_made
+                &&& tok@.args == old(tok)@.args
+                &&& interp_to_l0(old(tok)@, old(pt)@).contains_key(vaddr as nat)
+            },
+            Err(_) => {
+                &&& tok@ == old(tok)@
+                &&& !interp_to_l0(old(tok)@, pt@).contains_key(vaddr as nat)
+            },
+        },
+        tok.inv(),
+{
+    let ghost rebuild_root_pt = |pt_new, removed_regions| pt_new;
+    protect_aux(Tracked(tok), *pt, 0, pml4, 0, vaddr, permissions, Ghost(rebuild_root_pt))
+    //     Ok(res) => {
+
+    //         *pt = Ghost(res);
+    //         Ok(())
+    //     },
+    //     Err(e) => Err(()),
+
+}
 
 }
 

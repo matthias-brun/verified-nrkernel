@@ -1,7 +1,7 @@
 use vstd::prelude::*;
 
 use crate::theorem::RLbl;
-use crate::spec_t::mmu::defs::{ PageTableEntryExec, MemRegionExec };
+use crate::spec_t::mmu::defs::{ PageTableEntryExec, MemRegionExec, Flags, MemRegion };
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::defs::{ candidate_mapping_overlaps_existing_vmem, MAX_BASE, x86_arch_spec, x86_arch_spec_upper_bound };
 use crate::spec_t::os_ext;
@@ -10,8 +10,8 @@ use crate::spec_t::mmu::rl3::refinement::to_rl1;
 use crate::spec_t::os_code_vc::{ Token, CodeVC, HandlerVC };
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::os_code_vc::{ lemma_concurrent_trs_during_shootdown };
-use crate::impl_u::wrapped_token::{ self, WrappedMapToken, WrappedUnmapToken, WrappedTokenView, DoShootdown };
-use crate::impl_u::l2_impl::PT::{ self, map_frame, unmap };
+use crate::impl_u::wrapped_token::{ self, WrappedMapToken, WrappedUnmapToken, WrappedProtectToken, WrappedTokenView, DoShootdown };
+use crate::impl_u::l2_impl::PT::{ self, map_frame, unmap, protect };
 use crate::spec_t::os;
 
 verus! {
@@ -137,6 +137,62 @@ impl CodeVC for PTImpl {
 
         (res, tok)
     }
+
+
+    /// This function changes the protection flags of a mapped region
+    exec fn sys_do_protect(
+        Tracked(tok): Tracked<Token>,
+        pml4: usize,
+        vaddr: usize,
+        flags: Flags,
+        // Ghost(frame): Ghost<MemRegion>,
+    ) -> (res: (Result<(),()>, Tracked<Token>))
+    {
+        let tracked mut tok = tok;
+
+        wrapped_token::start_protect_and_acquire_lock(Tracked(&mut tok), Ghost(vaddr as nat), Ghost(flags));
+        let tracked wtok = WrappedProtectToken::new(tok); //, tok.steps()[0]->MapEnd_result);
+        proof {
+            wtok.lemma_regions_derived_from_view();
+        }
+        let mut pt = Ghost(choose|pt| PT::inv_and_nonempty(wtok@, pt));
+        assert(PT::inv_and_nonempty(wtok@, pt@));
+
+        proof {
+            x86_arch_spec_upper_bound();
+            assert(vaddr < MAX_BASE);
+            assert(x86_arch_spec.entry_size(1) == crate::spec_t::mmu::defs::L1_ENTRY_SIZE);
+            assert(x86_arch_spec.entry_size(2) == crate::spec_t::mmu::defs::L2_ENTRY_SIZE);
+            assert(x86_arch_spec.entry_size(3) == crate::spec_t::mmu::defs::L3_ENTRY_SIZE);
+        }
+
+        let ghost wtok_before = wtok@;
+        let ghost pt_before = pt@;
+
+        let res = protect(Tracked(&mut wtok), &mut pt, pml4, vaddr, flags);
+        assert(PT::inv_and_nonempty(wtok@, pt@));
+        assert forall|wtokp: WrappedTokenView| ({
+            &&& wtokp.pt_mem == wtok@.pt_mem
+            &&& wtokp.regions.dom() == wtok@.regions.dom()
+            &&& #[trigger] wtokp.regions_derived_from_view()
+        }) implies exists|pt| PT::inv_and_nonempty(wtokp, pt) by {
+            wtok.lemma_regions_derived_from_view();
+            PT::lemma_inv_at_changed_tok(wtok@, wtokp, pt@, 0, pt@.region.base as usize);
+            PT::lemma_no_empty_directories_with_changed_tok(wtok@, pt@, wtokp, pt@, 0, pt@.region.base as usize, 0);
+            assert(PT::inv_and_nonempty(wtokp, pt@));
+        };
+
+        let (res, shootdown) = if let Ok(size) = res {
+            (Ok(()), DoShootdown::Yes { vaddr, size })
+        } else {
+            (Err(()), DoShootdown::No)
+        };
+
+        let tok = WrappedProtectToken::finish_protect_and_release_lock(Tracked(wtok), shootdown, pt);
+
+        (res, tok)
+    }
+
 }
 
 impl HandlerVC for PTImpl {
