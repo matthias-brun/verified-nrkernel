@@ -3292,6 +3292,27 @@ pub fn unmap(Tracked(tok): Tracked<&mut WrappedUnmapToken>, pt: &mut Ghost<PTDir
 }
 
 
+
+// spec fn unmap_builder_pre(tok_old: WrappedTokenView, pt_old: PTDir, tok_new: WrappedTokenView, pt_new: PTDir, layer: nat, ptr: usize, removed_regions: Set<MemRegion>) -> bool {
+//     &&& tok_new.pt_mem.pml4 === tok_old.pt_mem.pml4
+//     &&& tok_new.regions.dom() == tok_old.regions.dom().difference(removed_regions)
+//     &&& pt_new.used_regions == pt_old.used_regions.difference(removed_regions)
+//     &&& removed_regions.subset_of(tok_old.regions.dom())
+//     &&& removed_regions.subset_of(pt_old.used_regions)
+//     &&& inv_at(tok_new, pt_new, layer as nat, ptr)
+//     &&& forall|r: MemRegion| !pt_old.used_regions.contains(r) ==> #[trigger] tok_new.regions[r] === tok_old.regions[r]
+//     &&& pt_new.region === pt_old.region
+// }
+
+pub open spec fn accepted_protect(vaddr: nat, layer: nat, base: nat) -> bool {
+    &&& exists|size: nat|
+        #![trigger x86_arch_spec.contains_entry_size(size)]
+        #![trigger aligned(vaddr, size)]
+        x86_arch_spec.contains_entry_size(size) && aligned(vaddr, size)
+    &&& vaddr < x86_arch_spec.upper_vaddr(layer as nat, base as nat)
+}
+
+
 // TODO: pt remains unchanged
 #[verifier(spinoff_prover)]
 fn protect_aux(
@@ -3303,18 +3324,18 @@ fn protect_aux(
     vaddr: usize,
     permissions: Flags,
     Ghost(rebuild_root_pt): Ghost<spec_fn(PTDir, Set<MemRegion>) -> PTDir>,
-) -> (res: Result<usize,()>)
+) -> (res: Result<(usize, Ghost<PTDir>),()>)
     requires
-        // old(tok).inv(),
-        // !old(tok)@.change_made,
-        // old(tok)@.args == (OpArgs::Unmap { base: vaddr }),
-        // inv_at(old(tok)@, pt, layer as nat, ptr),
-        // no_empty_directories(old(tok)@, pt, layer as nat, ptr),
-        // accepted_unmap(vaddr as nat, layer as nat, base as nat),
-        // aligned(base as nat, x86_arch_spec.entry_size(layer as nat)),
-        // base <= vaddr < MAX_BASE,
-        // interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp().contains_key(vaddr as nat)
-        //     <==> interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])).contains_key(vaddr as nat),
+        old(tok).inv(),
+        !old(tok)@.change_made,
+        old(tok)@.args == (OpArgs::Protect { base: vaddr, flags: permissions }),
+        inv_at(old(tok)@, pt, layer as nat, ptr),
+        no_empty_directories(old(tok)@, pt, layer as nat, ptr),
+        accepted_protect(vaddr as nat, layer as nat, base as nat),
+        aligned(base as nat, x86_arch_spec.entry_size(layer as nat)),
+        base <= vaddr < MAX_BASE,
+        interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp().contains_key(vaddr as nat)
+             <==> interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])).contains_key(vaddr as nat),
         // forall|tok_new, pt_new, removed_regions|
         //    #[trigger] unmap_builder_pre(old(tok)@, pt, tok_new, pt_new, layer as nat, ptr, removed_regions)
         //        ==> {
@@ -3329,51 +3350,51 @@ fn protect_aux(
         //                         === interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])).remove(vaddr as nat)
         // }
     ensures
-        // tok.inv(),
-        // tok@.pt_mem.pml4 == old(tok)@.pt_mem.pml4,
-        // match res {
-        //     Ok(resv) => {
-        //         let (pt_res, removed_regions) = resv@;
-        //         &&& interp_at(tok@, pt_res, layer as nat, ptr, base as nat).interp()
-        //             == interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp().remove(vaddr as nat)
-        //         // We return the regions that we removed
-        //         &&& tok@.regions.dom() == old(tok)@.regions.dom().difference(removed_regions)
-        //         &&& pt_res.used_regions == pt.used_regions.difference(removed_regions)
-        //         &&& removed_regions.subset_of(old(tok)@.regions.dom())
-        //         &&& removed_regions.subset_of(pt.used_regions)
-        //         // Invariant preserved
-        //         &&& inv_at(tok@, pt_res, layer as nat, ptr)
-        //         &&& no_empty_directories(tok@, pt_res, layer as nat, ptr)
-        //         &&& interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp().contains_key(vaddr as nat)
+        tok.inv(),
+        tok@.pt_mem.pml4 == old(tok)@.pt_mem.pml4,
+        match res {
+            Ok(resv) => {
+                let (sz, Ghost(pt_res)) = resv;
+                // this one needs to change to say we only changed the permissions.
+                // &&& interp_at(tok@, pt_res, layer as nat, ptr, base as nat).interp().update()
+                //     == interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp()
+                // We return the regions that we removed
+                &&& tok@.regions.dom() == old(tok)@.regions.dom()
+                &&& pt_res.used_regions == pt.used_regions
+                // Invariant preserved
+                &&& inv_at(tok@, pt_res, layer as nat, ptr)
+                &&& no_empty_directories(tok@, pt_res, layer as nat, ptr)
+                &&& interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp().contains_key(vaddr as nat)
         //         // We only touch regions in pt.used_regions
-        //         &&& (forall|r: MemRegion|
-        //              !pt.used_regions.contains(r) ==>
-        //              #[trigger] tok@.regions[r] === old(tok)@.regions[r])
-        //         &&& pt_res.region === pt.region
-        //         &&& tok@.change_made
-        //         &&& tok@.args == old(tok)@.args
-        //     },
-        //     Err(e) => {
-        //         // If error, unchanged
-        //         &&& tok@ === old(tok)@
-        //         &&& !interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp().contains_key(vaddr as nat)
-        //     },
-        // },
+                &&& (forall|r: MemRegion|
+                     !pt.used_regions.contains(r) ==>
+                     #[trigger] tok@.regions[r] === old(tok)@.regions[r])
+                &&& pt_res.region === pt.region
+                &&& tok@.change_made
+                &&& tok@.args == old(tok)@.args
+            },
+            Err(e) => {
+                // If error, unchanged
+                &&& tok@ === old(tok)@
+                &&& !interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp().contains_key(vaddr as nat)
+            },
+        },
     decreases X86_NUM_LAYERS - layer
 {
-    proof { admit(); }
-    // proof {
-    //     broadcast use
-    //         lemma_difference_empty,
-    //         lemma_inv_implies_interp_inv;
-    //     lemma_bitvector_facts_simple();
-    //     lemma_interp_at_facts(tok@, pt, layer as nat, ptr, base as nat);
-    //     lemma_x86_arch_spec_inv();
-    // }
-    // let ghost root_pt = rebuild_root_pt(pt, set![]);
-    // assert(PT::inv(old(tok)@, root_pt)) by {
-    //     assert(unmap_builder_pre(old(tok)@, pt, old(tok)@, pt, layer as nat, ptr, set![]));
-    // };
+
+    proof {
+        broadcast use
+            lemma_difference_empty,
+            lemma_inv_implies_interp_inv;
+        lemma_bitvector_facts_simple();
+        lemma_interp_at_facts(tok@, pt, layer as nat, ptr, base as nat);
+        lemma_x86_arch_spec_inv();
+    }
+    let ghost root_pt = rebuild_root_pt(pt, set![]);
+    assert(PT::inv(old(tok)@, root_pt)) by {
+        admit();
+        // assert(protect_builder_pre(old(tok)@, pt, old(tok)@, pt, layer as nat, ptr, set![]));
+    };
     let idx: usize = x86_arch_exec.index_for_vaddr(layer, base, vaddr);
     // proof { indexing::lemma_index_from_base_and_addr(base as nat, vaddr as nat, x86_arch_spec.entry_size(layer as nat), X86_NUM_ENTRIES as nat); }
     let entry = entry_at_protect(Tracked(tok), Ghost(pt), layer, ptr, idx);
@@ -3384,6 +3405,7 @@ fn protect_aux(
     // assert(interp_at_entry(tok@, pt, layer as nat, ptr, base as nat, idx as nat)
     //        == interp_at(tok@, pt, layer as nat, ptr, base as nat).entries[idx as int]);
     if entry.is_present() {
+        proof { admit(); }
         if entry.is_dir(layer) {
             let dir_addr = entry.address();
             // assert(pt.entries[idx as int] is Some);
@@ -3581,7 +3603,7 @@ fn protect_aux(
                     //         lemma_no_empty_directories_framing(old(tok)@, pt, tok@, pt_res, layer as nat, ptr, base as nat, idx as nat);
                     //     };
                     // }
-                    Ok(x86_arch_exec.entry_size(layer))
+                    Ok((x86_arch_exec.entry_size(layer), Ghost(arbitrary())))
                     // Ok(Ghost((pt_res, removed_regions)))
                 },
                 Err(e) => {
@@ -3661,7 +3683,7 @@ fn protect_aux(
                 //     assert(tok@.regions.dom() =~= old(tok)@.regions.dom().difference(removed_regions));
                 //     assert(pt.used_regions =~= pt.used_regions.difference(removed_regions));
                 // }
-                Ok(x86_arch_exec.entry_size(layer))
+                Ok((x86_arch_exec.entry_size(layer), Ghost(arbitrary())))
                 // Ok(Ghost((pt, removed_regions)))
             } else {
                 // proof {
@@ -3676,13 +3698,13 @@ fn protect_aux(
             }
         }
     } else {
-        // proof {
-        //     let interp_old = interp_at(old(tok)@, pt, layer as nat, ptr, base as nat);
-        //     assert(interp_old.interp_of_entry(idx as nat).dom() === set![]);
-        //     assert_by_contradiction!(!interp_old.interp().contains_key(vaddr as nat), {
-        //         interp_old.lemma_interp_contains_key_implies_interp_of_entry_contains_key_at_index(vaddr as nat);
-        //     });
-        // }
+        proof {
+            let interp_old = interp_at(old(tok)@, pt, layer as nat, ptr, base as nat);
+            assert(interp_old.interp_of_entry(idx as nat).dom() === set![]);
+            assert_by_contradiction!(!interp_old.interp().contains_key(vaddr as nat), {
+                interp_old.lemma_interp_contains_key_implies_interp_of_entry_contains_key_at_index(vaddr as nat);
+            });
+        }
         Err(())
     }
 }
@@ -3694,7 +3716,7 @@ pub fn protect(Tracked(tok): Tracked<&mut WrappedProtectToken>, pt: &mut Ghost<P
         !old(tok)@.change_made,
         inv_and_nonempty(old(tok)@, old(pt)@),
         old(tok).inv(),
-        // accepted_protect(vaddr as nat, 0, 0),
+        accepted_protect(vaddr as nat, 0, 0),
         vaddr < MAX_BASE,
         pml4 == old(tok)@.pt_mem.pml4,
         old(tok)@.args == (OpArgs::Protect { base: vaddr, flags: permissions }),
@@ -3714,14 +3736,13 @@ pub fn protect(Tracked(tok): Tracked<&mut WrappedProtectToken>, pt: &mut Ghost<P
         tok.inv(),
 {
     let ghost rebuild_root_pt = |pt_new, removed_regions| pt_new;
-    protect_aux(Tracked(tok), *pt, 0, pml4, 0, vaddr, permissions, Ghost(rebuild_root_pt))
-    //     Ok(res) => {
-
-    //         *pt = Ghost(res);
-    //         Ok(())
-    //     },
-    //     Err(e) => Err(()),
-
+    if let Ok((sz, _)) = protect_aux(Tracked(tok), *pt, 0, pml4, 0, vaddr, permissions, Ghost(rebuild_root_pt)) {
+        assert(inv_and_nonempty(tok@, pt@));
+        Ok(sz)
+    } else {
+        assert(inv_and_nonempty(tok@, pt@));
+        Err(())
+    }
 }
 
 }
