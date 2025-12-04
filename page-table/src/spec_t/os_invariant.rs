@@ -1,5 +1,5 @@
 use vstd::prelude::*;
-use vstd::assert_by_contradiction;
+use vstd::{ assert_by_contradiction, assert_maps_equal };
 
 use crate::extra::lemma_bits_misc;
 //use crate::impl_u::spec_pt;
@@ -187,6 +187,144 @@ pub proof fn next_step_preserves_inv(c: os::Constants, s1: os::State, s2: os::St
     next_step_preserves_inv_shootdown(c, s1, s2, step, lbl);
     next_step_preserves_inv_pending_maps(c, s1, s2, step, lbl);
     next_step_preserves_tlb_inv(c, s1, s2, step, lbl);
+    next_step_preserves_inv_protect_frame_unchanged(c, s1, s2, step, lbl);
+}
+
+pub proof fn next_step_preserves_inv_protect_frame_unchanged(c: os::Constants, s1: os::State, s2: os::State, step: os::Step, lbl: RLbl)
+    requires
+        s1.inv(c),
+        os::next_step(c, s1, s2, step, lbl),
+    ensures
+        s2.inv_protect_frame_unchanged(c),
+{
+    match step { // Broadcasting these is very slow
+        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+        | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
+        | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
+        | os::Step::ProtectOpChange { .. } => {
+            to_rl1::next_refines(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
+            to_rl1::next_preserves_inv(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
+        },
+        _ => {},
+    }
+
+    assert forall|va| #[trigger] s2.inflight_protect_params_map().contains_key(va)
+            implies s2.inflight_protect_params_map()[va].frame == s2.interp_pt_mem()[va].frame
+    by {
+        match step {
+            os::Step::UnmapOpChange { core, paddr, value } => {
+                let mlbl = mmu::Lbl::Write(core, paddr, value);
+                let mmu_step = choose|step| rl1::next_step(s1.mmu@, s2.mmu@, c.common, step, mlbl);
+                assert(rl1::next_step(s1.mmu@, s2.mmu@, c.common, mmu_step, mlbl));
+                // assume(!rl1::step_WriteProtect(s1.mmu@, s2.mmu@, c.common, step.mmu_lbl(s1, lbl)));
+                // assume(!rl1::step_WriteNonneg(s1.mmu@, s2.mmu@, c.common, step.mmu_lbl(s1, lbl)));
+
+                assert(s1.inflight_protect_params_map() =~= s2.inflight_protect_params_map()) by {
+                    assume(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
+                        <==> s2.is_inflight_protect_vaddr_core(va, core));
+                    assume(forall|va, pte, core| s1.is_inflight_protect_vaddr_pte_core(va, pte, core)
+                        <==> s2.is_inflight_protect_vaddr_pte_core(va, pte, core));
+                    assert(s1.inflight_protect_vaddrs() == s2.inflight_protect_vaddrs());
+                    assert(s1.inflight_protect_params() =~= s2.inflight_protect_params());
+                };
+                // match mmu_step {
+                //     rl1::Step::WriteNonneg => {
+                //     }
+                //     _ => assert(false),
+                // }
+            },
+            os::Step::MapOpChange { core, paddr, value } => {
+                assert(s1.inflight_protect_params_map() =~= s2.inflight_protect_params_map()) by {
+                    assume(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
+                        <==> s2.is_inflight_protect_vaddr_core(va, core));
+                    assume(forall|va, pte, core| s1.is_inflight_protect_vaddr_pte_core(va, pte, core)
+                        <==> s2.is_inflight_protect_vaddr_pte_core(va, pte, core));
+                    assert(s1.inflight_protect_vaddrs() == s2.inflight_protect_vaddrs());
+                    assert(s1.inflight_protect_params() =~= s2.inflight_protect_params());
+                };
+                // let mlbl = mmu::Lbl::Write(core, paddr, value);
+                // let mmu_step = choose|step| rl1::next_step(s1.mmu@, s2.mmu@, c.common, step, mlbl);
+                // assert(rl1::next_step(s1.mmu@, s2.mmu@, c.common, mmu_step, mlbl));
+                // match mmu_step {
+                //     rl1::Step::WriteNonneg => {
+                //         let vaddr = s1.core_states[core]->MapExecuting_vaddr;
+                //         let pte = s1.core_states[core]->MapExecuting_pte;
+                //         if base == vaddr {
+                //             assert(s2.interp_pt_mem()[base as nat] == pte);
+                //             assert(s2.mmu@.pending_maps.contains_key(base));
+                //             assert(s2.mmu@.pending_maps[base] == pte);
+                //             assert(s2.is_pending_for_core(c, base, core));
+                //         } else {
+                //             assert(s2.interp_pt_mem().contains_key(base as nat));
+                //             assert(s1.interp_pt_mem().contains_key(base as nat));
+                //             assert(s1.mmu@.pending_maps.contains_key(base));
+                //         }
+                //     },
+                //     _ => assert(false),
+                // }
+            },
+            os::Step::ProtectOpChange { core, .. } => {
+                // assume(!rl1::step_WriteNonneg(s1.mmu@, s2.mmu@, c.common, step.mmu_lbl(s1, lbl)));
+                assert(s1.inflight_protect_params_map() =~= s2.inflight_protect_params_map()) by {
+                    assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
+                        <==> s2.is_inflight_protect_vaddr_core(va, core));
+                    // XXX: easy
+                    assume(forall|va, pte, core| s1.is_inflight_protect_vaddr_pte_core(va, pte, core)
+                        <==> s2.is_inflight_protect_vaddr_pte_core(va, pte, core));
+                    assert(s1.inflight_protect_vaddrs() == s2.inflight_protect_vaddrs());
+                    assert(s1.inflight_protect_params() =~= s2.inflight_protect_params());
+                };
+            },
+            os::Step::ProtectStart { core } => {
+                let vaddr = lbl->ProtectStart_vaddr;
+                let pt = s1.interp_pt_mem();
+                let pte = pt[vaddr];
+                let pte_size = if pt.contains_key(vaddr) { pt[vaddr].frame.size } else { 0 };
+                assert_maps_equal!(
+                    s2.inflight_protect_params_map(),
+                    s1.inflight_protect_params_map().insert(vaddr, pt[vaddr]), va
+                => {
+                    admit(); // XXX: need overlap inv
+                    if va == vaddr {
+                    } else {
+                        assert(s2.inflight_protect_vaddrs().contains(va));
+                    }
+                    // assert(forall|va, core| s2.is_inflight_protect_vaddr_core(va, core)
+                    //     <==> s1.is_inflight_protect_vaddr_core(va, core) || va == vaddr);
+                    // assume(forall|va, pte, core| s1.is_inflight_protect_vaddr_pte_core(va, pte, core)
+                    //     <==> s2.is_inflight_protect_vaddr_pte_core(va, pte, core));
+                    // assert(s2.inflight_protect_vaddrs() == s1.inflight_protect_vaddrs().insert(vaddr));
+                    // assert(s2.inflight_protect_params() =~= s1.inflight_protect_params().insert((vaddr, pte)));
+                });
+            },
+            os::Step::ProtectEnd { .. } => {
+                let vaddr = lbl->ProtectStart_vaddr;
+                let pt = s1.interp_pt_mem();
+                let pte = pt[vaddr];
+                let pte_size = if pt.contains_key(vaddr) { pt[vaddr].frame.size } else { 0 };
+                assert_maps_equal!(
+                    s2.inflight_protect_params_map(),
+                    s1.inflight_protect_params_map().remove(vaddr), va
+                => {
+                    admit(); // XXX: need overlap inv
+                    if va == vaddr {
+                    } else {
+                    }
+                });
+
+            },
+            _ => {
+                assert(s1.inflight_protect_params_map() =~= s2.inflight_protect_params_map()) by {
+                    assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
+                        <==> s2.is_inflight_protect_vaddr_core(va, core));
+                    assert(forall|va, pte, core| s1.is_inflight_protect_vaddr_pte_core(va, pte, core)
+                        <==> s2.is_inflight_protect_vaddr_pte_core(va, pte, core));
+                    assert(s1.inflight_protect_vaddrs() == s2.inflight_protect_vaddrs());
+                    assert(s1.inflight_protect_params() =~= s2.inflight_protect_params());
+                };
+            }
+        }
+    }
 }
 
 #[verifier(spinoff_prover)]
@@ -484,6 +622,7 @@ pub proof fn next_step_preserves_inv_writes(c: os::Constants, s1: os::State, s2:
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Proof of TLB Invariants
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 pub proof fn init_implies_tlb_inv(c: os::Constants, s: os::State)
     requires os::init(c, s),
     ensures s.tlb_inv(c),
