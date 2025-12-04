@@ -1507,6 +1507,14 @@ impl State {
             }) ==> exists|pt| PT::inv_and_nonempty(wtok, pt)
     }
 
+    pub open spec fn inv_protect_frame_unchanged(self, c: Constants) -> bool {
+        forall|va| #[trigger] self.inflight_protect_params_map().contains_key(va)
+            ==> self.inflight_protect_params_map()[va].frame == self.interp_pt_mem()[va].frame
+        // forall|base| #[trigger] self.interp_pt_mem().contains_key(base)
+        //     ==> self.interp_pt_mem().union_prefer_right(self.inflight_protect_params_map())[base].frame
+        //         == self.interp_pt_mem()[base].frame
+    }
+
     pub open spec fn inv(self, c: Constants) -> bool {
         &&& self.inv_basic(c)
         &&& self.inv_mmu(c)
@@ -1517,6 +1525,7 @@ impl State {
         &&& self.tlb_inv(c)
         &&& self.inv_overlapping_mem(c)
         &&& self.inv_pending_maps(c)
+        &&& self.inv_protect_frame_unchanged(c)
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////////////
@@ -1742,7 +1751,7 @@ impl Step {
             // Unmap steps
             Step::UnmapStart { .. } => hlspec::Step::UnmapStart,
             Step::UnmapEnd { core } => hlspec::Step::UnmapEnd,
-            // Unmap steps
+            // Protect steps
             Step::ProtectStart { .. } => hlspec::Step::ProtectStart,
             Step::ProtectEnd { core } => hlspec::Step::ProtectEnd,
             _ => hlspec::Step::Stutter,
