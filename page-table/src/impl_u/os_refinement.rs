@@ -2033,7 +2033,8 @@ proof fn step_MapOpChange_refines(c: os::Constants, s1: os::State, s2: os::State
 
     assert(s1.effective_mappings() =~= s2.effective_mappings()) by {
         assert(s1.inflight_protect_params_map() =~= s2.inflight_protect_params_map()) by {
-            // XXX: Needs invariant to show that protect vaddrs dont overlap
+            // XXX: Needs invariant to show that protect vaddrs dont overlap inflight stuff
+            //      (actually should already have that in existing overlap mem)
             admit();
             assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
                 <==> s2.is_inflight_protect_vaddr_core(va, core));
