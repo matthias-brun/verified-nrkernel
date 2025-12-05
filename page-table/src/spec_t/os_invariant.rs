@@ -1118,6 +1118,8 @@ pub proof fn next_step_preserves_overlap_mem_inv(
                                 },
                             )) implies core1 === core2
                     by {
+                        // XXX: This proof broke when I added the !is_protecting conjunct in
+                        // inv_inflight_pmem_no_overlap_existing_pmem
                         admit();
                         if core1 == core || core2 == core {
                             let other = if core1 != core { core1 } else { core2 };
