@@ -5,7 +5,12 @@ edition = "2021"
 
 [dependencies]
 vstd = { path = "../.verus/source/vstd", features = [], default-features = false }
-builtin = { path = "../.verus/source/builtin" }
+# builtin = { path = "../.verus/source/builtin" }
+
+#[dependencies]
+#vstd =           { git = "https://github.com/verus-lang/verus" }
+#builtin =        { git = "https://github.com/verus-lang/verus" }
+#builtin_macros = { git = "https://github.com/verus-lang/verus" }
 
 [lib]
 path = "src/lib.rs"
