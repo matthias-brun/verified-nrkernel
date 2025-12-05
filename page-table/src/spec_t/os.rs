@@ -1047,22 +1047,16 @@ impl State {
             }
     }
 
-    pub open spec fn is_inflight_protect_vaddr_pte_core(self, va: nat, pte: PTE, core: Core) -> bool {
-        &&& self.interp_pt_mem().contains_key(va)
-        &&& self.core_states.contains_key(core)
-        &&& match self.core_states[core] {
+    pub open spec fn inflight_protect_core_get_pte(self, core: Core) -> PTE {
+        match self.core_states[core] {
             CoreState::ProtectWaiting { vaddr, flags, .. }
-            | CoreState::ProtectExecuting { vaddr, flags, result: None, .. } => {
-                &&& vaddr == va
-                &&& pte == PTE { frame: self.interp_pt_mem()[va].frame, flags }
-            },
-            CoreState::ProtectExecuting { vaddr, result: Some(Ok(pte2)), .. }
-            | CoreState::ProtectOpDone { vaddr, result: Ok(pte2), .. }
-            | CoreState::ProtectShootdownWaiting { vaddr, result: Ok(pte2), .. } => {
-                &&& vaddr == va
-                &&& pte == pte2
-            },
-            _ => false,
+            | CoreState::ProtectExecuting { vaddr, flags, result: None, .. }
+                => PTE { frame: self.interp_pt_mem()[vaddr].frame, flags },
+            CoreState::ProtectExecuting { vaddr, result: Some(Ok(pte)), .. }
+            | CoreState::ProtectOpDone { vaddr, result: Ok(pte), .. }
+            | CoreState::ProtectShootdownWaiting { vaddr, result: Ok(pte), .. }
+                => pte,
+            _ => arbitrary(),
         }
     }
 
@@ -1070,26 +1064,20 @@ impl State {
         exists|core: Core| self.is_inflight_protect_vaddr_core(va, core)
     }
 
-    pub open spec fn inflight_protect_vaddrs(self) -> Set<nat> {
-        Set::new(|va: nat| self.is_inflight_protect_vaddr(va))
+    pub open spec fn choose_inflight_protect_vaddr_core(self, va: nat) -> Core {
+        choose|core: Core| self.is_inflight_protect_vaddr_core(va, core)
     }
 
-    pub open spec fn inflight_protect_params(self) -> Set<(nat, PTE)> {
-        Set::new(|tup: (nat, PTE)|
-            exists|core: Core| self.is_inflight_protect_vaddr_pte_core(tup.0, tup.1, core))
-    }
-
-    // TODO(MB): There's surely a better way of doing this without the choose.
-    pub open spec fn inflight_protect_params_map(self) -> Map<nat, PTE> {
+    pub open spec fn inflight_protect_params(self) -> Map<nat, PTE> {
         Map::new(
-            |va| self.inflight_protect_vaddrs().contains(va),
-            |va| choose|pte| self.inflight_protect_params().contains((va, pte))
+            |va| self.is_inflight_protect_vaddr(va),
+            |va| self.inflight_protect_core_get_pte(self.choose_inflight_protect_vaddr_core(va))
         )
     }
 
     pub open spec fn effective_mappings(self) -> Map<nat, PTE> {
         self.interp_pt_mem()
-            .union_prefer_right(self.inflight_protect_params_map())
+            .union_prefer_right(self.inflight_protect_params())
             .remove_keys(self.inflight_mapunmap_vaddr())
     }
 
@@ -1506,10 +1494,10 @@ impl State {
     }
 
     pub open spec fn inv_protect_frame_unchanged(self, c: Constants) -> bool {
-        forall|va| #[trigger] self.inflight_protect_params_map().contains_key(va)
-            ==> self.inflight_protect_params_map()[va].frame == self.interp_pt_mem()[va].frame
+        forall|va| #[trigger] self.inflight_protect_params().contains_key(va)
+            ==> self.inflight_protect_params()[va].frame == self.interp_pt_mem()[va].frame
         // forall|base| #[trigger] self.interp_pt_mem().contains_key(base)
-        //     ==> self.interp_pt_mem().union_prefer_right(self.inflight_protect_params_map())[base].frame
+        //     ==> self.interp_pt_mem().union_prefer_right(self.inflight_protect_params())[base].frame
         //         == self.interp_pt_mem()[base].frame
     }
 
@@ -1682,7 +1670,7 @@ impl State {
                         base: self.core_states[core2].paddr(self.interp_pt_mem()),
                         size: self.core_states[core2].pte_size(self.interp_pt_mem()),
                     },
-            )) ==> core1 === core2
+            )) ==> core1 == core2
     }
 
 
