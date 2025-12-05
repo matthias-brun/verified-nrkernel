@@ -514,12 +514,6 @@ proof fn step_MemOp_refines(c: os::Constants, s1: os::State, s2: os::State, core
     extra_mappings_preserved(c, s1, s2);
     assert(c.valid_core(core));
 
-    // XXX: Needs an invariant but should be fairly easy.
-    assume(forall|base|
-        #[trigger] s1.interp_pt_mem().contains_key(base)
-            ==> s1.interp_pt_mem().union_prefer_right(s1.inflight_protect_params_map())[base].frame
-        == s1.interp_pt_mem()[base].frame
-    );
     // assume(forall|base|
     //     #[trigger] s2.interp_pt_mem().contains_key(base)
     //         ==> s2.interp_pt_mem().union_prefer_right(s1.inflight_protect_params_map())[base].frame
@@ -2599,9 +2593,8 @@ proof fn step_UnmapOpChange_refines(
         assert(s1.core_states.contains_key(core));
         assert(s1.inflight_mapunmap_vaddr().contains(vaddr));
         assert forall|ids|
-            s1.inflight_mapunmap_vaddr().contains(
-                ids,
-            ) implies #[trigger] s2.inflight_mapunmap_vaddr().insert(vaddr).contains(ids) by {
+            s1.inflight_mapunmap_vaddr().contains(ids)
+            implies #[trigger] s2.inflight_mapunmap_vaddr().insert(vaddr).contains(ids) by {
             if s1.inflight_mapunmap_vaddr().contains(ids) {
                 if ids === vaddr {
                 } else {

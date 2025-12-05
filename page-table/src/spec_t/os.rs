@@ -1687,12 +1687,12 @@ impl State {
 
 
     pub open spec fn inv_inflight_pmem_no_overlap_existing_pmem(self, c: Constants) -> bool {
-        forall|core| #![auto] (c.valid_core(core) && self.core_states[core].has_pte(self.interp_pt_mem()))
+        forall|core| c.valid_core(core) && self.core_states[core].has_pte(self.interp_pt_mem())
                     && !(self.core_states[core] matches CoreState::MapDone { result: Ok(_), ..})
                     && !(self.core_states[core] matches CoreState::UnmapExecuting { result: None, .. })
-                    && self.core_states[core] !is UnmapWaiting
-                    // // inflight protects always overlap the existing memory
-                    // && !self.core_states[core].is_protecting()
+                    && #[trigger] self.core_states[core] !is UnmapWaiting
+                    // inflight protects always overlap the existing memory
+                    && !self.core_states[core].is_protecting()
             ==> !candidate_mapping_overlaps_existing_pmem(self.interp_pt_mem(), self.core_states[core].PTE())
     }
 
@@ -1701,7 +1701,7 @@ impl State {
             self.interp_pt_mem().contains_key(vaddr1)
             && self.interp_pt_mem().contains_key(vaddr2)
             && overlap(self.interp_pt_mem()[vaddr1].frame, self.interp_pt_mem()[vaddr2].frame)
-                ==> vaddr1 === vaddr2
+                ==> vaddr1 == vaddr2
     }
 
 
