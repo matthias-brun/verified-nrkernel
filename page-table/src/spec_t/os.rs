@@ -1354,7 +1354,7 @@ impl State {
     pub open spec fn inv_successful_maps(self, c: Constants) -> bool {
         forall|core: Core| c.valid_core(core) ==>
             match self.core_states[core] {
-                CoreState::MapDone { vaddr, pte, result: Result::Ok(_), .. }
+                CoreState::MapDone { vaddr, pte, result: Ok(_), .. }
                     => self.interp_pt_mem().contains_pair(vaddr, pte),
                 _ => true,
             }
@@ -1363,7 +1363,7 @@ impl State {
     pub open spec fn inv_unsuccessful_maps(self, c: Constants) -> bool {
         forall|core: Core| c.valid_core(core) ==>
             match self.core_states[core] {
-                CoreState::MapDone { vaddr, pte, result: Result::Err(_), .. }
+                CoreState::MapDone { vaddr, pte, result: Err(_), .. }
                     => candidate_mapping_overlaps_existing_vmem(self.interp_pt_mem(), vaddr, pte),
                 _ => true,
             }
@@ -1372,14 +1372,13 @@ impl State {
     pub open spec fn inv_overlap_of_mapped_maps(self, c: Constants) -> bool {
         forall|core: Core| c.valid_core(core) ==>
             match self.core_states[core] {
-                CoreState::MapDone { vaddr, pte, result: Result::Ok(_), .. }
+                CoreState::MapDone { vaddr, pte, result: Ok(_), .. }
                     => !candidate_mapping_overlaps_existing_vmem(self.interp_pt_mem().remove(vaddr), vaddr, pte),
-                CoreState::MapDone { vaddr, pte, result: Result::Err(_), .. }
+                CoreState::MapDone { vaddr, pte, result: Err(_), .. }
                     => candidate_mapping_overlaps_existing_vmem(self.interp_pt_mem(), vaddr, pte),
                 _ => true,
             }
     }
-
 
     pub open spec fn inv_successful_unmaps(self, c: Constants) -> bool {
         forall|core: Core| c.valid_core(core) ==>
@@ -1412,6 +1411,7 @@ impl State {
         &&& self.inv_unsuccessful_maps(c)
         &&& self.inv_successful_maps(c)
         &&& self.inv_overlap_of_mapped_maps(c)
+        &&& self.inv_protect_result(c)
         &&& self.inv_lock(c)
     }
 
@@ -1512,9 +1512,6 @@ impl State {
     pub open spec fn inv_protect_frame_unchanged(self, c: Constants) -> bool {
         forall|va| #[trigger] self.inflight_protect_params().contains_key(va)
             ==> self.inflight_protect_params()[va].frame == self.interp_pt_mem()[va].frame
-        // forall|base| #[trigger] self.interp_pt_mem().contains_key(base)
-        //     ==> self.interp_pt_mem().union_prefer_right(self.inflight_protect_params())[base].frame
-        //         == self.interp_pt_mem()[base].frame
     }
 
     pub open spec fn inv_protect_vaddr_same_core(self, c: Constants) -> bool {
@@ -1522,6 +1519,23 @@ impl State {
             self.is_inflight_protect_vaddr_core(va, core1)
             && self.is_inflight_protect_vaddr_core(va, core2)
                 ==> core1 == core2
+    }
+
+    pub open spec fn inv_protect_result(self, c: Constants) -> bool {
+        forall|core: Core| c.valid_core(core) ==>
+            match self.core_states[core] {
+                // succeeded
+                CoreState::ProtectExecuting { vaddr, result: Some(Ok(pte)), .. }
+                | CoreState::ProtectOpDone { vaddr, result: Ok(pte), .. }
+                | CoreState::ProtectShootdownWaiting { vaddr, result: Ok(pte), .. } => {
+                    &&& self.interp_pt_mem().contains_key(vaddr)
+                },
+                // failed
+                CoreState::ProtectOpDone { vaddr, result: Err(_), .. }
+                    => !self.interp_pt_mem().contains_key(vaddr),
+                CoreState::ProtectShootdownWaiting { result: Err(_), .. } => false,
+                _ => true,
+            }
     }
 
     pub open spec fn inv(self, c: Constants) -> bool {

@@ -2590,49 +2590,60 @@ proof fn step_ProtectEnd_refines(c: os::Constants, s1: os::State, s2: os::State,
 {
     let hl_s1 = s1.interp(c);
     let hl_s2 = s2.interp(c);
+    assert(s1.inflight_mapunmap_vaddr() =~= s2.inflight_mapunmap_vaddr()) by {
+        assert forall|va| s1.inflight_mapunmap_vaddr().contains(va) implies s2.inflight_mapunmap_vaddr().contains(va) by {
+            let core2 = s1.inflight_mapunmap_vaddr_choose_core(va);
+            assert(s2.core_states.contains_key(core2));
+        }
+    };
     match s1.core_states[core] {
-        os::CoreState::ProtectShootdownWaiting { ult_id, result, vaddr, .. }
-        | os::CoreState::ProtectOpDone { result, ult_id, vaddr, .. } => {
-            assert(hl_s2.thread_state === hl_s1.thread_state.insert(ult_id, hlspec::ThreadState::Idle));
-            // assert(!s1.interp_pt_mem().contains_key(vaddr));
-            // assert(!s2.interp_pt_mem().contains_key(vaddr));
-            // lemma_inflight_unmap_vaddr_equals_hl_unmap(c, s2);
-            // lemma_inflight_unmap_vaddr_equals_hl_unmap(c, s1);
-            //assert(s1.inflight_unmap_vaddr().subset_of(s2.inflight_unmap_vaddr()));
-            assume(s2.inflight_mapunmap_vaddr() =~= s1.inflight_mapunmap_vaddr());
+        os::CoreState::ProtectShootdownWaiting { ult_id, result: Err(_), vaddr, .. }
+        | os::CoreState::ProtectOpDone { result: Err(_), ult_id, vaddr, .. } => {
+            assert(hl_s2.thread_state == hl_s1.thread_state.insert(ult_id, hlspec::ThreadState::Idle));
 
-            // XXX: Not enough info here: inflight_protect_core_get_pte is only for successful but
-            // in this case we're also proving for unsuccessful, in which case inflight stuff is
-            // unchanged
-            assume(s1.interp_pt_mem().contains_key(vaddr));
-            assert(s1.is_inflight_protect_vaddr_core(vaddr, core));
-            assert(!s2.is_inflight_protect_vaddr_core(vaddr, core));
-
-            assert forall|core2| core2 != core implies !s1.is_inflight_protect_vaddr_core(vaddr, core2) by {
-            };
-            assert_by_contradiction!(!s2.is_inflight_protect_vaddr(vaddr), {
-                let core2 = s2.choose_inflight_protect_vaddr_core(vaddr);
-                assert(s1.is_inflight_protect_vaddr_core(vaddr, core2));
-            });
             assert(s2.inflight_protect_params() =~= s1.inflight_protect_params().remove(vaddr)) by {
                 assert(forall|va, core2| va != vaddr ==> (s2.is_inflight_protect_vaddr_core(va, core2)
                     <==> s1.is_inflight_protect_vaddr_core(va, core2)));
             };
-            // XXX: no overlap with mapunmap
-            assume(s1.effective_mappings().contains_key(vaddr));
-            assert(s2.effective_mappings().contains_key(vaddr));
-            assume(s1.inflight_protect_core_get_pte(core) == s1.interp_pt_mem()[vaddr]);
-            assert(s1.inflight_protect_params()[vaddr] == s1.interp_pt_mem()[vaddr]);
-            assert(s1.effective_mappings()[vaddr] == s1.interp_pt_mem()[vaddr]);
             assert(s2.effective_mappings() =~= s1.effective_mappings());
 
-            // // XXX: needs tlb inv
-            // assume(hl_s2.mappings === hl_s1.mappings);
+            extra_mappings_preserved(c, s1, s2);
+            assert(hlspec::step_ProtectEnd(c.interp(), s1.interp(c), s2.interp(c), lbl));
+        },
+        os::CoreState::ProtectShootdownWaiting { ult_id, result: Ok(pte), vaddr, .. }
+        | os::CoreState::ProtectOpDone { result: Ok(pte), ult_id, vaddr, .. } => {
+            assert(hl_s2.thread_state == hl_s1.thread_state.insert(ult_id, hlspec::ThreadState::Idle));
+
+            assert(s1.is_inflight_protect_vaddr_core(vaddr, core));
+            assert(!s2.is_inflight_protect_vaddr_core(vaddr, core));
+
+            assert(forall|core2| core2 != core ==> !s1.is_inflight_protect_vaddr_core(vaddr, core2));
+            assert(s2.inflight_protect_params() =~= s1.inflight_protect_params().remove(vaddr)) by {
+                assert_by_contradiction!(!s2.is_inflight_protect_vaddr(vaddr), {
+                    let core2 = s2.choose_inflight_protect_vaddr_core(vaddr);
+                    assert(s1.is_inflight_protect_vaddr_core(vaddr, core2));
+                });
+                assert(forall|va, core2| va != vaddr ==> (s2.is_inflight_protect_vaddr_core(va, core2)
+                    <==> s1.is_inflight_protect_vaddr_core(va, core2)));
+            };
+            assert_by_contradiction!(!s1.inflight_mapunmap_vaddr().contains(vaddr), {
+                // contradiction through inv_inflight_map_no_overlap_inflight_vmem
+                let mapunmap_core = s1.inflight_mapunmap_vaddr_choose_core(vaddr);
+                let ult_id = s1.core_states[mapunmap_core].ult_id();
+                assert(mapunmap_core != core);
+                assert(overlap(
+                    MemRegion {
+                        base: s1.core_states[core].vaddr(),
+                        size: s1.core_states[core].pte_size(s1.interp_pt_mem()),
+                    },
+                    MemRegion {
+                        base: s1.core_states[mapunmap_core].vaddr(),
+                        size: s1.core_states[mapunmap_core].pte_size(s1.interp_pt_mem()),
+                    }));
+            });
+            assert(s2.effective_mappings() =~= s1.effective_mappings());
 
             extra_mappings_preserved(c, s2, s1);
-            assert(hl_s2.mem == hl_s1.mem);
-            // relevant_mem_preserved(c, s2, s1);
-
             assert(hlspec::step_ProtectEnd(c.interp(), s1.interp(c), s2.interp(c), lbl));
         },
         _ => {
