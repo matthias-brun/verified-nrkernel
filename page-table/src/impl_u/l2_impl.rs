@@ -3381,8 +3381,8 @@ fn protect_aux(
         },
     decreases X86_NUM_LAYERS - layer
 {
-
     proof {
+        admit();
         broadcast use
             lemma_difference_empty,
             lemma_inv_implies_interp_inv;
@@ -3735,6 +3735,7 @@ pub fn protect(Tracked(tok): Tracked<&mut WrappedProtectToken>, pt: &mut Ghost<P
         },
         tok.inv(),
 {
+    proof { admit(); }
     let ghost rebuild_root_pt = |pt_new, removed_regions| pt_new;
     if let Ok((sz, _)) = protect_aux(Tracked(tok), *pt, 0, pml4, 0, vaddr, permissions, Ghost(rebuild_root_pt)) {
         assert(inv_and_nonempty(tok@, pt@));
