@@ -349,7 +349,7 @@ proof fn next_step_refines_hl_next_step(c: os::Constants, s1: os::State, s2: os:
         next_step_preserves_inv(c, s1, s2, step, lbl);
         match step {
             os::Step::MemOp { core, .. } => {
-                step_MemOp_refines(c, s1, s2, core, lbl);
+                step_MemOp_refines(c, s1, s2, step, lbl);
                 assert(hlspec::next_step(c.interp(), s1.interp(c), s2.interp(c), step.interp(s1, s2, c, lbl), lbl));
             },
             // Map steps
@@ -456,39 +456,21 @@ proof fn next_step_refines_hl_next_step(c: os::Constants, s1: os::State, s2: os:
 }
 
 #[verifier(spinoff_prover)]
-proof fn step_MemOp_refines(c: os::Constants, s1: os::State, s2: os::State, core: Core, lbl: RLbl)
+proof fn step_MemOp_refines(c: os::Constants, s1: os::State, s2: os::State, step: os::Step, lbl: RLbl)
     requires
         s1.inv(c),
         s2.inv(c),
         s1.sound,
-        os::step_MemOp(c, s1, s2, core, lbl),
+        os::next_step(c, s1, s2, step, lbl),
+        step is MemOp,
     ensures
-        ({
-            let vaddr = lbl->MemOp_vaddr;
-            let op = lbl->MemOp_op;
-            let mlbl = mmu::Lbl::MemOp(core, vaddr as usize, op);
-            let mmu_step = choose|step| rl1::next_step(s1.mmu@, s2.mmu@, c.common, step, mlbl);
-            match mmu_step {
-                rl1::Step::MemOpNoTr => hlspec::step_MemOp(c.interp(), s1.interp(c), s2.interp(c), None, lbl),
-                rl1::Step::MemOpNoTrNA { .. } => hlspec::step_MemOpNA(c.interp(), s1.interp(c), s2.interp(c), lbl),
-                rl1::Step::MemOpTLB { tlb_va } =>
-                    if s1.effective_mappings().contains_key(tlb_va as nat) {
-                        hlspec::step_MemOp(
-                            c.interp(),
-                            s1.interp(c),
-                            s2.interp(c),
-                            Some((tlb_va as nat, s1.effective_mappings()[tlb_va as nat])),
-                            lbl)
-                    } else {
-                        hlspec::step_MemOpNA( c.interp(), s1.interp(c), s2.interp(c), lbl)
-                    }
-                _ => arbitrary(),
-            }
-        }),
+        hlspec::next_step(c.interp(), s1.interp(c), s2.interp(c), step.interp(s1, s2, c, lbl), lbl)
 {
+    let core = step->MemOp_core;
     let vaddr = lbl->MemOp_vaddr;
     let op = lbl->MemOp_op;
     let mlbl = mmu::Lbl::MemOp(core, vaddr as usize, op);
+
     to_rl1::next_refines(s1.mmu, s2.mmu, c.common, mlbl);
     let mmu_step = choose|step| rl1::next_step(s1.mmu@, s2.mmu@, c.common, step, mlbl);
     assert(rl1::next_step(s1.mmu@, s2.mmu@, c.common, mmu_step, mlbl));
@@ -640,25 +622,34 @@ proof fn step_MemOp_refines(c: os::Constants, s1: os::State, s2: os::State, core
                 }
             }
 
-            if s1.effective_mappings().contains_key(tlb_va as nat) {
-                // XXX:
-                // * Needs a case distinction to handle protect
-                // * If protect, the pte might be different and we may need MemOpNA transition
-                // * Need to modify corresponding if-else in the step interp function
-                admit();
-                assert(s1.interp(c).mappings.contains_pair(tlb_va as nat, pte));
-                assert(s1.interp(c).mappings.contains_pair(base, pte));
+            let tlb_pte = s1.mmu@.tlbs[core][tlb_va];
+            if s1.effective_mappings().contains_key(tlb_va as nat)
+                && s1.effective_mappings()[tlb_va as nat] == tlb_pte
+            {
+                assert(s1.interp(c).mappings.contains_pair(tlb_va as nat, tlb_pte));
+                assert(s1.interp(c).mappings.contains_pair(base, tlb_pte));
                 assert(hlspec::step_MemOp(c.interp(), s1.interp(c), s2.interp(c), hl_pte, lbl));
             } else {
-                assert(s1.extra_mappings().contains_key(tlb_va as nat)
-                    || s1.inflight_mapunmap_vaddr().contains(tlb_va as nat));
-                assert(c.valid_core(core));
-                assert(s1.mmu@.tlbs[core].contains_key(tlb_va));
-                assert(between(vaddr, tlb_va as nat, tlb_va as nat + s1.mmu@.tlbs[core][tlb_va].frame.size));
-                vaddr_mapping_is_being_modified_from_vaddr_unmap(c, s1, core, tlb_va, vaddr);
-                assert(s1.interp(c).vaddr_mapping_is_being_modified(d, vaddr));
-                assert(Some((base, pte)) == s1.interp(c).vaddr_mapping_is_being_modified_choose(d, vaddr));
-                assert(hlspec::step_MemOpNA(c.interp(), s1.interp(c), s2.interp(c), lbl));
+                if s1.effective_mappings().contains_key(tlb_va as nat) {
+                    assert(s1.inflight_protect_params().contains_key(tlb_va as nat));
+                    assert(s1.is_inflight_protect_vaddr(tlb_va as nat));
+                    let prot_core = s1.choose_inflight_protect_vaddr_core(tlb_va as nat);
+                    assert(s1.is_inflight_protect_vaddr_core(tlb_va as nat, prot_core));
+                    let pte = s1.inflight_protect_core_get_pte(prot_core);
+                    // XXX: need tlb invariant for protects
+                    assume(tlb_pte == pte);
+                    assert(hlspec::step_MemOpNA(c.interp(), s1.interp(c), s2.interp(c), lbl));
+                } else {
+                    assert(s1.extra_mappings().contains_key(tlb_va as nat)
+                        || s1.inflight_mapunmap_vaddr().contains(tlb_va as nat));
+                    assert(c.valid_core(core));
+                    assert(s1.mmu@.tlbs[core].contains_key(tlb_va));
+                    assert(between(vaddr, tlb_va as nat, tlb_va as nat + s1.mmu@.tlbs[core][tlb_va].frame.size));
+                    vaddr_mapping_is_being_modified_from_vaddr_unmap(c, s1, core, tlb_va, vaddr);
+                    assert(s1.interp(c).vaddr_mapping_is_being_modified(d, vaddr));
+                    assert(Some((base, pte)) == s1.interp(c).vaddr_mapping_is_being_modified_choose(d, vaddr));
+                    assert(hlspec::step_MemOpNA(c.interp(), s1.interp(c), s2.interp(c), lbl));
+                }
             }
         },
         _ => {
@@ -2681,6 +2672,7 @@ proof fn step_UnmapOpChange_refines(
             by {
                 // XXX: easy, inflight protect and unmap don't overlap, so this mapping can't
                 // have been removed by the UnmapOpChange step
+                // (do we know s2.sound here?)
                 assume(s2.interp_pt_mem().contains_key(va));
             };
             assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)

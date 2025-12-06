@@ -1528,7 +1528,7 @@ impl State {
     // Invariants about the TLB
     ///////////////////////////////////////////////////////////////////////////////////////////////
     pub open spec fn inv_tlb_wf(self, c: Constants) -> bool {
-        forall|core| #![auto] c.valid_core(core) && self.core_states[core].is_unmapping()
+        forall|core| #![auto] c.valid_core(core) && self.core_states[core] !is Idle
             ==> self.core_states[core].vaddr() < MAX_BASE
     }
 
@@ -1724,19 +1724,23 @@ impl Step {
                 let op = lbl->MemOp_op;
                 let lbl = mmu::Lbl::MemOp(core, vaddr as usize, op);
                 // The transition is defined on rl3 but we're doing the case distinction on rl1
-                // because in the OS refinement proofs we're working with the rl1 transitions.
+                // because in the OS refinement proofs, we're working with the rl1 transitions.
                 let mmu_step = choose|step| rl1::next_step(pre.mmu@, post.mmu@, c.common, step, lbl);
                 match mmu_step {
                     rl1::Step::MemOpNoTr => hlspec::Step::MemOp { pte: None },
                     rl1::Step::MemOpNoTrNA { .. } => hlspec::Step::MemOpNA,
-                    rl1::Step::MemOpTLB { tlb_va } =>
-                        if pre.effective_mappings().contains_key(tlb_va as nat) {
+                    rl1::Step::MemOpTLB { tlb_va } => {
+                        let pte = pre.mmu@.tlbs[core][tlb_va];
+                        if pre.effective_mappings().contains_key(tlb_va as nat)
+                            && pre.effective_mappings()[tlb_va as nat] == pte
+                        {
                             hlspec::Step::MemOp {
                                 pte: Some((tlb_va as nat, pre.effective_mappings()[tlb_va as nat]))
                             }
                         } else {
                             hlspec::Step::MemOpNA
                         }
+                    }
                     _ => arbitrary(),
                 }
             },
