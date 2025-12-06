@@ -99,9 +99,16 @@ pub proof fn next_step_preserves_inv_basic(c: os::Constants, s1: os::State, s2: 
     hide(os::State::inv_overlap_of_mapped_maps);
     hide(os::State::inv_lock);
 
-    broadcast use
-        to_rl1::next_preserves_inv,
-        to_rl1::next_refines;
+    match step { // Broadcasting these is very slow
+        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+        | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
+        | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
+        | os::Step::ProtectOpChange { .. } => {
+            to_rl1::next_refines(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
+            to_rl1::next_preserves_inv(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
+        },
+        _ => {},
+    }
 
     assert(s2.wf(c));
     assert(s2.inv_inflight_pte_wf(c)) by {
@@ -134,23 +141,47 @@ pub proof fn next_step_preserves_inv_basic(c: os::Constants, s1: os::State, s2: 
         reveal(os::State::inv_lock);
     };
 
-    assert(s2.inv_lock(c)) by {
-        reveal(os::State::inv_lock);
+    next_step_preserves_inv_lock(c, s1, s2, step, lbl);
+    next_step_preserves_inv_basic_protect(c, s1, s2, step, lbl);
+}
 
-        assert forall|core: Core|
-            s2.os_ext.lock === Some(core) implies #[trigger] c.valid_core(core) && s2.core_states[core].is_in_crit_sect()
-        by {
-            if s2.os_ext.lock == s1.os_ext.lock {
-                assert(c.valid_core(core));
-                assert(s1.core_states[core].is_in_crit_sect());
-            }
-        };
+pub proof fn next_step_preserves_inv_lock(c: os::Constants, s1: os::State, s2: os::State, step: os::Step, lbl: RLbl)
+    requires
+        s1.inv(c),
+        os::next_step(c, s1, s2, step, lbl),
+    ensures
+        s2.inv_lock(c),
+{
+    broadcast use to_rl1::next_preserves_inv, to_rl1::next_refines;
 
-        assert forall|core: Core|
-            #[trigger] c.valid_core(core) && s2.core_states[core].is_in_crit_sect() implies s2.os_ext.lock === Some(core)
-        by {
-        };
+    assert forall|core: Core|
+        s2.os_ext.lock === Some(core) implies #[trigger] c.valid_core(core) && s2.core_states[core].is_in_crit_sect()
+    by {
+        if s2.os_ext.lock == s1.os_ext.lock {
+            assert(c.valid_core(core));
+            assert(s1.core_states[core].is_in_crit_sect());
+        }
     };
+    assert(forall|core: Core| #[trigger] c.valid_core(core) && s2.core_states[core].is_in_crit_sect() ==> s2.os_ext.lock === Some(core));
+}
+
+pub proof fn next_step_preserves_inv_basic_protect(c: os::Constants, s1: os::State, s2: os::State, step: os::Step, lbl: RLbl)
+    requires
+        s1.inv(c),
+        os::next_step(c, s1, s2, step, lbl),
+    ensures
+        s2.inv_protect_result(c),
+{
+    match step { // Broadcasting these is very slow
+        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+        | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
+        | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
+        | os::Step::ProtectOpChange { .. } => {
+            to_rl1::next_refines(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
+            to_rl1::next_preserves_inv(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
+        },
+        _ => {},
+    }
 }
 
 pub proof fn next_step_preserves_inv(c: os::Constants, s1: os::State, s2: os::State, step: os::Step, lbl: RLbl)
@@ -160,23 +191,7 @@ pub proof fn next_step_preserves_inv(c: os::Constants, s1: os::State, s2: os::St
     ensures
         s2.inv(c),
 {
-    broadcast use
-        to_rl1::next_preserves_inv,
-        to_rl1::next_refines;
-    /*
-     assert(s2.inv_successful_maps(c)) by {
-        assert forall|core| c.valid_core(core) implies {
-            match s2.core_states[core] {
-                os::CoreState::UnmapExecuting { vaddr, result: Some(_),.. }
-                | os::CoreState::UnmapOpDone { vaddr, .. }
-                | os::CoreState::UnmapShootdownWaiting { vaddr, .. }
-                    => !s2.interp_pt_mem().contains_key(vaddr),
-                _ => true,
-            }
-        } by { let _ = s1.core_states[core].is_in_crit_sect(); }
-    };
-    */
-
+    broadcast use to_rl1::next_preserves_inv, to_rl1::next_refines;
 
     next_step_preserves_inv_basic(c, s1, s2, step, lbl);
     next_step_preserves_inv_mmu(c, s1, s2, step, lbl);
