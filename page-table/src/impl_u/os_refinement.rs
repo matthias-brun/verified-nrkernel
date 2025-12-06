@@ -2178,34 +2178,24 @@ proof fn step_MapEnd_refines(c: os::Constants, s1: os::State, s2: os::State, cor
         hlspec::step_MapEnd(c.interp(), s1.interp(c), s2.interp(c), lbl)
 {
     //interpretation
-    let hl_c = c.interp();
     let hl_s1 = s1.interp(c);
     let hl_s2 = s2.interp(c);
     //label
-    assert(lbl is MapEnd);
     let vaddr = lbl->MapEnd_vaddr;
     let thread_id = lbl->MapEnd_thread_id;
-    let result = lbl->MapEnd_result;
     //core_state
-    assert(s1.core_states[core] is MapDone);
     let ult_id = s1.core_states[core]->MapDone_ult_id;
     let vaddr2 = s1.core_states[core]->MapDone_vaddr;
     let pte = s1.core_states[core]->MapDone_pte;
     let result = s1.core_states[core]->MapDone_result;
 
-    assert(vaddr == vaddr2);
-    assert(hl_c.valid_thread(ult_id));
-    assert(hl_s2.sound == hl_s1.sound);
-    assert(hl_s2.thread_state === hl_s1.thread_state.insert(
-            ult_id,
-            hlspec::ThreadState::Idle,
-    ));
-    assert(s1.interp(c).thread_state[ult_id] is Map);
+    assert(hl_s2.thread_state === hl_s1.thread_state.insert(ult_id, hlspec::ThreadState::Idle));
 
     assert(s1.inflight_protect_params() =~= s2.inflight_protect_params()) by {
         assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
             <==> s2.is_inflight_protect_vaddr_core(va, core));
     };
+    assert(s1.interp_pt_mem() =~= s2.interp_pt_mem());
 
     if result is Ok {
         //proofgoal: ! os overlap => ! hl overlap
@@ -2223,7 +2213,6 @@ proof fn step_MapEnd_refines(c: os::Constants, s1: os::State, s2: os::State, cor
         assert ( result is Ok);
 
         //proofgoal (2/4): ( hl_s2.mappings === hl_s1.mappings.insert(vaddr, pte))
-        assert(s1.interp_pt_mem() =~= s2.interp_pt_mem());
         assert(s1.interp_pt_mem().contains_pair(vaddr, pte));
         assert(!s1.inflight_unmap_vaddr().contains(vaddr)) by {
             let unmap_vaddr = vaddr;
@@ -2330,11 +2319,26 @@ proof fn step_MapEnd_refines(c: os::Constants, s1: os::State, s2: os::State, cor
         assert(s1.inflight_unmap_vaddr() =~= s2.inflight_unmap_vaddr());
         assert(!s2.inflight_mapunmap_vaddr().contains(vaddr));
         assert(s1.inflight_mapunmap_vaddr() =~= s1.inflight_unmap_vaddr().insert(vaddr));
-        assert(s2.inflight_mapunmap_vaddr() =~= s1.inflight_mapunmap_vaddr().remove(vaddr));
-        assert(s1.interp_pt_mem().union_prefer_right(s1.inflight_protect_params())
-            =~= s2.interp_pt_mem().union_prefer_right(s2.inflight_protect_params()));
-        // XXX: I feel like this should be easy?
-        assume(hl_s2.mappings === hl_s1.mappings.insert(vaddr, pte));
+        assert(s2.interp_pt_mem().union_prefer_right(s2.inflight_protect_params())
+                =~= s1.interp_pt_mem().union_prefer_right(s1.inflight_protect_params()));
+
+        assert forall|core2| !s1.is_inflight_protect_vaddr_core(vaddr, core2) by {
+            assert_by_contradiction!(!s1.is_inflight_protect_vaddr_core(vaddr, core2), {
+                assert(core != core2);
+                assert(s1.core_states.values().contains(s1.core_states[core2]));
+                // contradicts inv_inflight_map_no_overlap_inflight_vmem
+                assert(overlap(
+                        MemRegion {
+                            base: s1.core_states[core].vaddr(),
+                            size: s1.core_states[core].pte_size(s1.interp_pt_mem()),
+                        },
+                        MemRegion {
+                            base: s1.core_states[core2].vaddr(),
+                            size: s1.core_states[core2].pte_size(s1.interp_pt_mem()),
+                        }));
+            });
+        };
+        assert(hl_s2.mappings =~= hl_s1.mappings.insert(vaddr, pte));
 
         extra_mappings_preserved_effective_mapping_inserted(c, s1, s2, core);
     } else {
@@ -2348,7 +2352,7 @@ proof fn step_MapEnd_refines(c: os::Constants, s1: os::State, s2: os::State, cor
                     MemRegion { base: b, size: s1.interp_pt_mem()[b].frame.size },
                 )
             };
-            if (s1.inflight_mapunmap_vaddr().contains(os_overlap_vaddr)) {
+            if s1.inflight_mapunmap_vaddr().contains(os_overlap_vaddr) {
                 assert(s1.inflight_unmap_vaddr().contains(os_overlap_vaddr));
                 let os_overlap_core = choose |core: Core|
                 s1.core_states.contains_key(core) && match s1.core_states[core] {
@@ -2593,7 +2597,6 @@ proof fn step_UnmapOpChange_refines(
         hlspec::step_Stutter(c.interp(), s1.interp(c), s2.interp(c), lbl),
 {
     to_rl1::next_refines(s1.mmu, s2.mmu, c.common, mmu::Lbl::Write(core, paddr, value));
-    let hl_c = c.interp();
     let hl_s1 = s1.interp(c);
     let hl_s2 = s2.interp(c);
 
