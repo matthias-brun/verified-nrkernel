@@ -159,6 +159,7 @@ proof fn lemma_effective_mappings_unaffected_if_thread_state_constant(
 )
     requires
         s1.inv_basic(c),
+        s1.inv_protect_vaddr_same_core(c),
         s2.inv_basic(c),
         s1.interp_thread_state(c) === s2.interp_thread_state(c),
         s1.interp_pt_mem() === s2.interp_pt_mem(),
@@ -190,10 +191,6 @@ proof fn lemma_effective_mappings_unaffected_if_thread_state_constant(
     assert(s1.inflight_protect_params() =~= s2.inflight_protect_params()) by {
         assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
             <==> s2.is_inflight_protect_vaddr_core(va, core));
-        // XXX: Needs an invariant I guess? Feels like it should follow from the overlap invariants
-        assume(forall|va, core1, core2|
-            s2.is_inflight_protect_vaddr_core(va, core1) && s2.is_inflight_protect_vaddr_core(va, core2)
-                ==> core1 == core2);
     };
 
     assert(s1.effective_mappings() =~= s2.effective_mappings());
@@ -450,10 +447,6 @@ proof fn next_step_refines_hl_next_step(c: os::Constants, s1: os::State, s2: os:
                     assert(s1.inflight_protect_params() =~= s2.inflight_protect_params()) by {
                         assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
                             <==> s2.is_inflight_protect_vaddr_core(va, core));
-                        // XXX: Needs an invariant I guess? Feels like it should follow from the overlap invariants
-                        assume(forall|va, core1, core2|
-                            s2.is_inflight_protect_vaddr_core(va, core1) && s2.is_inflight_protect_vaddr_core(va, core2)
-                                ==> core1 == core2);
                     };
                 };
                 extra_mappings_preserved(c, s1, s2);
@@ -505,20 +498,11 @@ proof fn step_MemOp_refines(c: os::Constants, s1: os::State, s2: os::State, core
         assert(s1.inflight_protect_params() =~= s2.inflight_protect_params()) by {
             assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
                 <==> s2.is_inflight_protect_vaddr_core(va, core));
-            // XXX: Needs an invariant I guess? Feels like it should follow from the overlap invariants
-            assume(forall|va, core1, core2|
-                s2.is_inflight_protect_vaddr_core(va, core1) && s2.is_inflight_protect_vaddr_core(va, core2)
-                    ==> core1 == core2);
         };
     };
     extra_mappings_preserved(c, s1, s2);
     assert(c.valid_core(core));
 
-    // assume(forall|base|
-    //     #[trigger] s2.interp_pt_mem().contains_key(base)
-    //         ==> s2.interp_pt_mem().union_prefer_right(s1.inflight_protect_params())[base].frame
-    //     == s2.interp_pt_mem()[base].frame
-    // );
     match mmu_step {
         rl1::Step::MemOpNoTr { .. } => {
             assert(rl1::step_MemOpNoTr(s1.mmu@, s2.mmu@, c.common, mlbl));
@@ -1918,11 +1902,6 @@ proof fn step_MapStart_refines(c: os::Constants, s1: os::State, s2: os::State, c
             assert(s1.inflight_protect_params() =~= s2.inflight_protect_params()) by {
                 assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
                     <==> s2.is_inflight_protect_vaddr_core(va, core));
-                // XXX: Needs an invariant I guess? Feels like it should follow from the overlap invariants
-                assume(forall|va, core1, core2|
-                    s2.is_inflight_protect_vaddr_core(va, core1) && s2.is_inflight_protect_vaddr_core(va, core2)
-                        ==> core1 == core2);
-
             };
         };
         assert(hl_s2.mappings === hl_s1.mappings);
@@ -2028,15 +2007,16 @@ proof fn step_MapOpChange_refines(c: os::Constants, s1: os::State, s2: os::State
 
     assert(s1.effective_mappings() =~= s2.effective_mappings()) by {
         assert(s1.inflight_protect_params() =~= s2.inflight_protect_params()) by {
-            // XXX: Needs invariant to show that protect vaddrs dont overlap inflight stuff
-            //      (actually should already have that in existing overlap mem)
-            admit();
             assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
-                <==> s2.is_inflight_protect_vaddr_core(va, core));
-            // assert(forall|va, pte, core| s1.is_inflight_protect_vaddr_pte_core(va, pte, core)
-            //     <==> s2.is_inflight_protect_vaddr_pte_core(va, pte, core));
-            // assert(s1.inflight_protect_vaddrs() == s2.inflight_protect_vaddrs());
-            // assert(s1.inflight_protect_params() =~= s2.inflight_protect_params());
+                ==> s2.is_inflight_protect_vaddr_core(va, core));
+            assert forall|va, core| s2.is_inflight_protect_vaddr_core(va, core)
+                implies s1.is_inflight_protect_vaddr_core(va, core)
+            by {
+                // XXX: easy, inflight protect and map don't overlap, so this mapping can't
+                // have been created by the MapOpChange step
+                // (same proof also needed in os_invariant)
+                assume(s1.interp_pt_mem().contains_key(va));
+            };
         };
         // ==> direction
         assert(!s1.interp_pt_mem().contains_key(vaddr));
@@ -2113,10 +2093,6 @@ proof fn step_MapEnd_refines(c: os::Constants, s1: os::State, s2: os::State, cor
     assert(s1.inflight_protect_params() =~= s2.inflight_protect_params()) by {
         assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
             <==> s2.is_inflight_protect_vaddr_core(va, core));
-        // XXX: Needs an invariant I guess? Feels like it should follow from the overlap invariants
-        assume(forall|va, core1, core2|
-            s2.is_inflight_protect_vaddr_core(va, core1) && s2.is_inflight_protect_vaddr_core(va, core2)
-                ==> core1 == core2);
     };
 
     if result is Ok {
@@ -2349,16 +2325,7 @@ proof fn step_UnmapStart_refines(c: os::Constants, s1: os::State, s2: os::State,
     assert(s1.inflight_protect_params() =~= s2.inflight_protect_params()) by {
         assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
             <==> s2.is_inflight_protect_vaddr_core(va, core));
-        // XXX: Needs an invariant I guess? Feels like it should follow from the overlap invariants
-        assume(forall|va, core1, core2|
-            s2.is_inflight_protect_vaddr_core(va, core1) && s2.is_inflight_protect_vaddr_core(va, core2)
-                ==> core1 == core2);
     };
-
-    // assume(forall|base|
-    //     #[trigger] s1.inflight_protect_params().contains_key(base)
-    //         ==> s1.interp_pt_mem().contains_key(base)
-    // );
 
     if pte == hl_pte {
         if hlspec::step_Unmap_sound(hl_s1, vaddr, pte_size) {
@@ -2681,10 +2648,6 @@ proof fn step_UnmapEnd_refines(c: os::Constants, s1: os::State, s2: os::State, c
             assert(s1.inflight_protect_params() =~= s2.inflight_protect_params()) by {
                 assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
                     <==> s2.is_inflight_protect_vaddr_core(va, core));
-                // XXX: Needs an invariant I guess? Feels like it should follow from the overlap invariants
-                assume(forall|va, core1, core2|
-                    s2.is_inflight_protect_vaddr_core(va, core1) && s2.is_inflight_protect_vaddr_core(va, core2)
-                        ==> core1 == core2);
             };
             assert forall|key| s2.effective_mappings().contains_key(key)
                 implies s1.effective_mappings().contains_key(key)
