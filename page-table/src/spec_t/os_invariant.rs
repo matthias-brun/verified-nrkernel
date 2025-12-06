@@ -809,11 +809,19 @@ pub proof fn next_step_mmu_preserves_inv_tlb(
             assert(s2.TLB_unmap_agree(c));
         }
         rl1::Step::TLBFillNA2 { core, vaddr } => {
-            admit();
+            admit(); // XXX: These asserts pass but are unstable
+            assert(s2.inv_tlb_wf(c));
+            assert(s2.inv_shootdown_wf(c));
+            assert(s2.shootdown_exists(c));
+            assert(s2.shootdown_cores_valid(c));
             assert(s2.successful_IPI(c));
             assert(s2.TLB_dom_subset_of_pt_and_inflight_unmap_vaddr(c));
-            assert(s2.TLB_interp_pt_mem_agree(c));
-            assert(s2.TLB_unmap_agree(c));
+            assert(s2.all_cores_nonpos_before_shootdown(c));
+            // XXX: these are not true for protect:
+            assume(s2.successful_invlpg(c));
+            assume(s2.TLB_interp_pt_mem_agree(c));
+            assume(s2.TLB_unmap_agree(c));
+            assume(s2.pending_unmap_is_unmap_vaddr(c));
         }
         _ => {
             assert(forall|core| #![auto] s2.mmu@.tlbs[core].submap_of(s1.mmu@.tlbs[core]));

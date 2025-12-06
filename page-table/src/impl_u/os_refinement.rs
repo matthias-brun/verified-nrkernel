@@ -2457,7 +2457,8 @@ proof fn step_UnmapStart_refines(c: os::Constants, s1: os::State, s2: os::State,
                 lemma_map_insert_value(s1.core_states, core, os::CoreState::UnmapWaiting { ult_id, vaddr });
                 assert(s2.inflight_mapunmap_vaddr() =~= s1.inflight_mapunmap_vaddr().insert(vaddr));
                 assert(s1.interp_pt_mem() =~= s2.interp_pt_mem());
-                assert(hl_s1.mappings =~= hl_s2.mappings.insert(vaddr, hl_s1.mappings[vaddr]));
+                assert(pte is Some);
+                assert(s2.interp(c).mappings == s1.interp(c).mappings.remove(vaddr));
 
                 extra_mappings_preserved_effective_mapping_removed(c, s1, s2, core);
                 assert(hlspec::step_UnmapStart(c.interp(), s1.interp(c), s2.interp(c), lbl));
@@ -2465,37 +2466,24 @@ proof fn step_UnmapStart_refines(c: os::Constants, s1: os::State, s2: os::State,
         }
     } else {
         assert(pte is Some);
-        // XXX: Easy-ish?
-        assume(hl_pte is None);
-        assert(s1.interp_pt_mem().contains_key(vaddr));
-        assert(s1.inflight_mapunmap_vaddr().contains(vaddr));
-        let inflight_core = s1.inflight_mapunmap_vaddr_choose_core(vaddr);
-        assert(s1.core_states.values().contains(s1.core_states[inflight_core]));
-        assert(os::candidate_mapping_overlaps_inflight_vmem(s1.interp_pt_mem(), s1.core_states.values(), vaddr, pte_size));
-        assert(!s2.sound);
-        if s1.inflight_unmap_vaddr().contains(vaddr) {
-            lemma_inflight_unmap_vaddr_equals_hl_unmap(c, s1);
-            let unmap_thread_state = choose|thread_state|
-                   s1.interp_thread_state(c).values().contains(thread_state)
-                && s1.interp_pt_mem().contains_key(vaddr)
-                && (thread_state matches hlspec::ThreadState::Unmap { vaddr, .. } && vaddr === vaddr);
-            let unmap_pte = unmap_thread_state->Unmap_pte;
-            let unmap_size = if unmap_pte is Some { unmap_pte->Some_0.frame.size } else { 0 };
-            assert(overlap(MemRegion { base: vaddr, size: unmap_size }, MemRegion { base: vaddr, size: 0}));
+        if s1.effective_mappings().contains_key(vaddr) {
+            assert(s1.effective_mappings()[vaddr] != s1.interp_pt_mem()[vaddr]);
+            assert(s1.inflight_protect_params().contains_key(vaddr));
+            let prot_core = s1.choose_inflight_protect_vaddr_core(vaddr);
+            assert(s1.is_inflight_protect_vaddr_core(vaddr, prot_core));
+            let ult_id = s1.core_states[prot_core].ult_id();
+            assert(s1.interp_thread_state(c).contains_key(ult_id));
+            assert(s1.interp_thread_state(c).values().contains(s1.interp_thread_state(c)[ult_id]));
             assert(hlspec::candidate_mapping_overlaps_inflight_vmem(hl_s1.thread_state.values(), vaddr, 0));
-            assert(!hlspec::step_Unmap_sound(hl_s1, vaddr, 0));
         } else {
-            let map_core = choose|core| s1.core_states.contains_key(core) &&
-                s1.core_states[core] matches os::CoreState::MapDone {ult_id, vaddr:vaddr, result: Ok(()), .. };
-            let map_ult = s1.core_states[map_core]->MapDone_ult_id;
-            assert(s1.interp_thread_state(c).contains_key(map_ult));
-            assert(s1.interp_thread_state(c)[map_ult] is Map);
-            assert(s1.interp_thread_state(c).values().contains(s1.interp_thread_state(c)[map_ult]));
-            let map_pte = s1.interp_thread_state(c)[map_ult]->Map_pte;
-            assert(overlap(MemRegion { base: vaddr, size: map_pte.frame.size }, MemRegion { base: vaddr, size: 0}));
+            assert(s1.inflight_mapunmap_vaddr().contains(vaddr));
+            let mapunmap_core = s1.inflight_mapunmap_vaddr_choose_core(vaddr);
+            let ult_id = s1.core_states[mapunmap_core].ult_id();
+            assert(s1.interp_thread_state(c).contains_key(ult_id));
+            assert(s1.interp_thread_state(c).values().contains(s1.interp_thread_state(c)[ult_id]));
             assert(hlspec::candidate_mapping_overlaps_inflight_vmem(hl_s1.thread_state.values(), vaddr, 0));
-            assert(!hlspec::step_Unmap_sound(hl_s1, vaddr, 0));
         }
+        assert(!hlspec::step_Unmap_sound(hl_s1, vaddr, 0));
     }
 }
 
