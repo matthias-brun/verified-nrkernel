@@ -1055,7 +1055,7 @@ impl State {
             CoreState::ProtectExecuting { vaddr, result: Some(Ok(pte)), .. }
             | CoreState::ProtectOpDone { vaddr, result: Ok(pte), .. }
             | CoreState::ProtectShootdownWaiting { vaddr, result: Ok(pte), .. }
-                => pte,
+                => self.interp_pt_mem()[vaddr],
             _ => arbitrary(),
         }
     }
