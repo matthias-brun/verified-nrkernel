@@ -277,14 +277,14 @@ pub proof fn next_step_preserves_inv_protect_vaddr_same_core(c: os::Constants, s
         },
         os::Step::ProtectEnd { core } => {
             let vaddr = lbl->ProtectEnd_vaddr;
-            // assert(s2.interp_pt_mem() == s1.interp_pt_mem());
-            // assert(forall|core2| core2 != core ==> s2.core_states[core2] == s1.core_states[core2]);
             assert(forall|va, core2| core2 != core ==>
                 (s1.is_inflight_protect_vaddr_core(va, core2) <==> s2.is_inflight_protect_vaddr_core(va, core2)));
 
-            // XXX: easy invariant
-            assume(s1.interp_pt_mem().contains_key(vaddr));
-            assert(s1.is_inflight_protect_vaddr_core(vaddr, core));
+            if s1.core_states[core] is ProtectShootdownWaiting {
+                // op was successful
+                assert(s1.interp_pt_mem().contains_key(vaddr));
+                assert(s1.is_inflight_protect_vaddr_core(vaddr, core));
+            }
 
             assert(s2.inv_protect_vaddr_same_core(c));
         },
@@ -403,10 +403,12 @@ pub proof fn next_step_preserves_inv_protect_frame_unchanged(c: os::Constants, s
             assert(forall|va, core2| core2 != core ==>
                 (s1.is_inflight_protect_vaddr_core(va, core2) <==> s2.is_inflight_protect_vaddr_core(va, core2)));
 
-            // XXX: easy invariant
-            assume(s1.interp_pt_mem().contains_key(vaddr));
-            assert(s1.is_inflight_protect_vaddr_core(vaddr, core));
-            assert(s1.is_inflight_protect_vaddr(vaddr));
+            if s1.core_states[core] is ProtectShootdownWaiting {
+                // op was successful
+                assert(s1.interp_pt_mem().contains_key(vaddr));
+                assert(s1.is_inflight_protect_vaddr_core(vaddr, core));
+                assert(s1.is_inflight_protect_vaddr(vaddr));
+            }
 
             assert(s2.inv_protect_frame_unchanged(c));
         },
@@ -1127,10 +1129,10 @@ pub proof fn next_step_preserves_overlap_mem_inv(
                         },
                     )) implies core1 === core2
             by {
-                if (core1 == core || core2 == core) {
+                if core1 == core || core2 == core {
                     let other = if core1 != core { core1 } else { core2 };
                     assert(!os::candidate_mapping_overlaps_inflight_pmem(s1.interp_pt_mem(), s1.core_states.values(), pte));
-                    if (other != core) {
+                    if other != core {
                         assert(s2.core_states[other] == s1.core_states[other]);
                         assert(s1.core_states.contains_key(other));
                         assert(s1.core_states.values().contains(s2.core_states[other]));
