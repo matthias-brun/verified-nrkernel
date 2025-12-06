@@ -69,7 +69,7 @@ pub proof fn init_implies_inv(c: os::Constants, s: os::State)
 
     lemma_init_implies_empty_map(s, c);
     assert(s.inv_basic(c));
-    init_implies_tlb_inv(c, s);
+    init_implies_inv_tlb(c, s);
 }
 
 pub proof fn next_preserves_inv(c: os::Constants, s1: os::State, s2: os::State, lbl: RLbl)
@@ -185,7 +185,7 @@ pub proof fn next_step_preserves_inv(c: os::Constants, s1: os::State, s2: os::St
     next_step_preserves_inv_writes(c, s1, s2, step, lbl);
     next_step_preserves_inv_shootdown(c, s1, s2, step, lbl);
     next_step_preserves_inv_pending_maps(c, s1, s2, step, lbl);
-    next_step_preserves_tlb_inv(c, s1, s2, step, lbl);
+    next_step_preserves_inv_tlb(c, s1, s2, step, lbl);
     if s1.sound && s2.sound {
         next_step_preserves_overlap_mem_inv(c, s1, s2, step, lbl);
         next_step_preserves_inv_protect_vaddr_same_core(c, s1, s2, step, lbl);
@@ -668,7 +668,7 @@ pub proof fn next_step_preserves_inv_writes(c: os::Constants, s1: os::State, s2:
     ensures
         s2.inv_writes(c),
 {
-    hide(os::State::tlb_inv);
+    hide(os::State::inv_tlb);
     match step { // Broadcasting these is very slow
         os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
         | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
@@ -701,9 +701,9 @@ pub proof fn next_step_preserves_inv_writes(c: os::Constants, s1: os::State, s2:
 // Proof of TLB Invariants
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-pub proof fn init_implies_tlb_inv(c: os::Constants, s: os::State)
+pub proof fn init_implies_inv_tlb(c: os::Constants, s: os::State)
     requires os::init(c, s),
-    ensures s.tlb_inv(c),
+    ensures s.inv_tlb(c),
 {
     to_rl1::init_refines(s.mmu, c.common);
     assert(s.os_ext.shootdown_vec.open_requests.is_empty());
@@ -714,7 +714,7 @@ pub proof fn init_implies_tlb_inv(c: os::Constants, s: os::State)
     assert(s.TLB_dom_subset_of_pt_and_inflight_unmap_vaddr(c));
 }
 
-pub proof fn next_step_mmu_preserves_tlb_inv(
+pub proof fn next_step_mmu_preserves_inv_tlb(
     c: os::Constants,
     s1: os::State,
     s2: os::State,
@@ -722,14 +722,14 @@ pub proof fn next_step_mmu_preserves_tlb_inv(
     lbl: RLbl,
 )
     requires
-        s1.tlb_inv(c),
+        s1.inv_tlb(c),
         s1.inv_mmu(c),
         s1.inv_basic(c),
         s2.inv_basic(c),
         os::next_step(c, s1, s2, step, lbl),
         step is MMU,
     ensures
-        s2.tlb_inv(c),
+        s2.inv_tlb(c),
 {
     to_rl1::next_refines(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
     to_rl1::next_preserves_inv(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
@@ -826,7 +826,7 @@ pub proof fn next_step_mmu_preserves_tlb_inv(
 }
 
 #[verifier::spinoff_prover]
-pub proof fn next_step_preserves_tlb_inv(
+pub proof fn next_step_preserves_inv_tlb(
     c: os::Constants,
     s1: os::State,
     s2: os::State,
@@ -834,13 +834,13 @@ pub proof fn next_step_preserves_tlb_inv(
     lbl: RLbl,
 )
     requires
-        s1.tlb_inv(c),
+        s1.inv_tlb(c),
         s1.inv_mmu(c),
         s1.inv_basic(c),
         s2.inv_basic(c),
         os::next_step(c, s1, s2, step, lbl),
     ensures
-        s2.tlb_inv(c),
+        s2.inv_tlb(c),
 {
     match step { // Broadcasting these is very slow
         os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
@@ -853,7 +853,7 @@ pub proof fn next_step_preserves_tlb_inv(
     }
     match step {
         os::Step::MMU => {
-            next_step_mmu_preserves_tlb_inv(c, s1, s2, step, lbl);
+            next_step_mmu_preserves_inv_tlb(c, s1, s2, step, lbl);
         },
         os::Step::MapStart { core }
         | os::Step::UnmapStart { core }
@@ -874,7 +874,7 @@ pub proof fn next_step_preserves_tlb_inv(
             assert(s1.interp_pt_mem().dom().union(s1.unmap_vaddr_set()) =~= s2.interp_pt_mem().dom().union(s2.unmap_vaddr_set()));
             assert(forall|core, vaddr: nat| s2.is_unmap_vaddr_core(core, vaddr)
                 <==> s1.is_unmap_vaddr_core(core, vaddr));
-            assert(s2.tlb_inv(c));
+            assert(s2.inv_tlb(c));
         },
         os::Step::UnmapInitiateShootdown { core } => {
             assert(s2.shootdown_cores_valid(c));
