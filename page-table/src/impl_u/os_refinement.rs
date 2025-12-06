@@ -335,18 +335,18 @@ proof fn next_step_refines_hl_next_step(c: os::Constants, s1: os::State, s2: os:
     ensures
         hlspec::next_step(c.interp(), s1.interp(c), s2.interp(c), step.interp(s1, s2, c, lbl), lbl.interp()),
 {
-    match step { // Broadcasting these is very slow
-        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
-        | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
-        | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
-        | os::Step::ProtectOpChange { .. } => {
-            to_rl1::next_refines(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
-            to_rl1::next_preserves_inv(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
-        },
-        _ => {},
-    }
-    next_step_preserves_inv(c, s1, s2, step, lbl);
     if s1.sound {
+        match step { // Broadcasting these is very slow
+            os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+            | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
+            | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
+            | os::Step::ProtectOpChange { .. } => {
+                to_rl1::next_refines(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
+                to_rl1::next_preserves_inv(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
+            },
+            _ => {},
+        }
+        next_step_preserves_inv(c, s1, s2, step, lbl);
         match step {
             os::Step::MemOp { core, .. } => {
                 step_MemOp_refines(c, s1, s2, core, lbl);
@@ -461,8 +461,8 @@ proof fn step_MemOp_refines(c: os::Constants, s1: os::State, s2: os::State, core
     requires
         s1.inv(c),
         s2.inv(c),
-        os::step_MemOp(c, s1, s2, core, lbl),
         s1.sound,
+        os::step_MemOp(c, s1, s2, core, lbl),
     ensures
         ({
             let vaddr = lbl->MemOp_vaddr;
@@ -669,7 +669,9 @@ proof fn step_MemOp_refines(c: os::Constants, s1: os::State, s2: os::State, core
 }
 
 proof fn vaddr_distinct(c: os::Constants, s: os::State)
-    requires s.inv(c), s.sound,
+    requires
+        s.inv(c),
+        s.sound,
     ensures 
         forall |core1, core2| #![all_triggers]
             s.core_states.contains_key(core1) && s.core_states.contains_key(core2)
@@ -1797,8 +1799,8 @@ proof fn interp_vmem_update_range(c: os::Constants, s: os::State, base: nat, pte
 
 proof fn relevant_mem_preserved(c: os::Constants, s1: os::State, s2: os::State)
     requires
-        s1.sound, s1.inv(c),
-        s2.sound, s2.inv(c),
+        s1.inv(c), s1.sound,
+        s2.inv(c), s2.sound,
         s1.applied_mappings().submap_of(s2.applied_mappings()),
         s1.mmu@.phys_mem == s2.mmu@.phys_mem,
     ensures
@@ -1841,9 +1843,9 @@ proof fn relevant_mem_preserved(c: os::Constants, s1: os::State, s2: os::State)
 
 proof fn step_MapStart_refines(c: os::Constants, s1: os::State, s2: os::State, core: Core, lbl: RLbl)
     requires
-        s1.sound,
         s1.inv(c),
         s2.inv(c),
+        s1.sound,
         os::step_MapStart(c, s1, s2, core, lbl),
     ensures
         hlspec::step_MapStart(c.interp(), s1.interp(c), s2.interp(c), lbl),
@@ -1930,8 +1932,8 @@ proof fn step_MapOpChange_refines(c: os::Constants, s1: os::State, s2: os::State
     requires
         s1.inv(c),
         s2.inv(c),
-        os::step_MapOpChange(c, s1, s2, core, paddr, value, lbl),
         s1.sound,
+        os::step_MapOpChange(c, s1, s2, core, paddr, value, lbl),
     ensures
         hlspec::step_Stutter(c.interp(), s1.interp(c), s2.interp(c), lbl)
 {
@@ -2060,8 +2062,8 @@ proof fn step_MapEnd_refines(c: os::Constants, s1: os::State, s2: os::State, cor
     requires
         s1.inv(c),
         s2.inv(c),
-        os::step_MapEnd(c, s1, s2, core, lbl),
         s1.sound,
+        os::step_MapEnd(c, s1, s2, core, lbl),
     ensures
         hlspec::step_MapEnd(c.interp(), s1.interp(c), s2.interp(c), lbl)
 {
@@ -2549,14 +2551,15 @@ proof fn step_UnmapOpChange_refines(
     assert(s1.interp_pt_mem().remove(vaddr) =~= s2.interp_pt_mem());
     if s1.interp_pt_mem().contains_key(vaddr) {
         assert(s1.inflight_protect_params() =~= s2.inflight_protect_params()) by {
-            // XXX: Needs protect overlap inv
-            admit();
+            assert forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
+                implies s2.is_inflight_protect_vaddr_core(va, core)
+            by {
+                // XXX: easy, inflight protect and unmap don't overlap, so this mapping can't
+                // have been removed by the UnmapOpChange step
+                assume(s2.interp_pt_mem().contains_key(va));
+            };
             assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
                 <==> s2.is_inflight_protect_vaddr_core(va, core));
-            // assert(forall|va, pte, core| s1.is_inflight_protect_vaddr_pte_core(va, pte, core)
-            //     <==> s2.is_inflight_protect_vaddr_pte_core(va, pte, core));
-            // assert(s1.inflight_protect_vaddrs() == s2.inflight_protect_vaddrs());
-            // assert(s1.inflight_protect_params() =~= s2.inflight_protect_params());
         };
         assert(s1.core_states.contains_key(core));
         assert(s1.inflight_mapunmap_vaddr().contains(vaddr));
@@ -2579,7 +2582,7 @@ proof fn step_UnmapOpChange_refines(
                             },
                             _ => false,
                         };
-                    assert(!(critical_core == core));
+                    assert(critical_core != core);
                     assert(s2.core_states.contains_key(critical_core));
                 }
             }
@@ -2618,8 +2621,9 @@ proof fn step_UnmapOpChange_refines(
 
 proof fn step_UnmapEnd_refines(c: os::Constants, s1: os::State, s2: os::State, core: Core, lbl: RLbl)
     requires
-        s1.inv(c), s1.sound,
-        s2.inv(c), s2.sound,
+        s1.inv(c),
+        s2.inv(c),
+        s1.sound,
         os::step_UnmapEnd(c, s1, s2, core, lbl),
     ensures
         s1.core_states[core] is UnmapOpDone || s1.core_states[core] is UnmapShootdownWaiting,

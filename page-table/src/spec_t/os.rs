@@ -1509,17 +1509,19 @@ impl State {
     }
 
     pub open spec fn inv(self, c: Constants) -> bool {
+        &&& self.inv_impl()
         &&& self.inv_basic(c)
         &&& self.inv_mmu(c)
-        &&& self.inv_impl()
         &&& self.inv_writes(c)
         &&& self.inv_shootdown(c)
         &&& self.inv_allocated_mem(c)
         &&& self.tlb_inv(c)
-        &&& self.inv_overlapping_mem(c)
         &&& self.inv_pending_maps(c)
-        &&& self.inv_protect_frame_unchanged(c)
+        &&& self.sound ==> {
+        &&& self.inv_overlapping_mem(c)
         &&& self.inv_protect_vaddr_same_core(c)
+        &&& self.inv_protect_frame_unchanged(c)
+        }
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////////////
@@ -1702,17 +1704,15 @@ impl State {
 
 
     pub open spec fn inv_overlapping_mem(self, c: Constants) -> bool {
-        self.sound ==> {
-            // Existing mappings
-            &&& self.inv_existing_map_no_overlap_existing_vmem(c)
-            &&& self.inv_mapped_pmem_no_overlap(c)
-            // Inflight vs inflight
-            &&& self.inv_inflight_map_no_overlap_inflight_vmem(c)
-            &&& self.inv_inflight_pmem_no_overlap_inflight_pmem(c)
-            // Inflight vs existing
-            &&& self.inv_unmapped_vmem_no_overlap_existing_vmem(c)
-            &&& self.inv_inflight_pmem_no_overlap_existing_pmem(c)
-        }
+        // Existing mappings
+        &&& self.inv_existing_map_no_overlap_existing_vmem(c)
+        &&& self.inv_mapped_pmem_no_overlap(c)
+        // Inflight vs inflight
+        &&& self.inv_inflight_map_no_overlap_inflight_vmem(c)
+        &&& self.inv_inflight_pmem_no_overlap_inflight_pmem(c)
+        // Inflight vs existing
+        &&& self.inv_unmapped_vmem_no_overlap_existing_vmem(c)
+        &&& self.inv_inflight_pmem_no_overlap_existing_pmem(c)
     }
 }
 
