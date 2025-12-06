@@ -775,7 +775,7 @@ pub open spec fn step_ProtectEnd(c: Constants, s1: State, s2: State, core: Core,
     &&& s2.inv_impl() // impl invariant is re-established
     &&& s1.mmu@.writes.tso === set![]
     &&& s1.mmu@.writes.nonpos === set![]
-    &&& s1.mmu@.pending_unmaps === map![]
+    &&& s1.mmu@.pending_protects === map![]
     // mmu statemachine steps
     &&& s2.mmu == s1.mmu
     &&& os_ext::next(s1.os_ext, s2.os_ext, c.common, os_ext::Lbl::ReleaseLock { core })
