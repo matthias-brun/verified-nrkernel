@@ -1933,11 +1933,8 @@ proof fn relevant_mem_preserved(c: os::Constants, s1: os::State, s2: os::State)
         assert(mappings.contains_pair(base, pte));
         assert(s1.applied_mappings().contains_key(base));
 
-        // XXX: pte may change but its frame is the same
-        assume(s1.applied_mappings()[base].frame == pte.frame);
         assert(s2.applied_mappings().contains_key(base));
-        assume(s2.applied_mappings()[base].frame == pte.frame);
-        // assert(s2.applied_mappings().contains_pair(base, s2.applied_mappings()[base]));
+        assert(s2.applied_mappings()[base].frame == pte.frame);
 
         assert(os::State::has_base_and_pte_for_vaddr(s1.applied_mappings(), mem_vaddr as int));
         assert(os::State::has_base_and_pte_for_vaddr(s2.applied_mappings(), mem_vaddr as int));
