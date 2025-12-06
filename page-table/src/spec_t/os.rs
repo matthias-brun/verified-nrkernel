@@ -130,6 +130,22 @@ impl CoreState {
             _ => false,
         }
     }
+
+    pub open spec fn is_in_shootdown(self) -> bool {
+        match self {
+            CoreState::UnmapShootdownWaiting { .. } => true,
+            CoreState::ProtectShootdownWaiting { .. } => true,
+            _ => false,
+        }
+    }
+
+    pub open spec fn shootdown_vaddr(self) -> nat {
+        match self {
+            CoreState::UnmapShootdownWaiting { vaddr, .. } => vaddr,
+            CoreState::ProtectShootdownWaiting { vaddr, .. } => vaddr,
+            _ => arbitrary(),
+        }
+    }
 }
 
 impl Constants {
@@ -1515,7 +1531,7 @@ impl State {
         &&& self.inv_writes(c)
         &&& self.inv_shootdown(c)
         &&& self.inv_allocated_mem(c)
-        &&& self.tlb_inv(c)
+        &&& self.inv_tlb(c)
         &&& self.inv_pending_maps(c)
         &&& self.sound ==> {
         &&& self.inv_overlapping_mem(c)
@@ -1533,9 +1549,8 @@ impl State {
     }
 
     pub open spec fn inv_shootdown_wf(self, c: Constants) -> bool {
-        forall|dispatcher: Core| (#[trigger] c.valid_core(dispatcher) && self.core_states[dispatcher] is UnmapShootdownWaiting)
-        ==> self.core_states[dispatcher]->UnmapShootdownWaiting_vaddr
-                == self.os_ext.shootdown_vec.vaddr
+        forall|dispatcher: Core| (#[trigger] c.valid_core(dispatcher) && self.core_states[dispatcher].is_in_shootdown())
+        ==> self.core_states[dispatcher].shootdown_vaddr() == self.os_ext.shootdown_vec.vaddr
     }
 
     pub open spec fn shootdown_cores_valid(self, c: Constants) -> bool {
@@ -1545,7 +1560,8 @@ impl State {
 
     pub open spec fn all_cores_nonpos_before_shootdown(self, c: Constants) -> bool {
         (self.os_ext.lock matches Some(core)
-            && self.core_states[core] matches CoreState::UnmapExecuting { result: Some(_), .. })
+            && (self.core_states[core] matches CoreState::UnmapExecuting { result: Some(_), .. }
+                || self.core_states[core] matches CoreState::ProtectExecuting { result: Some(_), .. }))
         ==> self.mmu@.writes.nonpos == Set::new(|core| c.valid_core(core))
     }
 
@@ -1599,22 +1615,23 @@ impl State {
        self.os_ext.shootdown_vec.open_requests !== set![]
            ==> {
                &&& self.os_ext.lock matches Some(core)
-               &&& self.core_states[core] is UnmapShootdownWaiting
+               &&& self.core_states[core].is_in_shootdown()
            }
     }
 
-    pub open spec fn tlb_inv(self, c: Constants) -> bool {
+    pub open spec fn inv_tlb(self, c: Constants) -> bool {
         &&& self.inv_tlb_wf(c)
         &&& self.inv_shootdown_wf(c)
         &&& self.shootdown_exists(c)
         &&& self.shootdown_cores_valid(c)
-        &&& self.successful_invlpg(c)
         &&& self.successful_IPI(c)
         &&& self.TLB_dom_subset_of_pt_and_inflight_unmap_vaddr(c)
+        &&& self.all_cores_nonpos_before_shootdown(c)
+        // XXX: invs below are different in protect:
+        &&& self.successful_invlpg(c)
         &&& self.TLB_interp_pt_mem_agree(c)
         &&& self.TLB_unmap_agree(c)
         &&& self.pending_unmap_is_unmap_vaddr(c)
-        &&& self.all_cores_nonpos_before_shootdown(c)
     }
 
     pub open spec fn pending_unmap_is_unmap_vaddr(self, c: Constants) -> bool {
