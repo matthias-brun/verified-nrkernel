@@ -1502,6 +1502,13 @@ impl State {
         //         == self.interp_pt_mem()[base].frame
     }
 
+    pub open spec fn inv_protect_vaddr_same_core(self, c: Constants) -> bool {
+        forall|va, core1, core2|
+            self.is_inflight_protect_vaddr_core(va, core1)
+            && self.is_inflight_protect_vaddr_core(va, core2)
+                ==> core1 == core2
+    }
+
     pub open spec fn inv(self, c: Constants) -> bool {
         &&& self.inv_basic(c)
         &&& self.inv_mmu(c)
@@ -1513,6 +1520,7 @@ impl State {
         &&& self.inv_overlapping_mem(c)
         &&& self.inv_pending_maps(c)
         &&& self.inv_protect_frame_unchanged(c)
+        &&& self.inv_protect_vaddr_same_core(c)
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////////////

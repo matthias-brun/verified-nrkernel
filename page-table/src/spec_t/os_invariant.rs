@@ -188,6 +188,90 @@ pub proof fn next_step_preserves_inv(c: os::Constants, s1: os::State, s2: os::St
     next_step_preserves_inv_pending_maps(c, s1, s2, step, lbl);
     next_step_preserves_tlb_inv(c, s1, s2, step, lbl);
     next_step_preserves_inv_protect_frame_unchanged(c, s1, s2, step, lbl);
+    next_step_preserves_inv_protect_vaddr_same_core(c, s1, s2, step, lbl);
+}
+
+pub proof fn next_step_preserves_inv_protect_vaddr_same_core(c: os::Constants, s1: os::State, s2: os::State, step: os::Step, lbl: RLbl)
+    requires
+        s1.inv(c),
+        os::next_step(c, s1, s2, step, lbl),
+    ensures
+        s2.inv_protect_vaddr_same_core(c),
+{
+    match step { // Broadcasting these is very slow
+        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+        | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
+        | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
+        | os::Step::ProtectOpChange { .. } => {
+            to_rl1::next_refines(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
+            to_rl1::next_preserves_inv(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
+        },
+        _ => {},
+    }
+
+    match step {
+        os::Step::UnmapOpChange { core, paddr, value } => {
+            assert forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
+                implies s2.is_inflight_protect_vaddr_core(va, core)
+            by {
+                // XXX: easy, inflight protect and unmap don't overlap, so this mapping can't
+                // have been removed by the UnmapOpChange step
+                assume(s2.interp_pt_mem().contains_key(va));
+            };
+            assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
+                <==> s2.is_inflight_protect_vaddr_core(va, core));
+            assert(s2.inv_protect_vaddr_same_core(c));
+        },
+        os::Step::MapOpChange { core, paddr, value } => {
+            assert forall|va, core| s2.is_inflight_protect_vaddr_core(va, core)
+                implies s1.is_inflight_protect_vaddr_core(va, core)
+            by {
+                // XXX: easy, inflight protect and map don't overlap, so this mapping can't
+                // have been created by the MapOpChange step
+                assume(s1.interp_pt_mem().contains_key(va));
+            };
+            assert(s2.inv_protect_vaddr_same_core(c));
+        },
+        os::Step::ProtectStart { core } => {
+            let vaddr = lbl->ProtectStart_vaddr;
+            let flags = lbl->ProtectStart_flags;
+            let pt = s1.interp_pt_mem();
+            let pte = pt[vaddr];
+            let pte_size = if pt.contains_key(vaddr) { pt[vaddr].frame.size } else { 0 };
+            if pt.contains_key(vaddr) {
+                // assert(s2.interp_pt_mem() == s1.interp_pt_mem());
+                // assert(forall|core2| core2 != core ==> s2.core_states[core2] == s1.core_states[core2]);
+                assert(forall|va, core2| core2 != core ==>
+                    (s1.is_inflight_protect_vaddr_core(va, core2) <==> s2.is_inflight_protect_vaddr_core(va, core2)));
+                // XXX:
+                assume(forall|core| !s1.is_inflight_protect_vaddr_core(vaddr, core));
+
+                assert(s2.is_inflight_protect_vaddr_core(vaddr, core));
+            } else {
+                assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
+                    <==> s2.is_inflight_protect_vaddr_core(va, core));
+            }
+            assert(s2.inv_protect_vaddr_same_core(c));
+        },
+        os::Step::ProtectEnd { core } => {
+            let vaddr = lbl->ProtectEnd_vaddr;
+            // assert(s2.interp_pt_mem() == s1.interp_pt_mem());
+            // assert(forall|core2| core2 != core ==> s2.core_states[core2] == s1.core_states[core2]);
+            assert(forall|va, core2| core2 != core ==>
+                (s1.is_inflight_protect_vaddr_core(va, core2) <==> s2.is_inflight_protect_vaddr_core(va, core2)));
+
+            // XXX: easy invariant
+            assume(s1.interp_pt_mem().contains_key(vaddr));
+            assert(s1.is_inflight_protect_vaddr_core(vaddr, core));
+
+            assert(s2.inv_protect_vaddr_same_core(c));
+        },
+        _ => {
+            assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
+                <==> s2.is_inflight_protect_vaddr_core(va, core));
+            assert(s2.inv_protect_vaddr_same_core(c));
+        }
+    }
 }
 
 pub proof fn next_step_preserves_inv_protect_frame_unchanged(c: os::Constants, s1: os::State, s2: os::State, step: os::Step, lbl: RLbl)
@@ -217,10 +301,6 @@ pub proof fn next_step_preserves_inv_protect_frame_unchanged(c: os::Constants, s
             // assume(!rl1::step_WriteNonneg(s1.mmu@, s2.mmu@, c.common, step.mmu_lbl(s1, lbl)));
 
             assert(s1.inflight_protect_params() =~= s2.inflight_protect_params()) by {
-                // XXX: Needs an invariant I guess? Feels like it should follow from the overlap invariants
-                assume(forall|va, core1, core2|
-                    s2.is_inflight_protect_vaddr_core(va, core1) && s2.is_inflight_protect_vaddr_core(va, core2)
-                        ==> core1 == core2);
                 assert forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
                     implies s2.is_inflight_protect_vaddr_core(va, core)
                 by {
@@ -235,16 +315,8 @@ pub proof fn next_step_preserves_inv_protect_frame_unchanged(c: os::Constants, s
         },
         os::Step::MapOpChange { core, paddr, value } => {
             assert(s1.inflight_protect_params() =~= s2.inflight_protect_params()) by {
-                // XXX: Needs an invariant I guess? Feels like it should follow from the overlap invariants
-                assume(forall|va, core1, core2|
-                    s2.is_inflight_protect_vaddr_core(va, core1) && s2.is_inflight_protect_vaddr_core(va, core2)
-                        ==> core1 == core2);
                 assert(forall|core| #[trigger] c.valid_core(core) && s1.core_states[core].is_protecting()
                     ==> s2.core_states[core] == s1.core_states[core]);
-                // assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core) ==> c.valid_core(core));
-                // assert(forall|va, core| s2.is_inflight_protect_vaddr_core(va, core) ==> c.valid_core(core));
-                assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core) ==> s1.core_states[core].is_protecting());
-                assert(forall|va, core| s2.is_inflight_protect_vaddr_core(va, core) ==> s2.core_states[core].is_protecting());
                 assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
                     ==> s2.is_inflight_protect_vaddr_core(va, core));
                 assert forall|va, core| s2.is_inflight_protect_vaddr_core(va, core)
@@ -265,10 +337,6 @@ pub proof fn next_step_preserves_inv_protect_frame_unchanged(c: os::Constants, s
                 assert(s2.inflight_protect_core_get_pte(core) == s1.inflight_protect_core_get_pte(core));
                 assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
                     ==> s2.inflight_protect_core_get_pte(core) == s1.inflight_protect_core_get_pte(core));
-                // XXX: Needs an invariant I guess? Feels like it should follow from the overlap invariants
-                assume(forall|va, core1, core2|
-                    s2.is_inflight_protect_vaddr_core(va, core1) && s2.is_inflight_protect_vaddr_core(va, core2)
-                        ==> core1 == core2);
             };
         },
         os::Step::ProtectStart { core } => {
@@ -282,10 +350,6 @@ pub proof fn next_step_preserves_inv_protect_frame_unchanged(c: os::Constants, s
                 assert(forall|core2| core2 != core ==> s2.core_states[core2] == s1.core_states[core2]);
                 assert(forall|va, core2| core2 != core ==>
                     (s1.is_inflight_protect_vaddr_core(va, core2) <==> s2.is_inflight_protect_vaddr_core(va, core2)));
-                // XXX: both of these should follow from overlap invariants?
-                assume(forall|va, core1, core2|
-                    s1.is_inflight_protect_vaddr_core(va, core1) && s1.is_inflight_protect_vaddr_core(va, core2)
-                        ==> core1 == core2);
                 assume(forall|core| !s1.is_inflight_protect_vaddr_core(vaddr, core));
 
                 assert(s2.is_inflight_protect_vaddr_core(vaddr, core));
@@ -296,10 +360,6 @@ pub proof fn next_step_preserves_inv_protect_frame_unchanged(c: os::Constants, s
                 assert(s1.inflight_protect_params() =~= s2.inflight_protect_params()) by {
                     assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
                         <==> s2.is_inflight_protect_vaddr_core(va, core));
-                    // XXX: Needs an invariant I guess? Feels like it should follow from the overlap invariants
-                    assume(forall|va, core1, core2|
-                        s2.is_inflight_protect_vaddr_core(va, core1) && s2.is_inflight_protect_vaddr_core(va, core2)
-                            ==> core1 == core2);
                 };
             }
             assert(s2.inv_protect_frame_unchanged(c));
@@ -323,10 +383,6 @@ pub proof fn next_step_preserves_inv_protect_frame_unchanged(c: os::Constants, s
             assert(s1.inflight_protect_params() =~= s2.inflight_protect_params()) by {
                 assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
                     <==> s2.is_inflight_protect_vaddr_core(va, core));
-                // XXX: Needs an invariant I guess? Feels like it should follow from the overlap invariants
-                assume(forall|va, core1, core2|
-                    s2.is_inflight_protect_vaddr_core(va, core1) && s2.is_inflight_protect_vaddr_core(va, core2)
-                        ==> core1 == core2);
             };
             assert(s2.inv_protect_frame_unchanged(c));
         }
@@ -955,10 +1011,16 @@ pub proof fn next_step_preserves_tlb_inv(
             }
             assert(s2.TLB_dom_subset_of_pt_and_inflight_unmap_vaddr(c));
         },
-        _ => {
-            // XXX
+        os::Step::ProtectStart { core, .. }
+        | os::Step::ProtectOpStart { core, .. }
+        | os::Step::ProtectOpChange { core, .. }
+        | os::Step::ProtectOpFail { core, .. }
+        | os::Step::ProtectInitiateShootdown { core, .. }
+        | os::Step::ProtectEnd { core, .. } => {
             admit();
-        }
+        },
+        // _ => {
+        // }
     }
 }
 
