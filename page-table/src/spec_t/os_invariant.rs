@@ -1196,10 +1196,12 @@ pub proof fn next_step_preserves_overlap_mem_inv(
             step_MapNoOp_and_step_MapOpChange_preserves_overlap_mem_inv(c, s1, s2, step, lbl);
         },
         //Unmap steps
-        os::Step::UnmapStart { core } => {
-            let ult_id = lbl->UnmapStart_thread_id;
-            let vaddr = lbl->UnmapStart_vaddr;
-            let corestate = os::CoreState::UnmapWaiting { ult_id, vaddr };
+        os::Step::UnmapStart { core } 
+        | os::Step::ProtectStart { core, .. } => {
+            let ult_id = if step is UnmapStart {lbl->UnmapStart_thread_id} else {lbl->ProtectStart_thread_id};
+            let vaddr = if step is UnmapStart {lbl->UnmapStart_vaddr} else {lbl->ProtectStart_vaddr};
+            let flags = lbl->ProtectStart_flags;
+            let corestate = if step is UnmapStart {os::CoreState::UnmapWaiting { ult_id, vaddr }} else {os::CoreState::ProtectWaiting { ult_id, vaddr, flags }};
             let pte_size = if s1.interp_pt_mem().contains_key(vaddr) {
                 s1.interp_pt_mem()[vaddr].frame.size
             } else {
@@ -1248,10 +1250,12 @@ pub proof fn next_step_preserves_overlap_mem_inv(
             assert(s2.inv_existing_map_no_overlap_existing_vmem(c));
             assert(s2.inv_overlapping_mem(c));
         },
-        os::Step::UnmapOpStart { core } => {
-            let vaddr = s1.core_states[core]->UnmapWaiting_vaddr;
-            let ult_id = s1.core_states[core]->UnmapWaiting_ult_id;
-            let corestate = os::CoreState::UnmapExecuting { ult_id, vaddr, result: None };
+        os::Step::UnmapOpStart { core } 
+        | os::Step::ProtectOpStart { core, .. } => {
+            let vaddr = if step is UnmapOpStart {s1.core_states[core]->UnmapWaiting_vaddr} else {s1.core_states[core]->ProtectWaiting_vaddr};
+            let ult_id = if step is UnmapOpStart {s1.core_states[core]->UnmapWaiting_ult_id} else {s1.core_states[core]->ProtectWaiting_ult_id};
+            let flags = s1.core_states[core]->ProtectWaiting_flags;
+            let corestate = if step is UnmapOpStart {os::CoreState::UnmapExecuting { ult_id, vaddr, result: None }} else {os::CoreState::ProtectExecuting { ult_id, vaddr, flags, result: None }};
             lemma_insert_preserves_no_overlap(
                 c,
                 s1.core_states,
@@ -1374,10 +1378,12 @@ pub proof fn next_step_preserves_overlap_mem_inv(
             }
             assert(s2.inv_overlapping_mem(c));
         },
-        os::Step::UnmapOpFail { core } => {
-            let vaddr = s1.core_states[core]->UnmapExecuting_vaddr;
-            let ult_id = s1.core_states[core]->UnmapExecuting_ult_id;
-            let corestate = os::CoreState::UnmapOpDone { ult_id, vaddr, result: Err(()) };
+        os::Step::UnmapOpFail { core } 
+        | os::Step::ProtectOpFail { core, .. } => {
+            let vaddr = if step is UnmapOpFail {s1.core_states[core]->UnmapExecuting_vaddr} else {s1.core_states[core]->ProtectExecuting_vaddr};
+            let ult_id = if step is UnmapOpFail {s1.core_states[core]->UnmapExecuting_ult_id} else { s1.core_states[core]->ProtectExecuting_ult_id};
+            let flags = s1.core_states[core]->ProtectExecuting_flags;
+            let corestate = if step is UnmapOpFail {os::CoreState::UnmapOpDone { ult_id, vaddr, result: Err(()) }} else {os::CoreState::ProtectOpDone { ult_id, vaddr, flags, result: Err(()) }};
             lemma_insert_preserves_no_overlap(
                 c,
                 s1.core_states,
@@ -1389,11 +1395,14 @@ pub proof fn next_step_preserves_overlap_mem_inv(
             assert(s2.inv_inflight_pmem_no_overlap_inflight_pmem(c));
             assert(s2.inv_existing_map_no_overlap_existing_vmem(c));
         },
-        os::Step::UnmapInitiateShootdown { core } => {
-            let vaddr = s1.core_states[core]->UnmapExecuting_vaddr;
-            let ult_id = s1.core_states[core]->UnmapExecuting_ult_id;
-            let result = s1.core_states[core]->UnmapExecuting_result;
-            let corestate = os::CoreState::UnmapShootdownWaiting { ult_id, vaddr, result: result->Some_0 };
+        os::Step::UnmapInitiateShootdown { core } 
+        | os::Step::ProtectInitiateShootdown { core, .. } => {
+            let vaddr = if step is UnmapInitiateShootdown {s1.core_states[core]->UnmapExecuting_vaddr} else {s1.core_states[core]->ProtectExecuting_vaddr} ;
+            let ult_id = if step is UnmapInitiateShootdown {s1.core_states[core]->UnmapExecuting_ult_id} else {s1.core_states[core]->ProtectExecuting_ult_id};
+            let result = if step is UnmapInitiateShootdown {s1.core_states[core]->UnmapExecuting_result} else {s1.core_states[core]->ProtectExecuting_result};
+            let flags = s1.core_states[core]->ProtectExecuting_flags;
+            let corestate = if step is UnmapInitiateShootdown {os::CoreState::UnmapShootdownWaiting { ult_id, vaddr, result: result->Some_0 }} 
+                        else  {os::CoreState::ProtectShootdownWaiting { ult_id, vaddr, flags, result: result->Some_0 }} ;
             lemma_insert_preserves_no_overlap(c, s1.core_states, s1.interp_pt_mem(), core, corestate);
             lemma_unique_and_overlap_values_implies_overlap_vmem(c, s2);
             assert (s2.inv_inflight_pmem_no_overlap_inflight_pmem(c)) by {
@@ -1426,25 +1435,30 @@ pub proof fn next_step_preserves_overlap_mem_inv(
             assert(s2.inv_existing_map_no_overlap_existing_vmem(c));
             assert(s2.inv_overlapping_mem(c));
         },
-        os::Step::MapEnd { core } => {
+        os::Step::UnmapEnd { core } 
+        | os::Step::MapEnd { core } 
+        | os::Step::ProtectEnd { core, .. } => {
             assert(s2.inv_overlapping_mem(c));
         },
-        os::Step::ProtectStart { core }
-        | os::Step::ProtectOpStart { core, .. }
-        | os::Step::ProtectOpChange { core, .. }
-        | os::Step::ProtectOpFail { core, .. }
-        | os::Step::ProtectInitiateShootdown { core, .. }
-        | os::Step::ProtectEnd { core, .. } => {
+        os::Step::ProtectOpChange { core, .. } => {
             // XXX: easy?
             admit();
         },
         os::Step::Allocate { .. } => {
             assert(s2.inv_overlapping_mem(c)); // possibly flaky? may have to split up this
-                                               // function into smaller pieces
         },
-        _ => {
+        os::Step::MMU
+        | os::Step::MemOp {.. }
+        | os::Step::ReadPTMem { ..}
+        | os::Step::Barrier {.. }
+        | os::Step::Invlpg {.. }
+        | os::Step::Deallocate {.. }
+        | os::Step::UnmapOpStutter {.. }
+        | os::Step::MapOpStutter {.. }
+        | os::Step::AckShootdownIPI { .. } 
+        | os::Step::WaitShootdown {.. } => {
             assert(s2.inv_overlapping_mem(c));
-        },
+        }
     }
 }
 
