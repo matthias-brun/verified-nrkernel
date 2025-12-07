@@ -1805,7 +1805,7 @@ proof fn interp_vmem_subrange(c: os::Constants, s: os::State, base: nat, pte: PT
 {
     let paddr = pte.frame.base + vaddr - base;
 
-    vstd::seq_lib::assert_seqs_equal!(
+    assert_seqs_equal!(
         s.interp_vmem(c).subrange(vaddr, vaddr + size),
         s.mmu@.phys_mem.subrange(paddr, paddr + size),
         idx => {
@@ -1858,7 +1858,7 @@ proof fn interp_vmem_update_range(c: os::Constants, s: os::State, base: nat, pte
 
     assert(b1.len() == b2.len());
 
-    vstd::assert_seqs_equal!(b1, b2, idx => {
+    assert_seqs_equal!(b1, b2, idx => {
         let (base0, pte0) = os::State::base_and_pte_for_vaddr(s.applied_mappings(), idx);
 
         if base <= idx < base + pte.frame.size {
@@ -2750,17 +2750,26 @@ proof fn step_ProtectOpChange_refines(
     assert(s1.applied_mappings().contains_key(vaddr));
     assert(s1.applied_mappings()[vaddr] == s1.interp_pt_mem()[vaddr]);
 
-    // XXX: these two should be relatively easy, mostly overlap reasoning
-    assume(forall|va: nat| os::State::has_base_and_pte_for_vaddr(s2.applied_mappings(), va as int)
+    assert(forall|va: nat| os::State::has_base_and_pte_for_vaddr(s2.applied_mappings(), va as int)
         ==> os::State::has_base_and_pte_for_vaddr(s1.applied_mappings(), va as int));
 
-    assume(forall|va: nat| os::State::has_base_and_pte_for_vaddr(s1.applied_mappings(), va as int)
-        ==> {
+    assert forall|va: nat| os::State::has_base_and_pte_for_vaddr(s1.applied_mappings(), va as int)
+        implies {
             let (base1, pte1) = os::State::base_and_pte_for_vaddr(s1.applied_mappings(), va as int);
             let (base2, pte2) = os::State::base_and_pte_for_vaddr(s2.applied_mappings(), va as int);
             &&& base1 == base2
             &&& pte1.frame == pte2.frame
-        });
+    } by {
+        let (base1, pte1) = os::State::base_and_pte_for_vaddr(s1.applied_mappings(), va as int);
+        let (base2, pte2) = os::State::base_and_pte_for_vaddr(s2.applied_mappings(), va as int);
+        assert(s2.applied_mappings().contains_key(base1));
+        assert(os::State::has_base_and_pte_for_vaddr(s2.applied_mappings(), va as int));
+        if base1 != base2 {
+            assert(between(va, base1, base1 + s1.applied_mappings()[base1].frame.size));
+            assert(between(va, base2, base2 + s2.applied_mappings()[base2].frame.size));
+            no_overlaps_applied_mappings(c, s1);
+        }
+    };
 
     assert_seqs_equal!(s2.interp_vmem(c), s1.interp_vmem(c), va => {
         if os::State::has_base_and_pte_for_vaddr(s2.applied_mappings(), va) {
