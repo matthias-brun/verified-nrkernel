@@ -826,13 +826,13 @@ pub proof fn next_step_mmu_preserves_inv_tlb(
             assert(s2.TLB_unmap_agree(c));
         }
         rl1::Step::TLBFillNA2 { core, vaddr } => {
-            admit(); // XXX: These asserts pass but are unstable
             assert(s2.inv_tlb_wf(c));
             assert(s2.inv_shootdown_wf(c));
             assert(s2.shootdown_exists(c));
             assert(s2.shootdown_cores_valid(c));
             assert(s2.successful_IPI(c));
-            assert(s2.TLB_dom_subset_of_pt_and_inflight_unmap_vaddr(c));
+            // XXX: this might need overlap invs
+            assume(s2.TLB_dom_subset_of_pt_and_inflight_unmap_vaddr(c));
             assert(s2.all_cores_nonpos_before_shootdown(c));
             // XXX: these are not true for protect:
             assume(s2.successful_invlpg(c));
@@ -2136,7 +2136,6 @@ pub proof fn lemma_map_insert_values_equality<A, B>(map: Map<A, B>, key: A, valu
     assert(map.values().insert(value) =~= map.insert(key, value).values().insert(map.index(key)));
 }
 
-// XXX: is this not in vstd?
 pub proof fn lemma_map_insert_value<A, B>(map: Map<A, B>, key: A, value: B)
     ensures map.insert(key, value).values().contains(value),
 {

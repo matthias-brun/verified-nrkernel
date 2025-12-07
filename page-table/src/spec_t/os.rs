@@ -958,6 +958,16 @@ impl CoreState {
         }
     }
 
+    pub open spec fn flags(self) -> Flags {
+        match self {
+            CoreState::ProtectWaiting { flags, ..}
+            | CoreState::ProtectExecuting { flags, ..}
+            | CoreState::ProtectOpDone { flags, ..}
+            | CoreState::ProtectShootdownWaiting { flags, ..} => flags,
+            _ => arbitrary(),
+        }
+    }
+
     pub open spec fn ult_id(self) -> nat
         recommends self !is Idle
     {
@@ -1642,10 +1652,14 @@ impl State {
         &&& self.TLB_dom_subset_of_pt_and_inflight_unmap_vaddr(c)
         &&& self.all_cores_nonpos_before_shootdown(c)
         // XXX: invs below are different in protect:
+        // &&& (if self.mmu@.polarity is Protect {
+        //     &&& true
+        // } else {
         &&& self.successful_invlpg(c)
         &&& self.TLB_interp_pt_mem_agree(c)
         &&& self.TLB_unmap_agree(c)
         &&& self.pending_unmap_is_unmap_vaddr(c)
+        // })
     }
 
     pub open spec fn pending_unmap_is_unmap_vaddr(self, c: Constants) -> bool {
