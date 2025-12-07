@@ -2,7 +2,7 @@
 
 use vstd::prelude::*;
 use vstd::map::*;
-use vstd::assert_by_contradiction;
+use vstd::{ assert_by_contradiction, assert_seqs_equal };
 
 // use crate::spec_t::hlspec::*;
 #[cfg(verus_keep_ghost)]
@@ -420,8 +420,7 @@ proof fn next_step_refines_hl_next_step(c: os::Constants, s1: os::State, s2: os:
                 assert(hlspec::next_step(c.interp(), s1.interp(c), s2.interp(c), step.interp(s1, s2, c, lbl), lbl));
             },
             os::Step::ProtectOpChange { core, paddr, value } => {
-                admit();
-                // step_ProtectOpChange_refines(c, s1, s2, core, paddr, value, lbl);
+                step_ProtectOpChange_refines(c, s1, s2, core, paddr, value, lbl);
                 assert(hlspec::next_step(c.interp(), s1.interp(c), s2.interp(c), step.interp(s1, s2, c, lbl), lbl));
             }
             os::Step::ProtectOpFail { core } => {
@@ -2652,6 +2651,127 @@ proof fn step_ProtectEnd_refines(c: os::Constants, s1: os::State, s2: os::State,
     };
 }
 
+proof fn step_ProtectOpChange_refines(
+    c: os::Constants,
+    s1: os::State,
+    s2: os::State,
+    core: Core,
+    paddr: usize,
+    value: usize,
+    lbl: RLbl,
+)
+    requires
+        s1.inv(c),
+        s2.inv(c),
+        s1.sound,
+        os::step_ProtectOpChange(c, s1, s2, core, paddr, value, lbl),
+    ensures
+        hlspec::step_Stutter(c.interp(), s1.interp(c), s2.interp(c), lbl),
+{
+    to_rl1::next_refines(s1.mmu, s2.mmu, c.common, mmu::Lbl::Write(core, paddr, value));
+    let hl_s1 = s1.interp(c);
+    let hl_s2 = s2.interp(c);
+
+    let vaddr = s1.core_states[core]->ProtectExecuting_vaddr;
+    let flags = s1.core_states[core]->ProtectExecuting_flags;
+
+    assert forall|key| #[trigger] hl_s1.thread_state.contains_key(key)
+        implies hl_s1.thread_state[key] == hl_s2.thread_state[key]
+    by {
+        assert(c.valid_ult(key));
+        let core_of_key = c.ult2core[key];
+        assert(c.valid_core(core_of_key));
+        if s1.core_states[core_of_key].is_in_crit_sect() {
+            assert(core_of_key == core);
+        } else {
+            assert(core_of_key != core);
+            assert(!s1.core_states[core_of_key].is_in_crit_sect());
+            assert(s1.core_states.index(core_of_key) == s2.core_states.index(core_of_key));
+            assert(s1.core_states[c.ult2core[key]] === s2.core_states[c.ult2core[key]]);
+            if s1.core_states[core_of_key] is ProtectWaiting || s1.core_states[core_of_key] is UnmapWaiting {
+                let vaddr_of_key = s1.core_states[core_of_key].vaddr();
+                if vaddr_of_key == vaddr {
+                    assert(overlap(
+                        MemRegion {
+                            base: s2.core_states[core_of_key].vaddr(),
+                            size: s2.core_states[core_of_key].pte_size(s2.interp_pt_mem()),
+                        },
+                        MemRegion {
+                            base: s2.core_states[core].vaddr(),
+                            size: s2.core_states[core].pte_size(s2.interp_pt_mem()),
+                        },
+                    ));
+                }
+            }
+        }
+    }
+    assert(hl_s1.thread_state =~= hl_s2.thread_state);
+    assert(s2.interp_pt_mem() =~= s1.interp_pt_mem().insert(vaddr, PTE { flags, ..s1.interp_pt_mem()[vaddr] }));
+    assert(s1.interp_pt_mem().contains_key(vaddr));
+    assert(s1.inflight_protect_params() =~= s2.inflight_protect_params()) by {
+        assert forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
+            implies s2.is_inflight_protect_vaddr_core(va, core)
+        by {
+            assert(s2.interp_pt_mem().contains_key(va));
+        };
+        assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
+            <==> s2.is_inflight_protect_vaddr_core(va, core));
+    };
+    assert(s1.core_states.contains_key(core));
+    assert(s2.is_inflight_protect_vaddr_core(vaddr, core));
+    assert(s2.inflight_protect_params().contains_key(vaddr));
+    assert forall|va| s1.inflight_mapunmap_vaddr().contains(va)
+        implies #[trigger] s2.inflight_mapunmap_vaddr().contains(va)
+    by {
+        assert(s1.interp_pt_mem().contains_key(va));
+        assert(s2.interp_pt_mem().contains_key(va));
+        let critical_core = choose|cr|
+            s1.core_states.contains_key(cr) && match s1.core_states[cr] {
+                os::CoreState::MapDone {ult_id, vaddr, result: Ok(()), .. }
+                | os::CoreState::UnmapWaiting { ult_id, vaddr }
+                | os::CoreState::UnmapExecuting { ult_id, vaddr, .. }
+                | os::CoreState::UnmapOpDone { ult_id, vaddr, .. }
+                | os::CoreState::UnmapShootdownWaiting { ult_id, vaddr, .. } => {
+                    vaddr === va
+                },
+                _ => false,
+            };
+        assert(critical_core != core);
+        assert(s2.core_states.contains_key(critical_core));
+    }
+    assert(s1.inflight_mapunmap_vaddr() =~= s2.inflight_mapunmap_vaddr());
+    assert(s1.effective_mappings() =~= s2.effective_mappings());
+
+    let ult_id = s1.core_states[core]->ProtectExecuting_ult_id;
+    extra_mappings_preserved(c, s1, s2);
+    assert(s2.mmu@.phys_mem == s1.mmu@.phys_mem);
+    assert(s2.applied_mappings() =~= s1.applied_mappings().insert(vaddr, PTE { flags, ..s1.interp_pt_mem()[vaddr] }));
+
+    assert(s1.applied_mappings().contains_key(vaddr));
+    assert(s1.applied_mappings()[vaddr] == s1.interp_pt_mem()[vaddr]);
+
+    // XXX: these two should be relatively easy, mostly overlap reasoning
+    assume(forall|va: nat| os::State::has_base_and_pte_for_vaddr(s2.applied_mappings(), va as int)
+        ==> os::State::has_base_and_pte_for_vaddr(s1.applied_mappings(), va as int));
+
+    assume(forall|va: nat| os::State::has_base_and_pte_for_vaddr(s1.applied_mappings(), va as int)
+        ==> {
+            let (base1, pte1) = os::State::base_and_pte_for_vaddr(s1.applied_mappings(), va as int);
+            let (base2, pte2) = os::State::base_and_pte_for_vaddr(s2.applied_mappings(), va as int);
+            &&& base1 == base2
+            &&& pte1.frame == pte2.frame
+        });
+
+    assert_seqs_equal!(s2.interp_vmem(c), s1.interp_vmem(c), va => {
+        if os::State::has_base_and_pte_for_vaddr(s2.applied_mappings(), va) {
+            let (base, pte) = os::State::base_and_pte_for_vaddr(s2.applied_mappings(), va);
+            let (base1, pte1) = os::State::base_and_pte_for_vaddr(s1.applied_mappings(), va);
+            assert(base == base1);
+            assert(pte.frame == pte1.frame);
+        }
+    });
+}
+
 
 proof fn step_UnmapOpChange_refines(
     c: os::Constants,
@@ -2688,28 +2808,14 @@ proof fn step_UnmapOpChange_refines(
         assert(s1.core_states[core].is_in_crit_sect());
         assert(c.valid_core(core_of_key));
         if s1.core_states[core_of_key].is_in_crit_sect() {
-            assert(core_of_key === core);
+            assert(core_of_key == core);
         } else {
-            assert(!(core_of_key === core));
+            assert(core_of_key != core);
             assert(!s1.core_states[core_of_key].is_in_crit_sect());
             assert(s1.core_states.index(core_of_key) == s2.core_states.index(core_of_key));
             assert(s1.core_states[c.ult2core[key]] === s2.core_states[c.ult2core[key]]);
-            if s1.core_states[core_of_key] is UnmapWaiting {
-                let vaddr_of_key = s1.core_states[core_of_key]->UnmapWaiting_vaddr;
-                if vaddr_of_key == vaddr {
-                    assert(overlap(
-                        MemRegion {
-                            base: s2.core_states[core_of_key].vaddr(),
-                            size: s2.core_states[core_of_key].pte_size(s2.interp_pt_mem()),
-                        },
-                        MemRegion {
-                            base: s2.core_states[core].vaddr(),
-                            size: s2.core_states[core].pte_size(s2.interp_pt_mem()),
-                        },
-                    ));
-                }
-            } else if s1.core_states[core_of_key] is ProtectWaiting {
-                let vaddr_of_key = s1.core_states[core_of_key]->ProtectWaiting_vaddr;
+            if s1.core_states[core_of_key] is UnmapWaiting || s1.core_states[core_of_key] is ProtectWaiting {
+                let vaddr_of_key = s1.core_states[core_of_key].vaddr();
                 if vaddr_of_key == vaddr {
                     assert(overlap(
                         MemRegion {
@@ -2727,70 +2833,44 @@ proof fn step_UnmapOpChange_refines(
     }
     assert(hl_s1.thread_state =~= hl_s2.thread_state);
     assert(s1.interp_pt_mem().remove(vaddr) =~= s2.interp_pt_mem());
-    if s1.interp_pt_mem().contains_key(vaddr) {
-        assert(s1.inflight_protect_params() =~= s2.inflight_protect_params()) by {
-            assert forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
-                implies s2.is_inflight_protect_vaddr_core(va, core)
-            by {
-                // XXX: easy, inflight protect and unmap don't overlap, so this mapping can't
-                // have been removed by the UnmapOpChange step
-                // (do we know s2.sound here?)
-                assume(s2.interp_pt_mem().contains_key(va));
-            };
-            assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
-                <==> s2.is_inflight_protect_vaddr_core(va, core));
+    assert(s1.interp_pt_mem().contains_key(vaddr));
+    assert(s1.inflight_protect_params() =~= s2.inflight_protect_params()) by {
+        assert forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
+            implies s2.is_inflight_protect_vaddr_core(va, core)
+        by {
+            // XXX: easy, inflight protect and unmap don't overlap, so this mapping can't
+            // have been removed by the UnmapOpChange step
+            // (do we know s2.sound here?)
+            assume(va != vaddr);
+            assert(s2.interp_pt_mem().contains_key(va));
         };
-        assert(s1.core_states.contains_key(core));
-        assert(s1.inflight_mapunmap_vaddr().contains(vaddr));
-        assert forall|ids|
-            s1.inflight_mapunmap_vaddr().contains(ids)
-            implies #[trigger] s2.inflight_mapunmap_vaddr().insert(vaddr).contains(ids) by {
-            if s1.inflight_mapunmap_vaddr().contains(ids) {
-                if ids === vaddr {
-                } else {
-                    assert(s1.interp_pt_mem().contains_key(ids));
-                    assert(s2.interp_pt_mem().contains_key(ids));
-                    let critical_core = choose|cr|
-                        s1.core_states.contains_key(cr) && match s1.core_states[cr] {
-                            os::CoreState::MapDone {ult_id, vaddr, result: Ok(()), .. }
-                            |os::CoreState::UnmapWaiting { ult_id, vaddr }
-                            | os::CoreState::UnmapExecuting { ult_id, vaddr, .. }
-                            | os::CoreState::UnmapOpDone { ult_id, vaddr, .. }
-                            | os::CoreState::UnmapShootdownWaiting { ult_id, vaddr, .. } => {
-                                vaddr === ids
-                            },
-                            _ => false,
-                        };
-                    assert(critical_core != core);
-                    assert(s2.core_states.contains_key(critical_core));
-                }
-            }
+        assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
+            <==> s2.is_inflight_protect_vaddr_core(va, core));
+    };
+    assert(s1.core_states.contains_key(core));
+    assert(s1.inflight_mapunmap_vaddr().contains(vaddr));
+    assert forall|ids| s1.inflight_mapunmap_vaddr().contains(ids)
+        implies #[trigger] s2.inflight_mapunmap_vaddr().insert(vaddr).contains(ids)
+    by {
+        if ids != vaddr {
+            assert(s1.interp_pt_mem().contains_key(ids));
+            assert(s2.interp_pt_mem().contains_key(ids));
+            let critical_core = choose|cr|
+                s1.core_states.contains_key(cr) && match s1.core_states[cr] {
+                    os::CoreState::MapDone {ult_id, vaddr, result: Ok(()), .. }
+                    |os::CoreState::UnmapWaiting { ult_id, vaddr }
+                    | os::CoreState::UnmapExecuting { ult_id, vaddr, .. }
+                    | os::CoreState::UnmapOpDone { ult_id, vaddr, .. }
+                    | os::CoreState::UnmapShootdownWaiting { ult_id, vaddr, .. } => {
+                        vaddr === ids
+                    },
+                    _ => false,
+                };
+            assert(critical_core != core);
+            assert(s2.core_states.contains_key(critical_core));
         }
-        assert(s1.inflight_mapunmap_vaddr() =~= s2.inflight_mapunmap_vaddr().insert(vaddr));
-
-    } else {
-        assert(s1.interp_pt_mem() =~= s2.interp_pt_mem());
-        assert forall|ids| s1.inflight_mapunmap_vaddr().contains(ids) implies s2.inflight_mapunmap_vaddr().contains(ids) by {
-            if s1.inflight_mapunmap_vaddr().contains(ids) {
-                assert(!(ids === vaddr));
-                assert(s1.interp_pt_mem().contains_key(ids));
-                assert(s2.interp_pt_mem().contains_key(ids));
-                let unmap_core = choose|cr|
-                    s1.core_states.contains_key(cr) && match s1.core_states[cr] {
-                        os::CoreState::UnmapWaiting { ult_id, vaddr }
-                        | os::CoreState::UnmapExecuting { ult_id, vaddr, .. }
-                        | os::CoreState::UnmapOpDone { ult_id, vaddr, .. }
-                        | os::CoreState::UnmapShootdownWaiting { ult_id, vaddr, .. } => {
-                            vaddr === ids
-                        },
-                        _ => false,
-                    };
-                assert(unmap_core != core);
-                assert(s2.core_states.contains_key(unmap_core));
-            }
-        }
-        assert(s1.inflight_mapunmap_vaddr() =~= s2.inflight_mapunmap_vaddr());
     }
+    assert(s1.inflight_mapunmap_vaddr() =~= s2.inflight_mapunmap_vaddr().insert(vaddr));
     assert(s1.effective_mappings() =~= s2.effective_mappings());
 
     let ult_id = s1.core_states[core]->UnmapExecuting_ult_id;
