@@ -542,32 +542,51 @@ proof fn step_MemOp_refines(c: os::Constants, s1: os::State, s2: os::State, step
             assert(hlspec::step_MemOpNA(c.interp(), s1.interp(c), s2.interp(c), lbl));
         },
         rl1::Step::MemOpTLB { tlb_va } => {
-            // XXX: probably need case distinction on whether or not protect is inflight
-            admit();
+            assert forall|core, va|
+                c.valid_core(core) && #[trigger] s1.mmu@.tlbs[core].contains_key(va)
+                && s1.interp_pt_mem().contains_key(va as nat)
+                implies s1.mmu@.tlbs[core][va].frame == s1.interp_pt_mem()[va as nat].frame
+            by {
+                if s1.is_inflight_protect_vaddr(va as nat) {
+                    let prot_core = s1.choose_inflight_protect_vaddr_core(va as nat);
+                    assert(s1.is_inflight_protect_vaddr_core(va as nat, prot_core));
+                    assert(c.valid_core(prot_core));
+                    // match s1.core_states[prot_core] {
+                    //     CoreState::ProtectWaiting { flags, .. }
+                    //     | CoreState::ProtectExecuting { flags, result: None, .. } => {
+                    //     },
+                    //     CoreState::ProtectExecuting { flags, result: Some(Ok(pte)), .. }
+                    //     | CoreState::ProtectOpDone { flags, result: Ok(pte), .. }
+                    //     | CoreState::ProtectShootdownWaiting { flags, result: Ok(pte), .. } => {
+                    //         assert(s1.interp_pt_mem().contains_key(va as nat));
+                    //         assert(s1.interp_pt_mem()[va as nat] == PTE { flags, ..pte });
+                    //     },
+                    //     _ => {},
+                    // }
+                }
+            };
 
-            // assume(s1.TLB_interp_pt_mem_agree(c));
-            // assume(s1.TLB_unmap_agree(c));
             assert(s1.mmu@.tlbs[core].contains_key(tlb_va));
             assert(s1.interp_pt_mem().dom().union(s1.unmap_vaddr_set()).contains(tlb_va as nat));
             unmap_vaddr_set_le_extra_mappings_dom(c, s1);
             assert(s1.applied_mappings().contains_key(tlb_va as nat));
-            // assert(s1.applied_mappings()[tlb_va as nat] == s1.mmu@.tlbs[core][tlb_va]) by {
-            //     reveal(os::State::extra_mappings);
-            //     if s1.interp_pt_mem().contains_key(tlb_va as nat) {
-            //         assert(s1.interp_pt_mem()[tlb_va as nat] == s1.mmu@.tlbs[core][tlb_va]);
-            //         assert(s1.applied_mappings()[tlb_va as nat] == s1.mmu@.tlbs[core][tlb_va]);
-            //     } else {
-            //         assert(s1.unmap_vaddr_set().contains(tlb_va as nat));
-            //         let core1 = choose|core: Core| s1.is_unmap_vaddr_core(core, tlb_va as nat);
-            //         assert(c.valid_core(core1));
-            //         assert(s1.is_unmap_vaddr_core(core1, tlb_va as nat));
-            //         assert(s1.core_states[core1].PTE() == s1.mmu@.tlbs[core][tlb_va]);
-            //         vaddr_distinct(c, s1);
-            //         assert(s1.core_states[core1].PTE() == s1.extra_mapping_for_vaddr(tlb_va as nat));
-            //         assert(s1.extra_mapping_for_vaddr(tlb_va as nat) == s1.extra_mappings()[tlb_va as nat]);
-            //         assert(s1.applied_mappings()[tlb_va as nat] == s1.mmu@.tlbs[core][tlb_va]);
-            //     }
-            // }
+            assert(s1.applied_mappings()[tlb_va as nat].frame == s1.mmu@.tlbs[core][tlb_va].frame) by {
+                reveal(os::State::extra_mappings);
+                if s1.interp_pt_mem().contains_key(tlb_va as nat) {
+                    // assert(s1.interp_pt_mem()[tlb_va as nat] == s1.mmu@.tlbs[core][tlb_va]);
+                    // assert(s1.applied_mappings()[tlb_va as nat] == s1.mmu@.tlbs[core][tlb_va]);
+                } else {
+                    assert(s1.unmap_vaddr_set().contains(tlb_va as nat));
+                    let core1 = choose|core: Core| s1.is_unmap_vaddr_core(core, tlb_va as nat);
+                    assert(c.valid_core(core1));
+                    assert(s1.is_unmap_vaddr_core(core1, tlb_va as nat));
+                    assert(s1.core_states[core1].PTE() == s1.mmu@.tlbs[core][tlb_va]);
+                    vaddr_distinct(c, s1);
+                    assert(s1.core_states[core1].PTE() == s1.extra_mapping_for_vaddr(tlb_va as nat));
+                    assert(s1.extra_mapping_for_vaddr(tlb_va as nat) == s1.extra_mappings()[tlb_va as nat]);
+                    assert(s1.applied_mappings()[tlb_va as nat] == s1.mmu@.tlbs[core][tlb_va]);
+                }
+            }
 
 
             let d = c.interp();
@@ -602,12 +621,10 @@ proof fn step_MemOp_refines(c: os::Constants, s1: os::State, s2: os::State, step
             match op {
                 MemOp::Store { new_value, result } => {
                     if paddr < d.phys_mem_size && !pte.flags.is_supervisor && pte.flags.is_writable {
-            admit();
                         assert(result is Ok);
                         interp_vmem_update_range(c, s1, base, pte, vaddr as int, op.op_size() as int, new_value);
                         assert(s2.interp(c).mem === update_range(s1.interp(c).mem, vaddr as int, new_value));
                     } else {
-            admit();
                         assert(result is Pagefault);
                         assert(s2.interp(c).mem === s1.interp(c).mem);
                     }
@@ -615,7 +632,6 @@ proof fn step_MemOp_refines(c: os::Constants, s1: os::State, s2: os::State, step
                 MemOp::Load { is_exec, result, .. } => {
                     assert(s2.interp(c).mem === s1.interp(c).mem);
                     if paddr < d.phys_mem_size && !pte.flags.is_supervisor && (is_exec ==> !pte.flags.disable_execute) {
-            admit();
                         assert(result is Value);
                         interp_vmem_subrange(c, s1, base, pte, vaddr as int, op.op_size() as int);
                         assert(result->0 == s1.interp(c).mem.subrange(vaddr as int, vaddr + op.op_size() as int));
@@ -624,7 +640,6 @@ proof fn step_MemOp_refines(c: os::Constants, s1: os::State, s2: os::State, step
                     }
                 }
             }
-            admit();
 
             let tlb_pte = s1.mmu@.tlbs[core][tlb_va];
             if s1.effective_mappings().contains_key(tlb_va as nat)
@@ -635,24 +650,65 @@ proof fn step_MemOp_refines(c: os::Constants, s1: os::State, s2: os::State, step
                 assert(hlspec::step_MemOp(c.interp(), s1.interp(c), s2.interp(c), hl_pte, lbl));
             } else {
                 if s1.effective_mappings().contains_key(tlb_va as nat) {
+                    assert(s1.effective_mappings()[tlb_va as nat] != tlb_pte);
+
                     assert(!s1.inflight_mapunmap_vaddr().contains(tlb_va as nat));
                     assert(s1.inflight_protect_params().contains_key(tlb_va as nat));
                     assert(s1.is_inflight_protect_vaddr(tlb_va as nat));
                     let prot_core = s1.choose_inflight_protect_vaddr_core(tlb_va as nat);
                     assert(s1.is_inflight_protect_vaddr_core(tlb_va as nat, prot_core));
-                    assume(forall|core: Core, v: usize|
-                                #[trigger] c.valid_core(core)
-                                && #[trigger] s1.mmu@.tlbs[core].contains_key(v)
-                                && s1.interp_pt_mem().contains_key(v as nat)
-                                    ==> (s1.mmu@.tlbs[core][v] == s1.interp_pt_mem()[v as nat]
-                                        || s1.is_inflight_protect_vaddr(v as nat)
-                                            && (s1.inflight_protect_core_get_pte(s1.choose_inflight_protect_vaddr_core(v as nat)) == s1.mmu@.tlbs[core][v])
-                                        ));
-                    assert(tlb_pte == s1.interp_pt_mem()[tlb_va as nat]);
+                    assert(c.valid_core(prot_core));
+                    // assume(forall|core: Core, v: usize|
+                    //             #[trigger] c.valid_core(core)
+                    //             && #[trigger] s1.mmu@.tlbs[core].contains_key(v)
+                    //             && s1.interp_pt_mem().contains_key(v as nat)
+                    //                 ==> (s1.mmu@.tlbs[core][v] == s1.interp_pt_mem()[v as nat]
+                    //                     || s1.is_inflight_protect_vaddr(v as nat)
+                    //                         && (s1.inflight_protect_core_get_pte(s1.choose_inflight_protect_vaddr_core(v as nat)) == s1.mmu@.tlbs[core][v])
+                    //                    ));
+
+                    // match s1.core_states[prot_core] {
+                    //     CoreState::ProtectWaiting { vaddr, .. }
+                    //     | CoreState::ProtectExecuting { vaddr, result: None, .. } => {
+                    //         assert(tlb_pte == s1.interp_pt_mem()[tlb_va as nat]);
+                    //         // assert(tlb_pte == s1.core_states[prot_core].PTE());
+                    //     },
+                    //     CoreState::ProtectExecuting { vaddr, flags, result: Some(Ok(pte)), .. }
+                    //     | CoreState::ProtectOpDone { vaddr, flags, result: Ok(pte), .. }
+                    //     | CoreState::ProtectShootdownWaiting { vaddr, flags, result: Ok(pte), .. } => {
+                    //         assert(vaddr == tlb_va);
+                    //         assert(s1.interp_pt_mem().contains_key(tlb_va as nat));
+                    //         assert(s1.interp_pt_mem()[tlb_va as nat] == PTE { flags, ..pte });
+                    //         assert(s1.inflight_protect_core_get_pte(prot_core) == s1.interp_pt_mem()[vaddr]);
+                    //         assert(tlb_pte == pte);
+                    //
+                    //         assert(s1.effective_mappings()[tlb_va as nat] == PTE { flags, ..pte });
+                    //         assert(s1.interp_pt_mem()[tlb_va as nat] == PTE { flags, ..pte });
+                    //         assert(tlb_pte != PTE { flags, ..pte });
+                    //
+                    //         admit();
+                    //         // assert(s1.effective_mappings()[tlb_va as nat] == tlb_pte);
+                    //         // assert(false);
+                    //
+                    //         // if tlb_pte == (PTE { flags, ..pte }) {
+                    //         //     assert(false);
+                    //         // } else {
+                    //         //     assert(tlb_pte == pte);
+                    //         //     // assert(tlb_pte == s1.interp_pt_mem()[tlb_va as nat]);
+                    //         // }
+                    //         // s1.mmu@.tlbs[core][tlb_va as nat] == PTE { flags, ..pte }
+                    //         //     || s1.mmu@.tlbs[core][tlb_va as nat] == pte,
+                    //         assert(tlb_pte == s1.interp_pt_mem()[tlb_va as nat]);
+                    //     },
+                    //     _ => {},
+                    // }
+                    // admit();
+                    assert(tlb_pte.frame == s1.interp_pt_mem()[tlb_va as nat].frame);
+            // admit();
                     // XXX: Invariants:
                     // * pending_protects is PTE() (after change)
                     // * tlb entries are either in interp_pt_mem or in pending_protects
-                    assume(tlb_pte == s1.core_states[core].PTE());
+                    // assume(tlb_pte == s1.core_states[core].PTE());
                     assert(
                         s1.interp(c).vaddr_mapping_is_being_modified(c.interp(), vaddr)
                         && s1.interp(c).vaddr_mapping_is_being_modified_choose(c.interp(), vaddr)
@@ -1838,7 +1894,7 @@ proof fn interp_vmem_subrange(c: os::Constants, s: os::State, base: nat, pte: PT
     requires
         no_overlaps(s.applied_mappings()),
         s.applied_mappings().contains_key(base),
-        s.applied_mappings()[base] == pte,
+        s.applied_mappings()[base].frame == pte.frame,
         base <= vaddr,
         size >= 0,
         vaddr + size <= base + pte.frame.size,
@@ -1863,14 +1919,14 @@ proof fn interp_vmem_subrange(c: os::Constants, s: os::State, base: nat, pte: PT
 
             let (base0, pte0) = os::State::base_and_pte_for_vaddr(s.applied_mappings(), vaddr);
 
-            assert(s.applied_mappings().contains_pair(base, pte));
+            // assert(s.applied_mappings().contains_pair(base, pte));
             assert(between(v as nat, base, base + pte.frame.size));
 
             assert(s.applied_mappings().contains_pair(base0, pte0)
               && between(v as nat, base0, base0 + pte0.frame.size));
 
             assert(base0 == base);
-            assert(pte0 == pte);
+            assert(pte0.frame == pte.frame);
 
             assert(s.interp_vmem(c)[v] == s.mmu@.phys_mem[p]);
         }
@@ -1884,7 +1940,7 @@ proof fn interp_vmem_update_range(c: os::Constants, s: os::State, base: nat, pte
         bounds(c, s.applied_mappings()),
         s.mmu@.phys_mem.len() == c.common.range_mem.1,
         s.applied_mappings().contains_key(base),
-        s.applied_mappings()[base] == pte,
+        s.applied_mappings()[base].frame == pte.frame,
         base <= vaddr,
         size >= 0,
         vaddr + size <= base + pte.frame.size,
@@ -1911,14 +1967,14 @@ proof fn interp_vmem_update_range(c: os::Constants, s: os::State, base: nat, pte
         let (base0, pte0) = os::State::base_and_pte_for_vaddr(s.applied_mappings(), idx);
 
         if base <= idx < base + pte.frame.size {
-            assert(s.applied_mappings().contains_pair(base, pte));
+            // assert(s.applied_mappings().contains_pair(base, pte));
             assert(between(idx as nat, base, base + pte.frame.size));
 
             assert(s.applied_mappings().contains_pair(base0, pte0)
               && between(idx as nat, base0, base0 + pte0.frame.size));
 
             assert(base == base0);
-            assert(pte == pte0);
+            assert(pte.frame == pte0.frame);
 
             assert(b1[idx] == b2[idx]);
         } else {

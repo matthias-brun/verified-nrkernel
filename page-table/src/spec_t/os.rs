@@ -1532,18 +1532,21 @@ impl State {
     }
 
     pub open spec fn inv_protect_result(self, c: Constants) -> bool {
-        forall|core: Core| c.valid_core(core) ==>
+        forall|core: Core| #[trigger] c.valid_core(core) ==>
             match self.core_states[core] {
                 // succeeded
-                CoreState::ProtectExecuting { vaddr, result: Some(Ok(pte)), .. }
-                | CoreState::ProtectOpDone { vaddr, result: Ok(pte), .. }
-                | CoreState::ProtectShootdownWaiting { vaddr, result: Ok(pte), .. } => {
+                CoreState::ProtectExecuting { vaddr, flags, result: Some(Ok(pte)), .. }
+                | CoreState::ProtectOpDone { vaddr, flags, result: Ok(pte), .. }
+                | CoreState::ProtectShootdownWaiting { vaddr, flags, result: Ok(pte), .. } => {
                     &&& self.interp_pt_mem().contains_key(vaddr)
+                    &&& self.interp_pt_mem()[vaddr] == PTE { flags, ..pte }
                 },
                 // failed
                 CoreState::ProtectOpDone { vaddr, result: Err(_), .. }
                     => !self.interp_pt_mem().contains_key(vaddr),
-                CoreState::ProtectShootdownWaiting { result: Err(_), .. } => false,
+                // unreachable
+                CoreState::ProtectExecuting { result: Some(Err(_)), .. }
+                | CoreState::ProtectShootdownWaiting { result: Err(_), .. } => false,
                 _ => true,
             }
     }
@@ -1623,7 +1626,27 @@ impl State {
             #[trigger] c.valid_core(core)
             && #[trigger] self.mmu@.tlbs[core].contains_key(v)
             && self.interp_pt_mem().contains_key(v as nat)
+            && !self.is_inflight_protect_vaddr(v as nat)
             ==> self.mmu@.tlbs[core][v] == self.interp_pt_mem()[v as nat]
+    }
+
+    pub open spec fn TLB_protect_agree(self, c: Constants) -> bool {
+        forall|core: Core, core2: Core, v: usize|
+            #[trigger] c.valid_core(core)
+            && #[trigger] self.mmu@.tlbs[core].contains_key(v)
+            && #[trigger] c.valid_core(core2)
+            // && self.is_inflight_protect_vaddr_core(v as nat, core2)
+            ==> match self.core_states[core2] {
+                CoreState::ProtectWaiting { vaddr, .. }
+                | CoreState::ProtectExecuting { vaddr, result: None, .. }
+                    => self.mmu@.tlbs[core][v] == self.interp_pt_mem()[vaddr],
+                CoreState::ProtectExecuting { vaddr, flags, result: Some(Ok(pte)), .. }
+                | CoreState::ProtectOpDone { vaddr, flags, result: Ok(pte), .. }
+                | CoreState::ProtectShootdownWaiting { vaddr, flags, result: Ok(pte), .. }
+                    => self.mmu@.tlbs[core][v] == self.interp_pt_mem()[vaddr]
+                        || self.mmu@.tlbs[core][v] == pte,
+                _ => true,
+            }
     }
 
     pub open spec fn TLB_unmap_agree(self, c: Constants) -> bool {
@@ -1651,15 +1674,11 @@ impl State {
         &&& self.successful_IPI(c)
         &&& self.TLB_dom_subset_of_pt_and_inflight_unmap_vaddr(c)
         &&& self.all_cores_nonpos_before_shootdown(c)
-        // XXX: invs below are different in protect:
-        // &&& (if self.mmu@.polarity is Protect {
-        //     &&& true
-        // } else {
+        &&& self.TLB_unmap_agree(c)
         &&& self.successful_invlpg(c)
         &&& self.TLB_interp_pt_mem_agree(c)
-        &&& self.TLB_unmap_agree(c)
         &&& self.pending_unmap_is_unmap_vaddr(c)
-        // })
+        &&& self.TLB_protect_agree(c)
     }
 
     pub open spec fn pending_unmap_is_unmap_vaddr(self, c: Constants) -> bool {
