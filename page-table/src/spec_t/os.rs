@@ -1519,23 +1519,23 @@ impl State {
             }) ==> exists|pt| PT::inv_and_nonempty(wtok, pt)
     }
 
-    pub open spec fn inv_protect_frame_consistent(self, c: Constants) -> bool {
-        forall|core: Core| c.valid_core(core) ==>
-            match self.core_states[core] {
-                CoreState::ProtectExecuting { vaddr, result: Some(Ok(pte)), .. }
-                | CoreState::ProtectOpDone { vaddr, result: Ok(pte), .. }
-                | CoreState::ProtectShootdownWaiting { vaddr, result: Ok(pte), .. } => {
-                    &&& self.interp_pt_mem()[vaddr].frame == pte.frame
-                },
-                _ => true,
-            }
-    }
+    // pub open spec fn inv_protect_frame_consistent(self, c: Constants) -> bool {
+    //     forall|core: Core| c.valid_core(core) ==>
+    //         match self.core_states[core] {
+    //             CoreState::ProtectExecuting { vaddr, result: Some(Ok(pte)), .. }
+    //             | CoreState::ProtectOpDone { vaddr, result: Ok(pte), .. }
+    //             | CoreState::ProtectShootdownWaiting { vaddr, result: Ok(pte), .. } => {
+    //                 &&& self.interp_pt_mem()[vaddr].frame == pte.frame
+    //             },
+    //             _ => true,
+    //         }
+    // }
 
     pub open spec fn inv_protect_frame_unchanged(self, c: Constants) -> bool {
-        &&& forall|va| #[trigger] self.inflight_protect_params().contains_key(va)
+        forall|va| #[trigger] self.inflight_protect_params().contains_key(va)
             ==> self.inflight_protect_params()[va].frame == self.interp_pt_mem()[va].frame
         // XXX: might want to make this pretty:
-        &&& self.inv_protect_frame_consistent(c)
+        // &&& self.inv_protect_frame_consistent(c)
     }
 
     pub open spec fn inv_protect_vaddr_same_core(self, c: Constants) -> bool {
