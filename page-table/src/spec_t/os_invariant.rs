@@ -705,7 +705,6 @@ pub proof fn next_step_preserves_inv_shootdown(c: os::Constants, s1: os::State, 
 
     match step {
         os::Step::ProtectInitiateShootdown { .. } => {
-            
         },
         _ => {},
     }
@@ -1181,7 +1180,6 @@ pub proof fn next_step_preserves_overlap_mem_inv(
 )
     requires
         s1.inv_protect_frame_unchanged(c),
-        s1.inv_protect_frame_consistent(c),
         s1.inv_basic(c),
         s1.inv_mmu(c),
         s1.inv_overlapping_mem(c),
@@ -1613,7 +1611,6 @@ pub proof fn next_step_MapStart_preserves_overlap_mem_inv(
     lbl: RLbl,
 )
     requires
-        s1.inv_protect_frame_consistent(c),
         s1.inv_basic(c),
         s1.inv_overlapping_mem(c),
         s2.inv_basic(c),
