@@ -228,24 +228,46 @@ pub proof fn next_step_preserves_inv_protect_vaddr_same_core(c: os::Constants, s
 
     match step {
         os::Step::UnmapOpChange { core, paddr, value } => {
-            assert forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
-                implies s2.is_inflight_protect_vaddr_core(va, core)
+            assert forall|va, core2| s1.is_inflight_protect_vaddr_core(va, core2)
+                implies s2.is_inflight_protect_vaddr_core(va, core2)
             by {
-                // XXX: easy, inflight protect and unmap don't overlap, so this mapping can't
+                assert(core2 != core);
+                // inflight protect and unmap don't overlap, so this mapping can't
                 // have been removed by the UnmapOpChange step
-                assume(s2.interp_pt_mem().contains_key(va));
+                assert( !overlap(
+                    MemRegion {
+                        base: s1.core_states[core].vaddr(),
+                        size: s1.core_states[core].pte_size(s1.interp_pt_mem()),
+                    },
+                    MemRegion {
+                        base: s1.core_states[core2].vaddr(),
+                        size: s1.core_states[core2].pte_size(s1.interp_pt_mem()),
+                },));
+                assert(s1.core_states[core2].vaddr() != s1.core_states[core].vaddr());
+                assert(s2.interp_pt_mem().contains_key(va));
             };
             assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
                 <==> s2.is_inflight_protect_vaddr_core(va, core));
             assert(s2.inv_protect_vaddr_same_core(c));
         },
         os::Step::MapOpChange { core, paddr, value } => {
-            assert forall|va, core| s2.is_inflight_protect_vaddr_core(va, core)
-                implies s1.is_inflight_protect_vaddr_core(va, core)
+            assert forall|va, core2| s2.is_inflight_protect_vaddr_core(va, core2)
+                implies s1.is_inflight_protect_vaddr_core(va, core2)
             by {
-                // XXX: easy, inflight protect and map don't overlap, so this mapping can't
-                // have been created by the MapOpChange step
-                assume(s1.interp_pt_mem().contains_key(va));
+                assert(core2 != core);
+                // inflight protect and unmap don't overlap, so this mapping can't
+                // have been removed by the MapOpChange step
+                assert( !overlap(
+                    MemRegion {
+                        base: s1.core_states[core].vaddr(),
+                        size: s1.core_states[core].pte_size(s1.interp_pt_mem()),
+                    },
+                    MemRegion {
+                        base: s1.core_states[core2].vaddr(),
+                        size: s1.core_states[core2].pte_size(s1.interp_pt_mem()),
+                },));
+                assert(s1.core_states[core2].vaddr() != s1.core_states[core].vaddr());
+                assert(s2.interp_pt_mem().contains_key(va));
             };
             assert(s2.inv_protect_vaddr_same_core(c));
         },
@@ -324,12 +346,23 @@ pub proof fn next_step_preserves_inv_protect_frame_unchanged(c: os::Constants, s
             // assume(!rl1::step_WriteNonneg(s1.mmu@, s2.mmu@, c.common, step.mmu_lbl(s1, lbl)));
 
             assert(s1.inflight_protect_params() =~= s2.inflight_protect_params()) by {
-                assert forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
-                    implies s2.is_inflight_protect_vaddr_core(va, core)
+                assert forall|va, core2| s1.is_inflight_protect_vaddr_core(va, core2)
+                    implies s2.is_inflight_protect_vaddr_core(va, core2)
                 by {
-                    // XXX: easy, inflight protect and unmap don't overlap, so this mapping can't
+                    assert(core2 != core);
+                    // inflight protect and unmap don't overlap, so this mapping can't
                     // have been removed by the UnmapOpChange step
-                    assume(s2.interp_pt_mem().contains_key(va));
+                    assert( !overlap(
+                        MemRegion {
+                            base: s1.core_states[core].vaddr(),
+                            size: s1.core_states[core].pte_size(s1.interp_pt_mem()),
+                        },
+                        MemRegion {
+                            base: s1.core_states[core2].vaddr(),
+                            size: s1.core_states[core2].pte_size(s1.interp_pt_mem()),
+                    },));
+                    assert(s1.core_states[core2].vaddr() != s1.core_states[core].vaddr());
+                    assert(s2.interp_pt_mem().contains_key(va));
                 };
                 assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
                     <==> s2.is_inflight_protect_vaddr_core(va, core));
@@ -342,12 +375,23 @@ pub proof fn next_step_preserves_inv_protect_frame_unchanged(c: os::Constants, s
                     ==> s2.core_states[core] == s1.core_states[core]);
                 assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
                     ==> s2.is_inflight_protect_vaddr_core(va, core));
-                assert forall|va, core| s2.is_inflight_protect_vaddr_core(va, core)
-                    implies s1.is_inflight_protect_vaddr_core(va, core)
+                assert forall|va, core2| s2.is_inflight_protect_vaddr_core(va, core2)
+                    implies s1.is_inflight_protect_vaddr_core(va, core2)
                 by {
-                    // XXX: easy, inflight protect and map don't overlap, so this mapping can't
-                    // have been created by the MapOpChange step
-                    assume(s1.interp_pt_mem().contains_key(va));
+                    assert(core2 != core);
+                    // inflight protect and unmap don't overlap, so this mapping can't
+                    // have been removed by the MapOpChange step
+                    assert( !overlap(
+                        MemRegion {
+                            base: s1.core_states[core].vaddr(),
+                            size: s1.core_states[core].pte_size(s1.interp_pt_mem()),
+                        },
+                        MemRegion {
+                            base: s1.core_states[core2].vaddr(),
+                            size: s1.core_states[core2].pte_size(s1.interp_pt_mem()),
+                    },));
+                    assert(s1.core_states[core2].vaddr() != s1.core_states[core].vaddr());
+                    assert(s2.interp_pt_mem().contains_key(va));
                 };
             };
             assert(s2.inv_protect_frame_unchanged(c));
@@ -661,7 +705,7 @@ pub proof fn next_step_preserves_inv_shootdown(c: os::Constants, s1: os::State, 
 
     match step {
         os::Step::ProtectInitiateShootdown { .. } => {
-            admit();
+            
         },
         _ => {},
     }
