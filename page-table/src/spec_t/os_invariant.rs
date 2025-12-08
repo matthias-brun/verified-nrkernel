@@ -1126,6 +1126,7 @@ pub proof fn next_step_preserves_inv_tlb(
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Proof of overlapping virtual memory Invariants
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 #[verifier(spinoff_prover)]
 pub proof fn next_step_preserves_overlap_mem_inv(
     c: os::Constants,
@@ -1162,48 +1163,7 @@ pub proof fn next_step_preserves_overlap_mem_inv(
     match step {
         // Map steps
         os::Step::MapStart { core } => {
-            assert(c.valid_core(core));
-            let thread_id = lbl->MapStart_thread_id;
-            let vaddr = lbl->MapStart_vaddr;
-            let pte = lbl->MapStart_pte;
-            let corestate = os::CoreState::MapWaiting { ult_id: thread_id, vaddr, pte };
-            lemma_insert_no_overlap_preserves_no_overlap(
-                c,
-                s1.core_states,
-                s1.interp_pt_mem(),
-                core,
-                corestate,
-            );
-            lemma_unique_and_overlap_values_implies_overlap_vmem(c, s2);
-            assert forall|core1: Core, core2: Core|
-                    (c.valid_core(core1) && c.valid_core(core2)
-                        && s2.core_states[core1].has_pte(s2.interp_pt_mem()) && s2.core_states[core2].has_pte(s2.interp_pt_mem())
-                        && overlap(
-                        MemRegion {
-                            base: s2.core_states[core1].paddr(s2.interp_pt_mem()),
-                            size: s2.core_states[core1].pte_size(s2.interp_pt_mem()),
-                        },
-                        MemRegion {
-                            base: s2.core_states[core2].paddr(s2.interp_pt_mem()),
-                            size: s2.core_states[core2].pte_size(s2.interp_pt_mem()),
-                        },
-                    )) implies core1 === core2
-            by {
-                if core1 == core || core2 == core {
-                    let other = if core1 != core { core1 } else { core2 };
-                    assert(!os::candidate_mapping_overlaps_inflight_pmem(s1.interp_pt_mem(), s1.core_states.values(), pte));
-                    if other != core {
-                        assert(s2.core_states[other] == s1.core_states[other]);
-                        assert(s1.core_states.contains_key(other));
-                        assert(s1.core_states.values().contains(s2.core_states[other]));
-                        assert(os::candidate_mapping_overlaps_inflight_pmem(s1.interp_pt_mem(), s1.core_states.values(), pte));
-                        assert(false);
-                    }
-                }
-            }
-            assert(s2.inv_inflight_pmem_no_overlap_inflight_pmem(c));
-            assert(s2.inv_existing_map_no_overlap_existing_vmem(c));
-            assert(s2.inv_overlapping_mem(c));
+            next_step_MapStart_preserves_overlap_mem_inv(c, s1, s2, core, lbl);
         },
         os::Step::MapOpStart { core } => {
             let vaddr = s1.core_states[core]->MapWaiting_vaddr;
@@ -1300,7 +1260,7 @@ pub proof fn next_step_preserves_overlap_mem_inv(
                             assert(s2.core_states[other] == s1.core_states[other]);
                             assert(s1.core_states.contains_key(other));
                             assert(s1.core_states.values().contains(s2.core_states[other]));
-                            assert(false); //jinstable?
+                            assert(false); 
                         }
                     }
                 }
@@ -1599,6 +1559,67 @@ pub proof fn next_step_preserves_overlap_mem_inv(
             assert(s2.inv_overlapping_mem(c));
         },
     }
+}
+
+pub proof fn next_step_MapStart_preserves_overlap_mem_inv(
+    c: os::Constants,
+    s1: os::State,
+    s2: os::State,
+    core: Core,
+    lbl: RLbl,
+)
+    requires
+        s1.inv_protect_frame_consistent(c),
+        s1.inv_basic(c),
+        s1.inv_overlapping_mem(c),
+        s2.inv_basic(c),
+        s1.sound, s2.sound,
+        os::step_MapStart(c, s1, s2, core, lbl),
+    ensures
+        s2.inv_overlapping_mem(c)
+{
+    assert(c.valid_core(core));
+    let thread_id = lbl->MapStart_thread_id;
+    let vaddr = lbl->MapStart_vaddr;
+    let pte = lbl->MapStart_pte;
+    let corestate = os::CoreState::MapWaiting { ult_id: thread_id, vaddr, pte };
+    lemma_insert_no_overlap_preserves_no_overlap(
+        c,
+        s1.core_states,
+        s1.interp_pt_mem(),
+        core,
+        corestate,
+    );
+    lemma_unique_and_overlap_values_implies_overlap_vmem(c, s2);
+    assert forall|core1: Core, core2: Core|
+        (c.valid_core(core1) && c.valid_core(core2)
+        && s2.core_states[core1].has_pte(s2.interp_pt_mem()) && s2.core_states[core2].has_pte(s2.interp_pt_mem())
+        && overlap(
+            MemRegion {
+                base: s2.core_states[core1].paddr(s2.interp_pt_mem()),
+                size: s2.core_states[core1].pte_size(s2.interp_pt_mem()),
+            },
+            MemRegion {
+                base: s2.core_states[core2].paddr(s2.interp_pt_mem()),
+                size: s2.core_states[core2].pte_size(s2.interp_pt_mem()),
+                    },
+        )) implies core1 === core2
+    by {
+        if core1 == core || core2 == core {
+            let other = if core1 != core { core1 } else { core2 };
+            assert(!os::candidate_mapping_overlaps_inflight_pmem(s1.interp_pt_mem(), s1.core_states.values(), pte));
+            if other != core {
+                assert(s2.core_states[other] == s1.core_states[other]);
+                assert(s1.core_states.contains_key(other));
+                assert(s1.core_states.values().contains(s2.core_states[other]));
+                assert(os::candidate_mapping_overlaps_inflight_pmem(s1.interp_pt_mem(), s1.core_states.values(), pte));
+                assert(false);
+            }
+        }
+    }
+    assert(s2.inv_inflight_pmem_no_overlap_inflight_pmem(c));
+    assert(s2.inv_existing_map_no_overlap_existing_vmem(c));
+    assert(s2.inv_overlapping_mem(c));
 }
 
 #[verifier(spinoff_prover)]
