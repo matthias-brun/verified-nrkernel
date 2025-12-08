@@ -1135,6 +1135,7 @@ pub proof fn next_step_preserves_overlap_mem_inv(
     lbl: RLbl,
 )
     requires
+        s1.inv_protect_frame_consistent(c),
         s1.inv_basic(c),
         s1.inv_mmu(c),
         s1.inv_overlapping_mem(c),
@@ -1288,9 +1289,7 @@ pub proof fn next_step_preserves_overlap_mem_inv(
                             },
                         )) implies core1 === core2
                 by {
-                    // XXX: This proof broke when I added the !is_protecting conjunct in
                     // inv_inflight_pmem_no_overlap_existing_pmem
-                    admit();
                     if core1 == core || core2 == core {
                         let other = if core1 != core { core1 } else { core2 };
                         assert(!os::candidate_mapping_overlaps_inflight_vmem(s1.interp_pt_mem(), s1.core_states.values(), vaddr, pte_size));
