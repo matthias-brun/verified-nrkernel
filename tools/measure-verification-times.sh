@@ -17,3 +17,7 @@ verus --crate-type=lib  \
       --output-json \
       --num-threads 32 \
     page-table/src/lib.rs > "verification-times-${GIT_HASH}.json"
+
+python3 tools/plot-verification-times.py "verification-times-${GIT_HASH}.json"
+
+
