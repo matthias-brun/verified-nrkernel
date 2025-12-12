@@ -21,9 +21,7 @@ use vstd::prelude::Tracked;
 use crate::spec_t::mmu::defs::{ PageTableEntryExec, MemRegionExec };
 // #[cfg(feature="linuxmodule")]
 use crate::spec_t::os_code_vc::{ Token, CodeVC };
-verus!{
 
-global size_of usize == 8;
 
 // Ignore in line count because this is only for the Linux integration.
 // $line_count$${$
@@ -38,6 +36,10 @@ use core::panic::PanicInfo;
 fn panic(_info: &PanicInfo) -> ! {
     loop {}
 }
+
+verus!{
+
+global size_of usize == 8;
 
 #[cfg(feature="hlspec_user")]
 pub mod hlspec_user;

@@ -2046,7 +2046,7 @@ proof fn step_MapOpChange_refines(c: os::Constants, s1: os::State, s2: os::State
     let ult_id = s1.core_states[core]->MapExecuting_ult_id;
     let vaddr = s1.core_states[core]->MapExecuting_vaddr;
     let pte = s1.core_states[core]->MapExecuting_pte;
-    let result: std::result::Result<(), ()> = Ok(());
+    let result: core::result::Result<(), ()> = Ok(());
 
     //First goal prove soundess
     assert(hl_s2.sound);

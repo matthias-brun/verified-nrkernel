@@ -380,7 +380,14 @@ pub mod code {
 
     /// the shootdown acks counter
     #[cfg(feature="linuxmodule")]
-    exec static SHOOTDOWN_ACKS: [AtomicUsize; NUM_CORES] = [ const { AtomicUsize::new(0) }; NUM_CORES];
+    exec static SHOOTDOWN_ACKS: [AtomicUsize; NUM_CORES] = core_array_initializer();
+
+
+    #[cfg(feature="linuxmodule")]
+    #[verifier(external_body)]
+    pub const exec fn core_array_initializer() -> [AtomicUsize; NUM_CORES] {
+        [ const { AtomicUsize::new(0) }; NUM_CORES]
+    }
 
     /// acquires the page table spinlock
     #[cfg(not(feature="linuxmodule"))]
@@ -443,7 +450,8 @@ pub mod code {
         fn get_num_cpus() -> u32;
 
         // handler here is a typedef void (*smp_call_func_t)(void *info);
-        fn smp_call_function(handler: fn(Tracked<os_code_vc::Token>, usize)-> Tracked<os_code_vc::Token>, info: usize, wait: u32) ;
+        // fn smp_call_function(handler: fn(Tracked<os_code_vc::Token>, usize)-> Tracked<os_code_vc::Token>, info: usize, wait: u32) ;
+        fn smp_call_function(handler: u64, info: usize, wait: u32) ;
 
         // CPU relax function for spin loops
         fn do_cpu_relax();
@@ -478,7 +486,7 @@ pub mod code {
 
             // unsafe { print("Send IPIs to all CPUs:\0".as_ptr() as *const c_char, vaddr); }
 
-            unsafe { smp_call_function(PTImpl::handle_shootdown_ipi, vaddr, 0); }
+            unsafe { smp_call_function(PTImpl::handle_shootdown_ipi as u64 , vaddr, 0); }
         }
 
         // #[cfg(not(feature="linuxmodule"))]
