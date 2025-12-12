@@ -1,2 +1,4 @@
 .verus
 doc
+lib.d
+verification-times-*.json
