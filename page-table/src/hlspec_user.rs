@@ -964,7 +964,7 @@ mod program_three {
     
         let s1 = State {
             mem: seq![arbitrary(); crate::spec_t::mmu::defs::MAX_BASE],
-            thread_state: map![0 => ThreadState::Idle,],
+            thread_state: map![0 => ThreadState::Idle, 1 => ThreadState::Idle,],
             mappings: Map::empty(),
             sound: true,
         };
@@ -988,7 +988,7 @@ mod program_three {
         };
 
         let s2s3rlbl = RLbl::MapEnd { thread_id: 0, vaddr: pte1_vaddr, result: Ok(()) };
-        assert(next_step(c, s1, s2, Step::MapEnd, s2s3rlbl));
+        assert(next_step(c, s2, s3, Step::MapEnd, s2s3rlbl));
 
         let s4 = State {
             thread_state: s3.thread_state.insert(1, ThreadState::Unmap { vaddr: pte1_vaddr, pte: Some(pte1) }, ),
@@ -999,7 +999,7 @@ mod program_three {
         assert(next_step(c, s3, s4, Step::UnmapStart, RLbl::UnmapStart { thread_id: 1, vaddr: pte1_vaddr }));
 
         let s5 = State {
-            thread_state: s3.thread_state.insert(1, ThreadState::Idle, ),
+            thread_state: s4.thread_state.insert(1, ThreadState::Idle, ),
             ..s4
         };
 
@@ -1007,15 +1007,14 @@ mod program_three {
         
         let s6 = s5;
 
-        assert(next_step(c, s4, s5, Step::UnmapEnd, RLbl::UnmapEnd { thread_id: 1, vaddr: pte1_vaddr, result: Ok(()) }));
-        let s3s4op = MemOp::Store { new_value: seq![10, 0, 0, 0], result: StoreResult::Pagefault };
-        assert(s3s4op.op_size() == 4);
+        let s5s6op = MemOp::Store { new_value: seq![10, 0, 0, 0], result: StoreResult::Pagefault };
+        assert(s5s6op.op_size() == 4);
 
-        assert(next_step(c, s5, s6, Step::MemOp { pte: Some((pte1_vaddr, pte1)) },
+        assert(next_step(c, s5, s6, Step::MemOp { pte: None },
             RLbl::MemOp {
                 thread_id: 1,
                 vaddr: pte1_vaddr,
-                op: s3s4op,
+                op: s5s6op,
             },
         ));
     } 
