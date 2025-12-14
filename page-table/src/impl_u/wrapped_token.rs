@@ -109,7 +109,7 @@ impl WrappedTokenView {
             let l1_idx = mul(l1_bits!(vaddr), WORD_SIZE);
             let l2_idx = mul(l2_bits!(vaddr), WORD_SIZE);
             let l3_idx = mul(l3_bits!(vaddr), WORD_SIZE);
-            assert(forall|a:usize| (a & bitmask_inc!(0usize,8usize) == a) ==> a < 512) by (bit_vector);
+            assert(forall|a:usize| (#[trigger] (a & bitmask_inc!(0usize,8usize)) == a) ==> a < 512) by (bit_vector);
             assert(bitmask_inc!(39usize,47usize) == 0xFF80_0000_0000) by (compute);
             assert(bitmask_inc!(30usize,38usize) == 0x007F_C000_0000) by (compute);
             assert(bitmask_inc!(21usize,29usize) == 0x0000_3FE0_0000) by (compute);
@@ -357,7 +357,7 @@ impl WrappedTokenView {
             let l1_idx = mul(l1_bits!(vaddr), WORD_SIZE);
             let l2_idx = mul(l2_bits!(vaddr), WORD_SIZE);
             let l3_idx = mul(l3_bits!(vaddr), WORD_SIZE);
-            assert(forall|a:usize| (a & bitmask_inc!(0usize,8usize) == a) ==> a < 512) by (bit_vector);
+            assert(forall|a:usize| (#[trigger] (a & bitmask_inc!(0usize,8usize)) == a) ==> a < 512) by (bit_vector);
             assert(bitmask_inc!(39usize,47usize) == 0xFF80_0000_0000) by (compute);
             assert(bitmask_inc!(30usize,38usize) == 0x007F_C000_0000) by (compute);
             assert(bitmask_inc!(21usize,29usize) == 0x0000_3FE0_0000) by (compute);
