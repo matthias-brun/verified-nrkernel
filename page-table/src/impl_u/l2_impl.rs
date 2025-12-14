@@ -231,7 +231,7 @@ impl PDE {
         axiom_max_phyaddr_width_facts();
         assert(forall|i:usize| #![auto] i != 5 && i != 6 ==> e & bit!(i) == 0) by (bit_vector)
             requires e & !(bit!(5) | bit!(6)) == 0;
-        assert(forall|i1: usize, i2: usize| #![auto] 6 < i1 && 6 < i2 ==> e & bitmask_inc!(i1, i2) == 0) by (bit_vector)
+        assert(forall|i1: usize, i2: usize| 6 < i1 && 6 < i2 ==> #[trigger] (e & bitmask_inc!(i1, i2)) == 0) by (bit_vector)
             requires e & !(bit!(5) | bit!(6)) == 0;
     }
 
