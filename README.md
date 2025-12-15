@@ -35,14 +35,7 @@ sudo apt-get install linux-headers-$(uname -r) build-essential dkms libncurses-d
 Note: This includes the build-dependencies of the Linux kernel modules.
 
 
-**2. Initialize the Git Submodules**
-
-```bash
-git submodule update --init --recursive
-```
-
-
-**3. Install Rust**
+**2. Install Rust**
 
 Follow the instructions on [Rustup.rs](https://rustup.rs/) to install Rust. In short, this is:
 
@@ -61,7 +54,7 @@ rustup override set nightly
 rustup component add rust-src --toolchain nightly-x86_64-unknown-linux-gnu
 ```
 
-**4. Install Verus**
+**3. Install Verus**
 
 Run the following command to install Verus in the right directory. You can learn more about
 installing Verus from its [install instructions](https://github.com/verus-lang/verus/blob/main/INSTALL.md).
