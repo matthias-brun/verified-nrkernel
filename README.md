@@ -115,6 +115,7 @@ Note, there might be a missing linebreak in the Verus output before "verificatio
 
 
 
+
 **Running the Experiment**
 
 ```bash
@@ -131,7 +132,7 @@ The output should look like the following table:
 ```
 | file                      | Trusted | Spec | Proof | Exec | Proof+Exec | Comment | Layout | unaccounted | Directives |
 |---------------------------|---------|------|-------|------|------------|---------|--------|-------------|------------|
-| lib.rs                    |       0 |    0 |     0 |    0 |          0 |      16 |     13 |          75 |          0 |
+| lib.rs                    |       0 |    0 |     0 |    0 |          0 |      16 |     12 |          78 |          0 |
 | impl_u/mod.rs             |       0 |    0 |     0 |    0 |          0 |       2 |      0 |          11 |          0 |
 | impl_u/l1.rs              |       0 |  355 |   240 |    9 |          0 |    1295 |    138 |         102 |          2 |
 | impl_u/l2_impl.rs         |       0 |  777 |  1492 |  159 |         39 |     236 |    396 |         126 |          9 |
@@ -140,12 +141,11 @@ The output should look like the following table:
 | impl_u/verified_impl.rs   |       0 |    0 |   126 |   24 |          7 |       1 |     39 |          29 |          0 |
 | impl_u/os_refinement.rs   |       0 |  387 |  1779 |    0 |          0 |     124 |    431 |          75 |          6 |
 | definitions_u.rs          |       0 |   69 |    78 |   20 |          0 |      26 |     41 |          45 |          2 |
-| spec_t/mod.rs             |       0 |    0 |     0 |    0 |          0 |       0 |      0 |           7 |          0 |
-| spec_t/hlspec.rs          |     287 |   35 |    16 |    0 |          0 |      50 |     83 |          66 |          0 |
-| spec_t/os.rs              |       0 |  978 |     0 |   43 |          0 |     152 |    211 |         152 |          2 |
-| spec_t/os_ext.rs          |     290 |    0 |     0 |    0 |          0 |     109 |     89 |         109 |          0 |
+| spec_t/mod.rs             |       0 |    0 |     0 |    0 |          0 |       0 |      0 |           6 |          0 |
+| spec_t/hlspec.rs          |     287 |    0 |     0 |    0 |          0 |      42 |     69 |          51 |          0 |
+| spec_t/os.rs              |       0 |  978 |     0 |   43 |          0 |     151 |    211 |         152 |          2 |
+| spec_t/os_ext.rs          |     294 |    0 |     0 |    0 |          0 |     110 |     90 |         111 |          0 |
 | spec_t/os_code_vc.rs      |     131 |  181 |   117 |    0 |          0 |      58 |     31 |          56 |          0 |
-| spec_t/hlproof.rs         |       0 |   36 |    78 |    0 |          0 |      85 |     26 |          20 |          0 |
 | spec_t/os_invariant.rs    |       0 |  193 |  1589 |    0 |          0 |     101 |    220 |          54 |         13 |
 | spec_t/mmu/mod.rs         |      79 |    0 |     0 |    0 |          0 |      26 |     18 |          49 |          0 |
 | extra.rs                  |       0 |   59 |    94 |    0 |          0 |       4 |     34 |          35 |         11 |
@@ -157,7 +157,7 @@ The output should look like the following table:
 | spec_t/mmu/translation.rs |     146 |   23 |    55 |    0 |          0 |      72 |     35 |          61 |          4 |
 | spec_t/mmu/defs.rs        |     233 |    6 |     6 |    0 |          0 |      21 |     80 |         102 |          2 |
 |---------------------------|---------|------|-------|------|------------|---------|--------|-------------|------------|
-| total                     |    1785 | 4784 |  8005 |  358 |         78 |    2884 |   2682 |        1675 |         87 |
+| total                     |    1789 | 4713 |  7911 |  358 |         78 |    2791 |   2642 |        1644 |         87 |
 ```
 
 The numbers should match the ones stated in the paper:
