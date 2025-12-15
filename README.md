@@ -21,6 +21,12 @@ Other platforms or architectures might work too, but are not tested.
 
 Follow the following preparation steps to set up the machine for building and running the artifact.
 
+**0. Ensure Root Privileges**
+
+Either run `su root` and execute everything as the root user, or setup password less root for
+your user to install kernel modules via modifying the sudoers file `$USER ALL=(ALL) NOPASSWD:ALL`
+
+
 **1. Install Dependencies**
 
 On Ubuntu, execute the following command to install the dependencies.
