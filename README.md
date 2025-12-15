@@ -113,7 +113,7 @@ Note, there might be a missing linebreak in the Verus output before "verificatio
 
 **Claim**
 
-
+The line counts match what we report in the paper.
 
 
 **Running the Experiment**
