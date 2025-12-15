@@ -43,8 +43,8 @@ sudo apt-get update
 
 sudo apt-get install linux-headers-$(uname -r) build-essential dkms libncurses-dev flex bison \
                      openssl libssl-dev libelf-dev libudev-dev libpci-dev libiberty-dev autoconf \
-                     git curl unzip python3 python3-matplotlib
-
+                     git curl unzip python3 python3-matplotlib automake libtool pkg-config libevent-dev \
+                    autotools-dev
 ```
 Note: This includes the build-dependencies of the Linux kernel modules.
 
