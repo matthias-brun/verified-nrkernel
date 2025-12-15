@@ -71,10 +71,9 @@ artifact.
 
 **Claim**
 
-The proof artifacts in this repository successfully verify:
- - Verify the `HiHM` and `LowHM` models.
- - Verify the Rust implementation and its refinement proofs.
- - Verify the HlSpec model and its refinement proofs.
+The proof artifacts in this repository successfully verify the two main theorems (stated in `theorem.rs`):
+* The Rust implementation refines the OS+HW state machine
+* The OS+HW state machine refines the hlspec
 
 **Running the Experiment**
 
