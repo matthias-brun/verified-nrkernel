@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2025 Paper #406 Authors, ASPLOS'26.
+// Copyright (c) 2025 Paper #409 Authors, ASPLOS'26.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,6 @@
 #include <linux/module.h>
 
 // Module metadata
-MODULE_AUTHOR("Paper #406 Authors, ASPLOS'26");
+MODULE_AUTHOR("Paper #409 Authors, ASPLOS'26");
 MODULE_DESCRIPTION("Verified MMAP Interface");
 MODULE_LICENSE("GPL");

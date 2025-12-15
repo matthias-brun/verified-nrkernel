@@ -7,7 +7,7 @@ This repository contains the artifact oft the ASPLOS'26 paper "*Managing Hardwar
 
 ```
 Managing Hardware Complexity in OS Verification.
-Anonymous Authors of Paper #406. ASPLOS '26.
+Anonymous Authors of Paper #409. ASPLOS '26.
 ```
 The citation will be updated once the paper is accepted.
 
@@ -30,7 +30,8 @@ Follow the following preparation steps to set up the machine for building and ru
 **0. Ensure Root Privileges**
 
 Either run `su root` and execute everything as the root user, or setup password less root for
-your user to install kernel modules via modifying the sudoers file `$USER ALL=(ALL) NOPASSWD:ALL`
+your user to install kernel modules via modifying the sudoers file, add a line like this:
+`$USER ALL=(ALL) NOPASSWD:ALL`
 
 
 **1. Install Dependencies**
