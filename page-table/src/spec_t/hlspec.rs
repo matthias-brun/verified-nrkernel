@@ -1,8 +1,6 @@
 // #![cfg_attr(verus_keep_ghost, verus::trusted)]
 // trusted:
 // this is the process-level specification of the kernel's behaviour
-// TODO: because we have the invariant defined and proved here as well we manually apply the
-// trusted label to the relevant parts
 
 use vstd::prelude::*;
 use crate::spec_t::mmu::defs::{
@@ -15,16 +13,7 @@ use crate::spec_t::mmu::defs::{
 };
 use crate::theorem::RLbl;
 
-#[cfg(verus_keep_ghost)]
-use crate::spec_t::hlproof::{
-    insert_non_map_preserves_unique, map_end_preserves_inv,
-    map_start_preserves_inv, unmap_start_preserves_inv,
-};
-
 verus! {
-
-
-// $line_count$Trusted${$
 
 pub struct Constants {
     pub thread_no: nat,
@@ -455,83 +444,6 @@ pub open spec fn next(c: Constants, s1: State, s2: State, lbl: RLbl) -> bool {
     exists|step: Step| next_step(c, s1, s2, step, lbl)
 }
 
-// $line_count$}$
-// everything below here is invariant definition and/or proof, not trusted
 
-
-pub open spec fn pmem_no_overlap(mappings: Map<nat, PTE>) -> bool {
-    forall|bs1: nat, bs2: nat|
-        mappings.contains_key(bs1) && mappings.contains_key(bs2)
-        && overlap(mappings.index(bs1).frame, mappings.index(bs2).frame)
-        ==> bs1 == bs2
-}
-
-pub open spec fn inflight_map_no_overlap_pmem(
-    inflightargs: Set<ThreadState>,
-    mappings: Map<nat, PTE>,
-) -> bool {
-    forall|b: ThreadState| #![auto]
-        inflightargs.contains(b) && b is Map
-            ==> !candidate_mapping_overlaps_existing_pmem(mappings, b->Map_pte)
-
-}
-
-pub open spec fn inflight_map_no_overlap_inflight_pmem(inflightargs: Set<ThreadState>) -> bool {
-    forall|b: ThreadState| #![auto]
-        inflightargs.contains(b) && b is Map
-            ==> !candidate_mapping_overlaps_inflight_pmem(inflightargs.remove(b), b->Map_pte)
-}
-
-pub open spec fn if_map_then_unique(thread_state: Map<nat, ThreadState>, id: nat) -> bool
-    recommends thread_state.contains_key(id),
-{
-    thread_state[id] matches ThreadState::Map { vaddr, pte }
-        ==> !thread_state.remove(id).values().contains(thread_state[id])
-}
-
-pub open spec fn inflight_maps_unique(thread_state: Map<nat, ThreadState>) -> bool {
-    forall|a: nat| #[trigger] thread_state.contains_key(a) ==> if_map_then_unique(thread_state, a)
-}
-
-pub open spec fn inv(c: Constants, s: State) -> bool {
-    &&& wf(c, s)
-    &&& pmem_no_overlap(s.mappings)
-    // invariants needed to prove the former
-    &&& inflight_map_no_overlap_pmem(s.thread_state.values(), s.mappings)
-    &&& inflight_map_no_overlap_inflight_pmem(s.thread_state.values())
-    &&& inflight_maps_unique(s.thread_state)
-}
-
-pub proof fn init_implies_inv(c: Constants, s: State)
-    requires init(c, s),
-    ensures inv(c, s),
-{
-}
-
-pub proof fn next_step_preserves_inv(c: Constants, s1: State, s2: State, lbl: RLbl)
-    requires
-        next(c, s1, s2, lbl),
-        s1.sound ==> inv(c, s1),
-    ensures
-        s2.sound ==> inv(c, s2),
-{
-    if s1.sound {
-        let p = choose|step: Step| next_step(c, s1, s2, step, lbl);
-        match p {
-            Step::UnmapStart => unmap_start_preserves_inv(c, s1, s2, lbl),
-            Step::UnmapEnd => {
-                let thread_id = lbl->UnmapEnd_thread_id;
-                assert(s2.thread_state.values().subset_of(s1.thread_state.values().insert(ThreadState::Idle)));
-                //lemma_mem_domain_from_mapping_finite(c.phys_mem_size, s2.mappings);
-                insert_non_map_preserves_unique(s1.thread_state, thread_id, ThreadState::Idle);
-            },
-            Step::MapStart => map_start_preserves_inv(c, s1, s2, lbl),
-            Step::MapEnd  => map_end_preserves_inv(c, s1, s2, lbl),
-            _ => {},
-        }
-    } else {
-        assert(!s2.sound);
-    }
-}
 
 } // verus!

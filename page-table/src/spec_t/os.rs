@@ -237,7 +237,6 @@ pub open spec fn step_MemOp(c: Constants, s1: State, s2: State, core: Core, lbl:
     //mmu statemachine steps
     &&& rl3::next(s1.mmu, s2.mmu, c.common, mmu::Lbl::MemOp(core, vaddr as usize, op))
     &&& s2.os_ext == s1.os_ext
-    // FIXME(MB): This additional enabling condition here is kind of fishy
     &&& vaddr <= usize::MAX
     //new state
     &&& s2.core_states == s1.core_states
