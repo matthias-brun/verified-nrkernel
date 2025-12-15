@@ -276,6 +276,10 @@ cd microbenchmarks
 cargo run --bin systemcall_map_unmap
 ```
 
+Note building might fail if you haven't enabled nightly toolchain, or having a dirty git repository.
+(See installing Rust above, and pass the `--allow-dirty` flag)
+
+
 **Expected Duration**
 
 The expected duration is less than one minute on an Intel Xeon Silver 4310 CPU @ 2.10GHz.
@@ -290,10 +294,10 @@ results, where Linux is expected to be slightly slower due to additional VMA man
 % =====================================================================================================
 % Table: System Call Performance
 % =====================================================================================================
-% Git Hash:   1c15460-dirty
+% Git Hash:   f17e641
 % CPU:        Intel(R) Xeon(R) Silver 4310 CPU @ 2.10GHz
 % OS:         Linux 24.04 Ubuntu
-% Date:       2025-12-09 06:50:01.842212996 -08:00
+% Date:       2025-12-15 12:41:56.154109259 -08:00
 % =====================================================================================================
 %
 \begin{tabular}{ccrrrrrr}
@@ -301,10 +305,10 @@ results, where Linux is expected to be slightly slower due to additional VMA man
   \th{Operation      } & \span{\th{  Map  }} & \span{\th{Protect}} & \span{\th{ Unmap }} \\
   \th{Code           } & \th{P50} & \th{P99} & \th{P50} & \th{P99} & \th{P50} & \th{P99} \\
   \hline % --------------------------------------------------------------------------------------------
-  Linux                &   3183ns &   3483ns &   8540ns &   8914ns &  10765ns &  11768ns \\
-  Velosiraptor         &   1438ns &   1771ns &   7627ns &   7964ns &   7376ns &   7777ns \\
-  \system              &   1468ns &   1825ns &   6677ns &   7632ns &   7752ns &   9471ns \\
-  \system+NoReclaim    &   1469ns &   1763ns &   6013ns &   6394ns &   6144ns &   6484ns \\
+  Linux                &   3208ns &   3559ns &   7922ns &   9583ns &  10607ns &  11534ns \\
+  Velosiraptor         &   1406ns &   1698ns &   7770ns &   8031ns &   7678ns &   7848ns \\
+  \system              &   1464ns &   1746ns &   7107ns &   7366ns &   7623ns &   9348ns \\
+  \system+NoReclaim    &   1645ns &   2075ns &   6450ns &   6838ns &   6323ns &   6701ns \\
   \hline % --------------------------------------------------------------------------------------------
 \end{tabular}
 %
@@ -326,6 +330,10 @@ This experiment is automated via the following command. Note: you need root priv
 cd macrobenchmarks
 cargo run --bin memcached
 ```
+
+Note building might fail if you haven't enabled nightly toolchain, or having a dirty git repository.
+(See installing Rust above, and pass the `--allow-dirty` flag)
+
 
 **Expected Duration**
 

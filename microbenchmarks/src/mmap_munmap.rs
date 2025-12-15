@@ -25,7 +25,6 @@
 
 use std::collections::HashMap;
 use std::env;
-use std::io::copy;
 use std::path::PathBuf;
 use std::process::Command;
 
