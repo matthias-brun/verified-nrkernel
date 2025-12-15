@@ -30,7 +30,8 @@ sudo apt-get update
 
 sudo apt-get install linux-headers-$(uname -r) build-essential dkms libncurses-dev flex bison \
                      openssl libssl-dev libelf-dev libudev-dev libpci-dev libiberty-dev autoconf \
-                     git curl unzip
+                     git curl unzip python3 python3-matplotlib
+
 ```
 Note: This includes the build-dependencies of the Linux kernel modules.
 
@@ -218,6 +219,9 @@ cd microbenchmarks
 cargo run --bin page_table_traversal
 ```
 
+Note building might fail if you haven't enabled nightly toolchain, or having a dirty git repository.
+(See installing Rust above, and pass the `--allow-dirty` flag)
+
 **Expected Duration**
 
 The expected duration is less than one minute on an Intel Xeon Silver 4310 CPU @ 2.10GHz.
@@ -234,10 +238,10 @@ but the `NoReclaim` variant should match Linux and Velosiratpor.
 % ==================================================================================================
 % Table: Generated Code Performance
 % ==================================================================================================
-% Git Hash:   8155502-dirty
+% Git Hash:   74a373a
 % CPU:        Intel(R) Xeon(R) Silver 4310 CPU @ 2.10GHz
 % OS:         Linux 24.04 Ubuntu
-% Date:       2025-12-09 06:16:01.264867551 -08:00
+% Date:       2025-12-15 12:35:29.048831547 -08:00
 % ==================================================================================================
 %
 \begin{tabular}{crrrrrr}
@@ -245,9 +249,9 @@ but the `NoReclaim` variant should match Linux and Velosiratpor.
   \th{Operation    } & \span{\th{  Map  }} & \span{\th{Protect}} & \span{\th{ Unmap }} \\
   \th{Code         } & \th{P50} & \th{P99} & \th{P50} & \th{P99} & \th{P50} & \th{P99} \\
   \hline % -----------------------------------------------------------------------------------------
-  Linux              &     20ns &     21ns &     20ns &     21ns &     19ns &     21ns \\
-  Velosiraptor       &     19ns &     19ns &     19ns &     19ns &     18ns &     18ns \\
-  \system            &     19ns &     21ns &     43ns &     45ns &    165ns &    287ns \\
+  Linux              &     26ns &     29ns &     24ns &     24ns &     24ns &     24ns \\
+  Velosiraptor       &     25ns &     25ns &     24ns &     24ns &     24ns &     24ns \\
+  \system            &     26ns &     26ns &     55ns &     57ns &    198ns &    347ns \\
   \system+NoReclaim  &     19ns &     20ns &     29ns &     30ns &     17ns &     17ns \\
   \hline % -----------------------------------------------------------------------------------------
 \end{tabular}
