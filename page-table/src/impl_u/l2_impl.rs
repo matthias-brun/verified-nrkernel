@@ -28,21 +28,18 @@ mod aux {
 use super::*;
 pub proof fn nonlinear_query1(entry_base: nat, vaddr: nat, layer: nat, base: nat, idx: nat) by (nonlinear_arith)
     requires
-        idx < 512,
         layer < 4,
         base <= vaddr,
         idx == x86_arch_spec.index_for_vaddr(layer as nat, base as nat, vaddr as nat),
         entry_base == x86_arch_spec.entry_base(layer as nat, base as nat, idx as nat),
         aligned(vaddr as nat, x86_arch_spec.entry_size(layer as nat)),
-        aligned(base as nat, x86_arch_spec.entry_size(layer as nat)),
+        aligned(base as nat, x86_arch_spec.entry_size(layer as nat))
     ensures
-          entry_base == vaddr
+          entry_base == vaddr as nat
 {}
 
 pub proof fn nonlinear_query2(i: nat, idx: nat, vaddr: nat, pte_size: nat, ppte_size: nat, layer: nat, base: nat, b: nat) by (nonlinear_arith)
     requires
-        idx < 512,
-        i < 512,
         overlap(
             MemRegion { base: vaddr, size: pte_size },
             MemRegion { base: b, size: ppte_size },
