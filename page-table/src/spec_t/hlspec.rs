@@ -1,4 +1,4 @@
-// #![cfg_attr(verus_keep_ghost, verus::trusted)]
+#![cfg_attr(verus_keep_ghost, verus::trusted)]
 // trusted:
 // this is the process-level specification of the kernel's behaviour
 
