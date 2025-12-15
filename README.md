@@ -229,6 +229,7 @@ This experiment is automated via the following command.
 
 ```bash
 cd microbenchmarks
+rustup override set nightly
 cargo run --bin page_table_traversal
 ```
 
@@ -287,6 +288,7 @@ This experiment is automated via the following command.
 
 ```bash
 cd microbenchmarks
+rustup override set nightly
 cargo run --bin systemcall_map_unmap
 ```
 
@@ -343,6 +345,7 @@ This experiment is automated via the following command.
 
 ```bash
 cd macrobenchmarks
+rustup override set nightly
 cargo run --bin memcached
 ```
 
