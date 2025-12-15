@@ -269,7 +269,8 @@ process with comparable performance to standard Linux and Velosiraptor code.
 
 **Running the Experiment**
 
-This experiment is automated via the following command. Note: you need root privileges to run this experiment.
+This experiment is automated via the following command.
+**Note**: you need *root* privileges to run this experiment.
 
 ```bash
 cd microbenchmarks
@@ -324,7 +325,8 @@ page table code.
 
 **Running the Experiment**
 
-This experiment is automated via the following command. Note: you need root privileges to run this experiment.
+This experiment is automated via the following command.
+**Note**: you need *root* privileges to run this experiment.
 
 ```bash
 cd macrobenchmarks
@@ -385,6 +387,7 @@ bash tools/hlspec-verify.sh --verify-module hlspec_user
 
 
 To run the user-level programs as litmus tests against the implementation, run the following command:
+**Note**: you need *root* privileges to run this experiment.
 
 ```bash
 make -C hlspec_code run
