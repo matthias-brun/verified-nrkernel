@@ -1,0 +1,4 @@
+bench
+bench_no_reclaim
+libverif_pt.a
+libpage_table*.a

@@ -1,0 +1,7 @@
+bench
+mmap_velosiraptor.ko
+mmap_verified.ko
+modules.order
+Module.symvers
+*.cmd
+*.ko

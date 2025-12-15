@@ -1,0 +1,4 @@
+verified_mmap_test
+malloc_test
+libjemalloc.a
+malloc_test_static

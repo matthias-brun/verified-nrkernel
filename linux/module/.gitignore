@@ -1,0 +1,11 @@
+*.cmd
+libpage_table
+libpage_table_no_reclaim
+libpage_table.a
+libpage_table_no_reclaim.a
+module.order
+*.ko
+*.mod
+*.mod.c
+modules.order
+Module.symvers

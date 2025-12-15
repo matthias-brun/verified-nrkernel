@@ -1,0 +1,14 @@
+mythread:
+  mov     QWORD PTR [1048576+rbx*8], rbx
+
+main:
+  mmap(1048576, 4096)
+
+  mov     eax, 1048576
+  mov     edx, 0
+.L10
+  add     rdx, QWORD PTR [rax]
+  mov     rdi, rdx
+  add     rax, 8
+  cmp     rax, 1048656
+  jne     .L10

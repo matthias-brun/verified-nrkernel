@@ -1,0 +1,2960 @@
+{
+  "verification-results": {
+    "encountered-error": false,
+    "encountered-vir-error": false,
+    "success": true,
+    "verified": 526,
+    "errors": 0,
+    "is-verifying-entire-crate": true
+  },
+  "times-ms": {
+    "verus-build": {
+      "profile": "release",
+      "version": "0.2025.04.12.04a69f9"
+    },
+    "num-threads": 31,
+    "total": 134773,
+    "estimated-cpu-time": 875046,
+    "rust": {
+      "total": 4473,
+      "init-and-types": 2504,
+      "lifetime": 214,
+      "compile": 1754
+    },
+    "verification": {
+      "total": 129959,
+      "vir": {
+        "total": 1847,
+        "hir": 624,
+        "import": 105,
+        "rust-to-vir": 637
+      }
+    },
+    "total-verify": 868217,
+    "total-verify-module-times": [
+      {
+        "module": "spec_t::os_invariant",
+        "time": 126994
+      },
+      {
+        "module": "impl_u::wrapped_token",
+        "time": 70843
+      },
+      {
+        "module": "spec_t::mmu::rl2",
+        "time": 62475
+      },
+      {
+        "module": "impl_u::os_refinement",
+        "time": 57334
+      },
+      {
+        "module": "impl_u::l2_impl::aux",
+        "time": 52409
+      },
+      {
+        "module": "spec_t::os_code_vc",
+        "time": 25668
+      },
+      {
+        "module": "impl_u::l2_impl::PT",
+        "time": 25315
+      },
+      {
+        "module": "spec_t::mmu::rl2::refinement",
+        "time": 9723
+      },
+      {
+        "module": "impl_u::l2_impl",
+        "time": 8264
+      },
+      {
+        "module": "impl_u::l1",
+        "time": 6626
+      },
+      {
+        "module": "impl_u::verified_impl",
+        "time": 6596
+      },
+      {
+        "module": "spec_t::mmu::rl3::refinement",
+        "time": 2412
+      },
+      {
+        "module": "spec_t::mmu::pt_mem",
+        "time": 2255
+      },
+      {
+        "module": "spec_t::mmu::translation",
+        "time": 1841
+      },
+      {
+        "module": "definitions_u",
+        "time": 1436
+      },
+      {
+        "module": "extra",
+        "time": 1401
+      },
+      {
+        "module": "spec_t::mmu::rl3",
+        "time": 1115
+      },
+      {
+        "module": "spec_t::mmu::rl3::refinement::to_rl1",
+        "time": 736
+      },
+      {
+        "module": "theorem",
+        "time": 704
+      },
+      {
+        "module": "spec_t::os",
+        "time": 666
+      },
+      {
+        "module": "impl_u::indexing",
+        "time": 659
+      },
+      {
+        "module": "spec_t::mmu::defs",
+        "time": 545
+      },
+      {
+        "module": "spec_t::hlproof",
+        "time": 443
+      },
+      {
+        "module": "spec_t::hlspec",
+        "time": 343
+      },
+      {
+        "module": "spec_t::mmu::rl3::code",
+        "time": 246
+      },
+      {
+        "module": "spec_t::mmu::rl1",
+        "time": 142
+      },
+      {
+        "module": "spec_t::os_ext::code",
+        "time": 133
+      },
+      {
+        "module": "spec_t::mmu",
+        "time": 54
+      },
+      {
+        "module": "spec_t::os_ext",
+        "time": 38
+      },
+      {
+        "module": "",
+        "time": 13
+      }
+    ],
+    "air": {
+      "total": 25310,
+      "module-times": [
+        {
+          "module": "impl_u::wrapped_token",
+          "time": 5353
+        },
+        {
+          "module": "spec_t::mmu::rl2",
+          "time": 4416
+        },
+        {
+          "module": "impl_u::l2_impl",
+          "time": 2374
+        },
+        {
+          "module": "impl_u::os_refinement",
+          "time": 1119
+        },
+        {
+          "module": "spec_t::os_invariant",
+          "time": 805
+        },
+        {
+          "module": "spec_t::mmu::translation",
+          "time": 761
+        },
+        {
+          "module": "definitions_u",
+          "time": 732
+        },
+        {
+          "module": "extra",
+          "time": 715
+        },
+        {
+          "module": "impl_u::l1",
+          "time": 513
+        },
+        {
+          "module": "impl_u::indexing",
+          "time": 382
+        },
+        {
+          "module": "spec_t::os_code_vc",
+          "time": 382
+        },
+        {
+          "module": "impl_u::l2_impl::PT",
+          "time": 367
+        },
+        {
+          "module": "spec_t::mmu::pt_mem",
+          "time": 364
+        },
+        {
+          "module": "impl_u::verified_impl",
+          "time": 312
+        },
+        {
+          "module": "spec_t::mmu::rl3::refinement",
+          "time": 290
+        },
+        {
+          "module": "theorem",
+          "time": 259
+        },
+        {
+          "module": "spec_t::mmu::rl2::refinement",
+          "time": 217
+        },
+        {
+          "module": "spec_t::mmu::rl3::refinement::to_rl1",
+          "time": 209
+        },
+        {
+          "module": "spec_t::mmu::defs",
+          "time": 209
+        },
+        {
+          "module": "spec_t::os",
+          "time": 181
+        },
+        {
+          "module": "spec_t::mmu::rl3",
+          "time": 126
+        },
+        {
+          "module": "spec_t::hlspec",
+          "time": 119
+        },
+        {
+          "module": "spec_t::hlproof",
+          "time": 96
+        },
+        {
+          "module": "spec_t::mmu::rl3::code",
+          "time": 87
+        },
+        {
+          "module": "impl_u::l2_impl::aux",
+          "time": 81
+        },
+        {
+          "module": "spec_t::os_ext::code",
+          "time": 63
+        },
+        {
+          "module": "spec_t::mmu::rl1",
+          "time": 26
+        },
+        {
+          "module": "spec_t::mmu",
+          "time": 12
+        },
+        {
+          "module": "spec_t::os_ext",
+          "time": 8
+        },
+        {
+          "module": "",
+          "time": 0
+        }
+      ]
+    },
+    "smt": {
+      "total": 826640,
+      "smt-init": 3673,
+      "smt-init-module-times": [
+        {
+          "module": "impl_u::os_refinement",
+          "time": 333
+        },
+        {
+          "module": "impl_u::wrapped_token",
+          "time": 217
+        },
+        {
+          "module": "definitions_u",
+          "time": 194
+        },
+        {
+          "module": "spec_t::os_invariant",
+          "time": 189
+        },
+        {
+          "module": "impl_u::l1",
+          "time": 188
+        },
+        {
+          "module": "extra",
+          "time": 173
+        },
+        {
+          "module": "impl_u::l2_impl::PT",
+          "time": 151
+        },
+        {
+          "module": "spec_t::mmu::rl2",
+          "time": 114
+        },
+        {
+          "module": "spec_t::os_code_vc",
+          "time": 111
+        },
+        {
+          "module": "impl_u::verified_impl",
+          "time": 97
+        },
+        {
+          "module": "impl_u::l2_impl",
+          "time": 95
+        },
+        {
+          "module": "impl_u::indexing",
+          "time": 82
+        },
+        {
+          "module": "theorem",
+          "time": 82
+        },
+        {
+          "module": "spec_t::mmu::rl3::refinement::to_rl1",
+          "time": 68
+        },
+        {
+          "module": "spec_t::mmu::rl2::refinement",
+          "time": 52
+        },
+        {
+          "module": "spec_t::mmu::rl3",
+          "time": 41
+        },
+        {
+          "module": "spec_t::mmu::rl3::refinement",
+          "time": 38
+        },
+        {
+          "module": "spec_t::mmu::defs",
+          "time": 37
+        },
+        {
+          "module": "spec_t::hlspec",
+          "time": 33
+        },
+        {
+          "module": "spec_t::mmu::pt_mem",
+          "time": 32
+        },
+        {
+          "module": "spec_t::hlproof",
+          "time": 30
+        },
+        {
+          "module": "spec_t::mmu::rl3::code",
+          "time": 30
+        },
+        {
+          "module": "spec_t::mmu::translation",
+          "time": 23
+        },
+        {
+          "module": "impl_u::l2_impl::aux",
+          "time": 17
+        },
+        {
+          "module": "spec_t::os_ext::code",
+          "time": 15
+        },
+        {
+          "module": "spec_t::os_ext",
+          "time": 0
+        },
+        {
+          "module": "spec_t::os",
+          "time": 0
+        },
+        {
+          "module": "spec_t::mmu",
+          "time": 0
+        },
+        {
+          "module": "spec_t::mmu::rl1",
+          "time": 0
+        },
+        {
+          "module": "",
+          "time": 0
+        }
+      ],
+      "smt-run": 822967,
+      "smt-run-module-times": [
+        {
+          "module": "spec_t::os_invariant",
+          "time": 125046,
+          "rlimit-count": 230908867,
+          "function-breakdown": [
+            {
+              "function": "lib::spec_t::os_invariant::next_step_preserves_tlb_inv",
+              "time": 58338,
+              "rlimit-count": 33479,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_invariant::next_step_preserves_inv",
+              "time": 44148,
+              "rlimit-count": 35391,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_invariant::lemma_map_insert_values_equality",
+              "time": 16,
+              "rlimit-count": 27709,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_invariant::next_preserves_inv",
+              "time": 46,
+              "rlimit-count": 34707830,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_invariant::init_implies_inv",
+              "time": 111,
+              "rlimit-count": 96188,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_invariant::lemma_insert_preserves_no_overlap",
+              "time": 93,
+              "rlimit-count": 68700,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_invariant::next_step_preserves_inv_impl",
+              "time": 2430,
+              "rlimit-count": 99245747,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_invariant::next_step_preserves_inv_shootdown",
+              "time": 5404,
+              "rlimit-count": 21558257,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_invariant::lemma_candidate_mapping_inflight_pmem_overlap_os_implies_hl",
+              "time": 208,
+              "rlimit-count": 356945,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_invariant::lemma_candidate_mapping_inflight_vmem_overlap_os_implies_hl",
+              "time": 187,
+              "rlimit-count": 353874,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_invariant::next_step_preserves_inv_allocated_mem",
+              "time": 20056,
+              "rlimit-count": 30599952,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_invariant::lemma_submap_preserves_no_overlap",
+              "time": 42,
+              "rlimit-count": 184159,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_invariant::lemma_candidate_mapping_inflight_pmem_overlap_hl_implies_os",
+              "time": 192,
+              "rlimit-count": 354202,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_invariant::lemma_init_implies_empty_map",
+              "time": 136,
+              "rlimit-count": 368910,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_invariant::next_step_preserves_inv_pending_maps",
+              "time": 18144,
+              "rlimit-count": 10824331,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_invariant::next_step_preserves_inv_mmu",
+              "time": 24779,
+              "rlimit-count": 76968,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_invariant::lemma_insert_no_overlap_preserves_no_overlap",
+              "time": 126,
+              "rlimit-count": 26344085,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_invariant::lemma_candidate_mapping_inflight_vmem_overlap_hl_implies_os",
+              "time": 187,
+              "rlimit-count": 73318,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_invariant::next_step_preserves_overlap_mem_inv",
+              "time": 42149,
+              "rlimit-count": 72636,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_invariant::next_step_preserves_inv_writes",
+              "time": 10629,
+              "rlimit-count": 5058202,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_invariant::lemma_unique_and_overlap_values_implies_overlap_vmem",
+              "time": 43,
+              "rlimit-count": 221778,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_invariant::lemma_map_insert_value",
+              "time": 14,
+              "rlimit-count": 276974,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_invariant::init_implies_tlb_inv",
+              "time": 45,
+              "rlimit-count": 38102,
+              "success": true
+            }
+          ]
+        },
+        {
+          "module": "impl_u::wrapped_token",
+          "time": 63846,
+          "rlimit-count": 126604712,
+          "function-breakdown": [
+            {
+              "function": "lib::impl_u::wrapped_token::WrappedTokenView::lemma_interps_match",
+              "time": 121,
+              "rlimit-count": 14409,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::wrapped_token::WrappedUnmapToken::finish_unmap_and_release_lock",
+              "time": 9757,
+              "rlimit-count": 2696325,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::wrapped_token::WrappedMapToken::write_stutter",
+              "time": 4953,
+              "rlimit-count": 4249952,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::wrapped_token::WrappedMapToken::new",
+              "time": 98,
+              "rlimit-count": 1555825,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::wrapped_token::WrappedMapToken::allocate",
+              "time": 1997,
+              "rlimit-count": 7198903,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::wrapped_token::start_map_and_acquire_lock",
+              "time": 1450,
+              "rlimit-count": 43715,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::wrapped_token::WrappedUnmapToken::read",
+              "time": 1518,
+              "rlimit-count": 85675,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::wrapped_token::WrappedUnmapToken::deallocate",
+              "time": 3158,
+              "rlimit-count": 6289779,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::wrapped_token::WrappedMapToken::write_change",
+              "time": 5051,
+              "rlimit-count": 2233667,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::wrapped_token::WrappedMapToken::register_failed_map",
+              "time": 284,
+              "rlimit-count": 7741942,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::wrapped_token::start_unmap_and_acquire_lock",
+              "time": 732,
+              "rlimit-count": 2489123,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::wrapped_token::WrappedMapToken::lemma_regions_derived_from_view_after_write",
+              "time": 816,
+              "rlimit-count": 68772809,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::wrapped_token::WrappedUnmapToken::write_stutter",
+              "time": 4080,
+              "rlimit-count": 2048873,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::wrapped_token::WrappedTokenView::lemma_interps_match_aux1",
+              "time": 23809,
+              "rlimit-count": 2738981,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::wrapped_token::WrappedMapToken::read",
+              "time": 2229,
+              "rlimit-count": 145252,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::wrapped_token::WrappedUnmapToken::new",
+              "time": 54,
+              "rlimit-count": 962772,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::wrapped_token::WrappedUnmapToken::lemma_regions_derived_from_view_after_write",
+              "time": 677,
+              "rlimit-count": 2535078,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::wrapped_token::WrappedMapToken::finish_map_and_release_lock",
+              "time": 1574,
+              "rlimit-count": 422911,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::wrapped_token::WrappedUnmapToken::write_change",
+              "time": 1412,
+              "rlimit-count": 14196174,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::wrapped_token::WrappedUnmapToken::lemma_regions_derived_from_view",
+              "time": 46,
+              "rlimit-count": 95529,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::wrapped_token::WrappedMapToken::lemma_regions_derived_from_view",
+              "time": 142,
+              "rlimit-count": 101427,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::wrapped_token::WrappedTokenView::lemma_interps_match_aux2",
+              "time": 9136,
+              "rlimit-count": 155290,
+              "success": true
+            }
+          ]
+        },
+        {
+          "module": "spec_t::mmu::rl2",
+          "time": 56919,
+          "rlimit-count": 123957205,
+          "function-breakdown": [
+            {
+              "function": "lib::spec_t::mmu::rl2::step_Writeback_preserves_inv_unmapping__inflight_walks",
+              "time": 40784,
+              "rlimit-count": 54963,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::next_step_preserves_inv_mapping__inflight_walks",
+              "time": 7909,
+              "rlimit-count": 34924,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::lemma_step_core_mem",
+              "time": 41,
+              "rlimit-count": 1341642,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::lemma_invalid_walk_is_invalid_in_writer_mem",
+              "time": 409,
+              "rlimit-count": 586250,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::lemma_valid_implies_equal_walks",
+              "time": 933,
+              "rlimit-count": 88359,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::lemma_pt_walk_result_vbase_equal",
+              "time": 714,
+              "rlimit-count": 1619,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::next_step_preserves_inv_mapping__valid_not_pending_is_not_in_sbuf",
+              "time": 2789,
+              "rlimit-count": 5279668,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::next_step_preserves_inv_unmapping__notin_nonpos",
+              "time": 323,
+              "rlimit-count": 1445109,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::lemma_valid_not_pending_implies_equal",
+              "time": 2265,
+              "rlimit-count": 3575988,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::lemma_finish_iter_walk_prefix_matches_iter_walk",
+              "time": 229,
+              "rlimit-count": 1284019,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::next_step_preserves_inv",
+              "time": 207,
+              "rlimit-count": 417116,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::next_step_preserves_inv_unmapping",
+              "time": 225,
+              "rlimit-count": 546900,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::lemma_writes_tso_empty_implies_sbuf_empty",
+              "time": 23,
+              "rlimit-count": 490388,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::lemma_step_writenonneg_new_walk_has_pending_map",
+              "time": 2737,
+              "rlimit-count": 2003877,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::next_step_preserves_inv_unmapping__inflight_walks",
+              "time": 805,
+              "rlimit-count": 984900,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::lemma_iter_walk_result_vbase_equal",
+              "time": 2,
+              "rlimit-count": 3471524,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::lemma_core_mem_pml4",
+              "time": 11,
+              "rlimit-count": 413994,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::lemma_iter_walk_result_vbase_equal_aux2",
+              "time": 1597,
+              "rlimit-count": 440019,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::lemma_bits_align_to_usize",
+              "time": 1473,
+              "rlimit-count": 765562,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::lemma_mem_view_after_step_write",
+              "time": 59,
+              "rlimit-count": 19449,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::lemma_iter_walk_equals_pt_walk",
+              "time": 285,
+              "rlimit-count": 211767,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::lemma_step_Writeback_post_valid_walk_unchanged",
+              "time": 336,
+              "rlimit-count": 919089,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::lemma_step_Writeback_post_valid_pt_walk_not_wraddr_in_path",
+              "time": 408,
+              "rlimit-count": 586235,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::lemma_step_writenonneg_path_addrs_match",
+              "time": 1213,
+              "rlimit-count": 951274,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::lemma_unmapping__pt_walk_valid_in_post_unchanged",
+              "time": 809,
+              "rlimit-count": 335217,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::init_implies_inv",
+              "time": 42,
+              "rlimit-count": 8267879,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::next_preserves_inv",
+              "time": 14,
+              "rlimit-count": 393408,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::lemma_indexing_bits_match_len_decrease",
+              "time": 10,
+              "rlimit-count": 78403,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::next_step_preserves_inv_mapping__pending_map_is_base_walk",
+              "time": 129,
+              "rlimit-count": 776453,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::next_step_preserves_inv_mapping__valid_is_not_in_sbuf",
+              "time": 242,
+              "rlimit-count": 4263425,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::next_step_preserves_inv_unmapping__valid_walk",
+              "time": 31291,
+              "rlimit-count": 351430,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::lemma_step_writenonneg_valid_walk_unchanged",
+              "time": 424,
+              "rlimit-count": 76226,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::lemma_finish_iter_walk_invalid_after_nonpos_write",
+              "time": 1764,
+              "rlimit-count": 1928545,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::next_step_preserves_inv_sbuf_facts",
+              "time": 376,
+              "rlimit-count": 42381,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::next_step_preserves_wf",
+              "time": 246,
+              "rlimit-count": 19383,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::lemma_mapping__pt_walk_valid_in_pre_unchanged",
+              "time": 805,
+              "rlimit-count": 52215,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::lemma_step_WriteNonpos_post_valid_pt_walk_not_wraddr_in_path",
+              "time": 367,
+              "rlimit-count": 4125146,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::lemma_finish_iter_walk_valid_with_nonpos_write_in_path",
+              "time": 973,
+              "rlimit-count": 1050368,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::lemma_step_writeback_invalid_walk_unchanged",
+              "time": 506,
+              "rlimit-count": 745529,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::lemma_writer_read_from_sbuf",
+              "time": 28,
+              "rlimit-count": 29663,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::lemma_valid_implies_equal_reads",
+              "time": 19,
+              "rlimit-count": 21884,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::lemma_pt_walk_with_indexing_bits_match",
+              "time": 306,
+              "rlimit-count": 370912,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::lemma_iter_walk_result_vbase_equal_aux1",
+              "time": 525,
+              "rlimit-count": 40634,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::lemma_step_writenonpos_invalid_walk_unchanged",
+              "time": 464,
+              "rlimit-count": 443145,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::lemma_step_Writeback_preserves_writer_mem",
+              "time": 16,
+              "rlimit-count": 66159,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::lemma_pt_walk_result_vaddr_indexing_bits_match",
+              "time": 204,
+              "rlimit-count": 796288,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::next_step_preserves_inv_unmapping__core_vs_writer_reads",
+              "time": 252,
+              "rlimit-count": 73857764,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::step_WriteNonpos_preserves_inv_unmapping__inflight_walks",
+              "time": 53756,
+              "rlimit-count": 37006,
+              "success": true
+            }
+          ]
+        },
+        {
+          "module": "impl_u::os_refinement",
+          "time": 54582,
+          "rlimit-count": 83619070,
+          "function-breakdown": [
+            {
+              "function": "lib::impl_u::os_refinement::no_overlaps_interp_pt_mem",
+              "time": 214,
+              "rlimit-count": 263763,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::os_refinement::extra_mappings_preserved_for_overlap_map",
+              "time": 6298,
+              "rlimit-count": 16505779,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::os_refinement::no_overlaps_pmem_applied_mappings",
+              "time": 738,
+              "rlimit-count": 3112890,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::os_refinement::relevant_mem_preserved",
+              "time": 429,
+              "rlimit-count": 851272,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::os_refinement::vaddr_mapping_is_being_modified_from_vaddr_unmap",
+              "time": 1303,
+              "rlimit-count": 357654,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::os_refinement::extra_mappings_preserved_effective_mapping_removed",
+              "time": 2878,
+              "rlimit-count": 1789670,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::os_refinement::step_UnmapOpChange_refines",
+              "time": 716,
+              "rlimit-count": 1925532,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::os_refinement::os_init_refines_hl_init",
+              "time": 71,
+              "rlimit-count": 33189,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::os_refinement::step_MapStart_refines",
+              "time": 817,
+              "rlimit-count": 888198,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::os_refinement::next_step_refines_hl_next_step",
+              "time": 15915,
+              "rlimit-count": 785357,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::os_refinement::interp_vmem_update_range",
+              "time": 171,
+              "rlimit-count": 531481,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::os_refinement::monotonic_candidate_mapping_overlaps_existing_vmem",
+              "time": 18,
+              "rlimit-count": 1191699,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::os_refinement::lemma_inflight_vaddr_implies_hl_unmap_or_map",
+              "time": 137,
+              "rlimit-count": 631253,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::os_refinement::step_UnmapEnd_refines",
+              "time": 539,
+              "rlimit-count": 1041874,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::os_refinement::lemma_inflight_unmap_vaddr_equals_hl_unmap",
+              "time": 200,
+              "rlimit-count": 41791,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::os_refinement::lemma_map_soundness_equality",
+              "time": 200,
+              "rlimit-count": 1545533,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::os_refinement::lemma_unmap_soundness_equality",
+              "time": 21,
+              "rlimit-count": 281824,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::os_refinement::vaddr_distinct",
+              "time": 53,
+              "rlimit-count": 114231,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::os_refinement::interp_vmem_subrange",
+              "time": 172,
+              "rlimit-count": 926567,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::os_refinement::step_UnmapStart_refines",
+              "time": 1750,
+              "rlimit-count": 3924554,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::os_refinement::extra_mappings_preserved_effective_mapping_inserted",
+              "time": 1622,
+              "rlimit-count": 1271168,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::os_refinement::no_overlaps_applied_mappings",
+              "time": 1329,
+              "rlimit-count": 361930,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::os_refinement::unmap_vaddr_set_le_extra_mappings_dom",
+              "time": 196,
+              "rlimit-count": 1783724,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::os_refinement::extra_mappings_preserved",
+              "time": 1323,
+              "rlimit-count": 78554,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::os_refinement::bounds_applied_mappings",
+              "time": 402,
+              "rlimit-count": 890120,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::os_refinement::extra_mappings_removed",
+              "time": 849,
+              "rlimit-count": 24892,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::os_refinement::step_MapEnd_refines",
+              "time": 1224,
+              "rlimit-count": 1952269,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::os_refinement::extra_mappings_inserted",
+              "time": 1375,
+              "rlimit-count": 2474951,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::os_refinement::step_MapOpChange_refines",
+              "time": 864,
+              "rlimit-count": 1201179,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::os_refinement::os_next_refines_hl_next",
+              "time": 41,
+              "rlimit-count": 23893924,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::os_refinement::extra_mappings_submap",
+              "time": 721,
+              "rlimit-count": 10687064,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::os_refinement::lemma_effective_mappings_unaffected_if_thread_state_constant",
+              "time": 960,
+              "rlimit-count": 200752,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::os_refinement::step_MemOp_refines",
+              "time": 11022,
+              "rlimit-count": 2054432,
+              "success": true
+            }
+          ]
+        },
+        {
+          "module": "impl_u::l2_impl::aux",
+          "time": 52236,
+          "rlimit-count": 9014,
+          "function-breakdown": [
+            {
+              "function": "lib::impl_u::l2_impl::aux::nonlinear_query2",
+              "time": 44043,
+              "rlimit-count": 4473,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::aux::nonlinear_query1",
+              "time": 8192,
+              "rlimit-count": 4541,
+              "success": true
+            }
+          ]
+        },
+        {
+          "module": "spec_t::os_code_vc",
+          "time": 24573,
+          "rlimit-count": 31046354,
+          "function-breakdown": [
+            {
+              "function": "lib::spec_t::os_code_vc::Token::register_external_step",
+              "time": 0,
+              "rlimit-count": 46005,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_code_vc::lemma_concurrent_trs_induct",
+              "time": 39,
+              "rlimit-count": 6710,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_code_vc::lemma_concurrent_trs_step_intro",
+              "time": 15,
+              "rlimit-count": 26721,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_code_vc::Token::register_internal_step_mmu",
+              "time": 0,
+              "rlimit-count": 30538281,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_code_vc::Token::do_concurrent_trs",
+              "time": 0,
+              "rlimit-count": 382312,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_code_vc::lemma_concurrent_trs_eq_intro",
+              "time": 23,
+              "rlimit-count": 1704,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_code_vc::concurrent_trs",
+              "time": 1,
+              "rlimit-count": 36653,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_code_vc::Token::return_osext_token",
+              "time": 0,
+              "rlimit-count": 1372,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_code_vc::Token::return_mmu_token",
+              "time": 0,
+              "rlimit-count": 1306,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_code_vc::lemma_concurrent_trs",
+              "time": 24493,
+              "rlimit-count": 798,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_code_vc::Token::register_internal_step",
+              "time": 0,
+              "rlimit-count": 820,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_code_vc::Token::register_external_step_osext",
+              "time": 0,
+              "rlimit-count": 1252,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_code_vc::Token::register_internal_step_osext",
+              "time": 0,
+              "rlimit-count": 2420,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_code_vc::lemma_concurrent_trs_no_lock",
+              "time": 47265,
+              "rlimit-count": 35481,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_code_vc::lemma_concurrent_trs_during_shootdown",
+              "time": 41981,
+              "rlimit-count": 35583,
+              "success": true
+            }
+          ]
+        },
+        {
+          "module": "impl_u::l2_impl::PT",
+          "time": 23936,
+          "rlimit-count": 25890638,
+          "function-breakdown": [
+            {
+              "function": "lib::impl_u::l2_impl::PT::unmap_aux",
+              "time": 11253,
+              "rlimit-count": 19565,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::PT::lemma_inv_implies_interp_inv",
+              "time": 876,
+              "rlimit-count": 11275,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::PT::entry_at_unmap",
+              "time": 141,
+              "rlimit-count": 237174,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::PT::lemma_directories_obey_invariant_at_framing",
+              "time": 79,
+              "rlimit-count": 110511,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::PT::unmap",
+              "time": 67,
+              "rlimit-count": 354326,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::PT::lemma_zeroed_page_implies_empty_at",
+              "time": 58,
+              "rlimit-count": 382068,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::PT::interp_at_entry",
+              "time": 19,
+              "rlimit-count": 17217,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::PT::inv_and_nonempty",
+              "time": 11,
+              "rlimit-count": 18539,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::PT::lemma_no_empty_directories_implies_interp_at_no_empty_directories",
+              "time": 82,
+              "rlimit-count": 280322,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::PT::lemma_inv_at_changed_tok",
+              "time": 60,
+              "rlimit-count": 129500,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::PT::lemma_interp_at_aux_facts",
+              "time": 80,
+              "rlimit-count": 6818,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::PT::lemma_interp_at_entry_changed_tok",
+              "time": 64,
+              "rlimit-count": 96627,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::PT::lemma_no_empty_directories_with_changed_tok",
+              "time": 90,
+              "rlimit-count": 106908,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::PT::lemma_empty_at_interp_at_equal_l1_empty_dir",
+              "time": 49,
+              "rlimit-count": 62655,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::PT::lemma_interp_at_facts",
+              "time": 26,
+              "rlimit-count": 153064,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::PT::interp_at",
+              "time": 2,
+              "rlimit-count": 29441,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::PT::insert_empty_directory",
+              "time": 21602,
+              "rlimit-count": 50786,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::PT::directories_obey_invariant_at",
+              "time": 12,
+              "rlimit-count": 117637,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::PT::map_frame",
+              "time": 179,
+              "rlimit-count": 22498835,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::PT::is_directory_empty",
+              "time": 227,
+              "rlimit-count": 367726,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::PT::inv",
+              "time": 0,
+              "rlimit-count": 18409,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::PT::entry_at",
+              "time": 180,
+              "rlimit-count": 46345,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::PT::lemma_empty_at_implies_interp_at_empty",
+              "time": 278,
+              "rlimit-count": 178759,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::PT::interp_at_aux",
+              "time": 21,
+              "rlimit-count": 28735,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::PT::lemma_no_empty_directories_framing",
+              "time": 286,
+              "rlimit-count": 166418,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::PT::lemma_not_empty_at_implies_interp_at_not_empty",
+              "time": 167,
+              "rlimit-count": 66547,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::PT::inv_at",
+              "time": 15,
+              "rlimit-count": 30694,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::PT::no_empty_directories",
+              "time": 13,
+              "rlimit-count": 3316,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::PT::lemma_empty_at_interp_at_aux_equal_l1_empty_dir",
+              "time": 63,
+              "rlimit-count": 79476,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::PT::layer_in_range",
+              "time": 0,
+              "rlimit-count": 11475,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::PT::lemma_not_empty_at_implies_interp_at_aux_not_empty",
+              "time": 52,
+              "rlimit-count": 240310,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::PT::map_frame_aux",
+              "time": 73950,
+              "rlimit-count": 177048,
+              "success": true
+            }
+          ]
+        },
+        {
+          "module": "spec_t::mmu::rl2::refinement",
+          "time": 9163,
+          "rlimit-count": 11245042,
+          "function-breakdown": [
+            {
+              "function": "lib::spec_t::mmu::rl2::refinement::init_refines",
+              "time": 20,
+              "rlimit-count": 24807,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::refinement::next_refines",
+              "time": 19,
+              "rlimit-count": 6161133,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::refinement::next_step_MemOpNoTr_refines",
+              "time": 4007,
+              "rlimit-count": 22845,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl2::refinement::next_step_refines",
+              "time": 5116,
+              "rlimit-count": 5036257,
+              "success": true
+            }
+          ]
+        },
+        {
+          "module": "impl_u::l1",
+          "time": 5667,
+          "rlimit-count": 1709785,
+          "function-breakdown": [
+            {
+              "function": "lib::impl_u::l1::Directory::lemma_interp_of_entry_contains_mapping_implies_interp_aux_contains_mapping",
+              "time": 71,
+              "rlimit-count": 5816,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::NodeEntry::interp",
+              "time": 1,
+              "rlimit-count": 5373,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::lemma_interp_of_entry_key_between",
+              "time": 17,
+              "rlimit-count": 21415,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::directories_match_arch",
+              "time": 3,
+              "rlimit-count": 9086,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::lemma_entries_interp_equal_implies_interp_aux_equal",
+              "time": 31,
+              "rlimit-count": 48758,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::lemma_interp_entries_remove_implies_interp_remove",
+              "time": 98,
+              "rlimit-count": 494980,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::lemma_new_empty_dir",
+              "time": 53,
+              "rlimit-count": 10353,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::lemma_interp_contains_implies_interp_of_entry_contains",
+              "time": 9,
+              "rlimit-count": 44715,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::well_formed",
+              "time": 0,
+              "rlimit-count": 6850,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::interp",
+              "time": 0,
+              "rlimit-count": 5344,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::entry_size",
+              "time": 0,
+              "rlimit-count": 1132,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::directories_obey_invariant",
+              "time": 13,
+              "rlimit-count": 20232,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::lemma_empty_implies_interp_empty",
+              "time": 8,
+              "rlimit-count": 28866,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::lemma_interp_aux_contains_implies_interp_of_entry_contains",
+              "time": 30,
+              "rlimit-count": 19556,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::inv",
+              "time": 6,
+              "rlimit-count": 9397,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::no_empty_directories",
+              "time": 4,
+              "rlimit-count": 8581,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::accepted_mapping",
+              "time": 0,
+              "rlimit-count": 1353,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::lemma_interp_aux_between",
+              "time": 23,
+              "rlimit-count": 34143,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::lemma_interp_of_entry_disjoint_mappings",
+              "time": 31,
+              "rlimit-count": 92948,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::pages_match_entry_size",
+              "time": 6,
+              "rlimit-count": 7088,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::lemma_interp_of_entry_contains_mapping_implies_interp_contains_mapping",
+              "time": 8,
+              "rlimit-count": 59299,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::interp_of_entry",
+              "time": 5,
+              "rlimit-count": 57010,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::lemma_interp_of_entry_insert_page_implies_interp_insert_page",
+              "time": 9,
+              "rlimit-count": 12611,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::lemma_interp_of_entry_insert_implies_interp_aux_insert",
+              "time": 43,
+              "rlimit-count": 12311,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::candidate_mapping_in_bounds",
+              "time": 0,
+              "rlimit-count": 2656,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::lemma_interp_of_entry_insert_implies_interp_insert",
+              "time": 10,
+              "rlimit-count": 67500,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::lemma_interp_contains_key_implies_interp_of_entry_contains_key_at_index",
+              "time": 12,
+              "rlimit-count": 10161,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::lemma_empty_implies_interp_aux_empty",
+              "time": 27,
+              "rlimit-count": 61077,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::lemma_interp_entries_insert_implies_interp_insert",
+              "time": 14,
+              "rlimit-count": 80052,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::lemma_entries_interp_insert_implies_interp_aux_insert",
+              "time": 194,
+              "rlimit-count": 7974,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::update",
+              "time": 0,
+              "rlimit-count": 6896,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::lemma_entries_interp_equal_implies_interp_equal",
+              "time": 9,
+              "rlimit-count": 47198,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::num_entries",
+              "time": 0,
+              "rlimit-count": 3098,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::upper_vaddr",
+              "time": 2,
+              "rlimit-count": 9006,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::frames_aligned",
+              "time": 3,
+              "rlimit-count": 10084,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::lemma_entries_interp_remove_implies_interp_aux_remove",
+              "time": 349,
+              "rlimit-count": 19317,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::interp_aux",
+              "time": 3,
+              "rlimit-count": 6979,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::lemma_interp_of_entry_between",
+              "time": 79,
+              "rlimit-count": 103837,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::lemma_entries_interp_insert_implies_interp_insert",
+              "time": 19,
+              "rlimit-count": 204544,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::lemma_nonempty_implies_interp_contains",
+              "time": 41,
+              "rlimit-count": 12039,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::map_frame",
+              "time": 12,
+              "rlimit-count": 24535,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::empty",
+              "time": 5,
+              "rlimit-count": 1654,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::directories_are_in_next_layer",
+              "time": 6,
+              "rlimit-count": 8148,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::ambient_lemmas2",
+              "time": 13,
+              "rlimit-count": 1632,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l1::Directory::lemma_interp_contains_implies_interp_of_entry_contains_at_index",
+              "time": 4450,
+              "rlimit-count": 9997,
+              "success": true
+            }
+          ]
+        },
+        {
+          "module": "impl_u::verified_impl",
+          "time": 5665,
+          "rlimit-count": 6214185,
+          "function-breakdown": [
+            {
+              "function": "lib::impl_u::verified_impl::PTImpl::sys_do_unmap",
+              "time": 2032,
+              "rlimit-count": 3489001,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::verified_impl::PTImpl::sys_do_map",
+              "time": 2279,
+              "rlimit-count": 41381,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::verified_impl::PTImpl::handle_shootdown_ipi",
+              "time": 1353,
+              "rlimit-count": 2683803,
+              "success": true
+            }
+          ]
+        },
+        {
+          "module": "impl_u::l2_impl",
+          "time": 5244,
+          "rlimit-count": 4517899,
+          "function-breakdown": [
+            {
+              "function": "lib::spec_t::mmu::translation::PDE::lemma_addr_mask_when_hp_pat_is_zero",
+              "time": 88,
+              "rlimit-count": 16289,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::lemma_aligned_addr_mask_facts",
+              "time": 163,
+              "rlimit-count": 35981,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::PDE::lemma_new_entry_addr_mask_is_address",
+              "time": 2080,
+              "rlimit-count": 75554,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::lemma_union_empty",
+              "time": 8,
+              "rlimit-count": 4119,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::PDE::flags",
+              "time": 9,
+              "rlimit-count": 9812,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::PDE::new_entry",
+              "time": 580,
+              "rlimit-count": 1375563,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::PDE::address",
+              "time": 17,
+              "rlimit-count": 20446,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::lemma_bitvector_facts_simple",
+              "time": 57,
+              "rlimit-count": 70365,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::PDE::lemma_zero_entry_facts",
+              "time": 128,
+              "rlimit-count": 32915,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::lemma_page_aligned_implies_mask_dir_addr_is_identity",
+              "time": 70,
+              "rlimit-count": 28025,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::lemma_difference_empty",
+              "time": 7,
+              "rlimit-count": 35393,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::PDE::is_page",
+              "time": 10,
+              "rlimit-count": 13865,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::PDE::new_page_entry",
+              "time": 33,
+              "rlimit-count": 1189883,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::PDE::new_dir_entry",
+              "time": 9,
+              "rlimit-count": 16060,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::PDE::lemma_new_entry_mb0_bits_are_zero",
+              "time": 1809,
+              "rlimit-count": 1477622,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::l2_impl::lemma_bitvector_facts",
+              "time": 158,
+              "rlimit-count": 92548,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::PDE::is_present",
+              "time": 6,
+              "rlimit-count": 6758,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::PDE::is_dir",
+              "time": 3,
+              "rlimit-count": 16701,
+              "success": true
+            }
+          ]
+        },
+        {
+          "module": "spec_t::mmu::rl3::refinement",
+          "time": 1920,
+          "rlimit-count": 1976322,
+          "function-breakdown": [
+            {
+              "function": "lib::spec_t::mmu::rl3::refinement::lemma_mask_dirty_access_after_xor",
+              "time": 24,
+              "rlimit-count": 37778,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl3::refinement::next_refines",
+              "time": 25,
+              "rlimit-count": 1617552,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl3::refinement::init_refines",
+              "time": 22,
+              "rlimit-count": 23922,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl3::refinement::next_step_refines",
+              "time": 1758,
+              "rlimit-count": 102048,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl3::refinement::rl3_walk_next_is_rl2_walk_next",
+              "time": 88,
+              "rlimit-count": 195022,
+              "success": true
+            }
+          ]
+        },
+        {
+          "module": "spec_t::mmu::pt_mem",
+          "time": 1651,
+          "rlimit-count": 617760,
+          "function-breakdown": [
+            {
+              "function": "lib::spec_t::mmu::pt_mem::lemma_fold_left_push",
+              "time": 10,
+              "rlimit-count": 38185,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::pt_mem::PTMem::lemma_write_seq_first",
+              "time": 6,
+              "rlimit-count": 10156,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::pt_mem::PTMem::lemma_write_seq",
+              "time": 15,
+              "rlimit-count": 8762,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::pt_mem::PTMem::lemma_write_seq_read",
+              "time": 20,
+              "rlimit-count": 109430,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::pt_mem::PTMem::lemma_pt_walk",
+              "time": 365,
+              "rlimit-count": 21046,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::pt_mem::PTMem::lemma_pt_walk_agrees_in_frame",
+              "time": 1206,
+              "rlimit-count": 57008,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::pt_mem::PTMem::lemma_write_seq_idle",
+              "time": 18,
+              "rlimit-count": 357804,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::pt_mem::PTMem::lemma_write_seq_push",
+              "time": 7,
+              "rlimit-count": 15369,
+              "success": true
+            }
+          ]
+        },
+        {
+          "module": "spec_t::mmu::translation",
+          "time": 826,
+          "rlimit-count": 1022554,
+          "function-breakdown": [
+            {
+              "function": "lib::spec_t::mmu::translation::MASK_ADDR_SPEC",
+              "time": 0,
+              "rlimit-count": 508,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::MASK_FLAG_RW",
+              "time": 0,
+              "rlimit-count": 17344,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::MASK_L1_PG_ADDR_SPEC",
+              "time": 0,
+              "rlimit-count": 2235,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::MASK_L2_PG_ADDR_SPEC",
+              "time": 0,
+              "rlimit-count": 491,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::MASK_FLAG_PCD",
+              "time": 0,
+              "rlimit-count": 275,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::MASK_L3_PG_FLAG_PAT",
+              "time": 0,
+              "rlimit-count": 499,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::MASK_DIRTY_ACCESS",
+              "time": 0,
+              "rlimit-count": 705,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::lemma_bit_indices_less_512",
+              "time": 35,
+              "rlimit-count": 856157,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::MASK_L2_PG_ADDR",
+              "time": 6,
+              "rlimit-count": 6828,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::MASK_PG_FLAG_PAT",
+              "time": 0,
+              "rlimit-count": 543,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::MASK_DIR_ADDR_SPEC",
+              "time": 0,
+              "rlimit-count": 685,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::MASK_L3_PG_ADDR_SPEC",
+              "time": 0,
+              "rlimit-count": 291,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::MASK_L2_PG_FLAG_PS",
+              "time": 0,
+              "rlimit-count": 275,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::MASK_ADDR",
+              "time": 3,
+              "rlimit-count": 3169,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::MASK_PG_FLAG_G",
+              "time": 0,
+              "rlimit-count": 275,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::MASK_L1_PG_ADDR",
+              "time": 6,
+              "rlimit-count": 6998,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::MASK_FLAG_P",
+              "time": 0,
+              "rlimit-count": 1707,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::MASK_FLAG_US",
+              "time": 0,
+              "rlimit-count": 277,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::MASK_FLAG_XD",
+              "time": 0,
+              "rlimit-count": 275,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::MASK_DIR_ADDR",
+              "time": 0,
+              "rlimit-count": 6786,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::MASK_FLAG_PWT",
+              "time": 0,
+              "rlimit-count": 267,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::PDE::lemma_view_unchanged_dirty_access",
+              "time": 390,
+              "rlimit-count": 29823,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::MASK_NEG_DIRTY_ACCESS",
+              "time": 0,
+              "rlimit-count": 2551,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::MASK_L3_PG_ADDR",
+              "time": 3,
+              "rlimit-count": 6812,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::MASK_L1_PG_FLAG_PS",
+              "time": 0,
+              "rlimit-count": 275,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::translation::PDE::lemma_view_addr_aligned",
+              "time": 378,
+              "rlimit-count": 76503,
+              "success": true
+            }
+          ]
+        },
+        {
+          "module": "spec_t::mmu::rl3",
+          "time": 778,
+          "rlimit-count": 978157,
+          "function-breakdown": [
+            {
+              "function": "lib::spec_t::mmu::rl3::init_implies_inv",
+              "time": 35,
+              "rlimit-count": 963272,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl3::next_preserves_inv",
+              "time": 743,
+              "rlimit-count": 14885,
+              "success": true
+            }
+          ]
+        },
+        {
+          "module": "definitions_u",
+          "time": 328,
+          "rlimit-count": 265886,
+          "function-breakdown": [
+            {
+              "function": "lib::spec_t::mmu::defs::ArchExec::entry_base",
+              "time": 15,
+              "rlimit-count": 6350,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::Arch::lemma_entry_sizes_aligned_auto",
+              "time": 10,
+              "rlimit-count": 19605,
+              "success": true
+            },
+            {
+              "function": "lib::definitions_u::overflow_bounds",
+              "time": 15,
+              "rlimit-count": 25516,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::ArchExec::entry_size",
+              "time": 10,
+              "rlimit-count": 58720,
+              "success": true
+            },
+            {
+              "function": "lib::definitions_u::permissive_flags",
+              "time": 0,
+              "rlimit-count": 5711,
+              "success": true
+            },
+            {
+              "function": "lib::definitions_u::lemma_new_seq",
+              "time": 4,
+              "rlimit-count": 16246,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::ArchLayerExec::clone",
+              "time": 0,
+              "rlimit-count": 7020,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::ArchExec::index_for_vaddr",
+              "time": 10,
+              "rlimit-count": 23455,
+              "success": true
+            },
+            {
+              "function": "lib::definitions_u::lemma_maxphyaddr_facts",
+              "time": 62,
+              "rlimit-count": 6763,
+              "success": true
+            },
+            {
+              "function": "lib::definitions_u::x86_arch_inv",
+              "time": 25,
+              "rlimit-count": 6917,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::Arch::lemma_entry_sizes_increase",
+              "time": 12,
+              "rlimit-count": 20084,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::ArchExec::num_entries",
+              "time": 5,
+              "rlimit-count": 12192,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::Arch::lemma_entry_sizes_aligned",
+              "time": 124,
+              "rlimit-count": 31386,
+              "success": true
+            },
+            {
+              "function": "lib::definitions_u::aligned_exec",
+              "time": 5,
+              "rlimit-count": 11953,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::ArchExec::next_entry_base",
+              "time": 25,
+              "rlimit-count": 13968,
+              "success": true
+            }
+          ]
+        },
+        {
+          "module": "extra",
+          "time": 317,
+          "rlimit-count": 135629,
+          "function-breakdown": [
+            {
+              "function": "lib::extra::div_mul_cancel",
+              "time": 4,
+              "rlimit-count": 2707,
+              "success": true
+            },
+            {
+              "function": "lib::extra::lemma_set_of_first_n_nat_is_finite",
+              "time": 4,
+              "rlimit-count": 2366,
+              "success": true
+            },
+            {
+              "function": "lib::extra::mult_leq_mono2",
+              "time": 0,
+              "rlimit-count": 3537,
+              "success": true
+            },
+            {
+              "function": "lib::extra::aligned_transitive_auto",
+              "time": 13,
+              "rlimit-count": 7680,
+              "success": true
+            },
+            {
+              "function": "lib::extra::mult_less_mono_both2",
+              "time": 4,
+              "rlimit-count": 3603,
+              "success": true
+            },
+            {
+              "function": "lib::extra::aligned_zero",
+              "time": 2,
+              "rlimit-count": 3387,
+              "success": true
+            },
+            {
+              "function": "lib::extra::less_mul_cancel",
+              "time": 2,
+              "rlimit-count": 3477,
+              "success": true
+            },
+            {
+              "function": "lib::extra::aligned_transitive",
+              "time": 19,
+              "rlimit-count": 10677,
+              "success": true
+            },
+            {
+              "function": "lib::extra::mod_mult_zero_implies_mod_zero",
+              "time": 5,
+              "rlimit-count": 3145,
+              "success": true
+            },
+            {
+              "function": "lib::extra::assert_maps_equal_contains_pair",
+              "time": 4,
+              "rlimit-count": 7645,
+              "success": true
+            },
+            {
+              "function": "lib::extra::mult_leq_mono_both",
+              "time": 2,
+              "rlimit-count": 2873,
+              "success": true
+            },
+            {
+              "function": "lib::extra::result_map_ok",
+              "time": 0,
+              "rlimit-count": 33389,
+              "success": true
+            },
+            {
+              "function": "lib::extra::mult_less_mono_both1",
+              "time": 3,
+              "rlimit-count": 2939,
+              "success": true
+            },
+            {
+              "function": "lib::extra::mult_leq_mono1",
+              "time": 2,
+              "rlimit-count": 3509,
+              "success": true
+            },
+            {
+              "function": "lib::extra::mod_less_eq",
+              "time": 2,
+              "rlimit-count": 3358,
+              "success": true
+            },
+            {
+              "function": "lib::extra::mul_distributive",
+              "time": 3,
+              "rlimit-count": 3414,
+              "success": true
+            },
+            {
+              "function": "lib::extra::mod_add_zero",
+              "time": 5,
+              "rlimit-count": 5995,
+              "success": true
+            },
+            {
+              "function": "lib::extra::leq_add_aligned_less",
+              "time": 222,
+              "rlimit-count": 3201,
+              "success": true
+            },
+            {
+              "function": "lib::extra::lemma_subset_is_finite",
+              "time": 1,
+              "rlimit-count": 15387,
+              "success": true
+            },
+            {
+              "function": "lib::extra::mul_commute",
+              "time": 1,
+              "rlimit-count": 3433,
+              "success": true
+            },
+            {
+              "function": "lib::extra::result_map",
+              "time": 0,
+              "rlimit-count": 516,
+              "success": true
+            },
+            {
+              "function": "lib::extra::lemma_aligned_iff_eq_mul_div",
+              "time": 7,
+              "rlimit-count": 6728,
+              "success": true
+            },
+            {
+              "function": "lib::extra::subtract_mod_eq_zero",
+              "time": 3,
+              "rlimit-count": 2663,
+              "success": true
+            }
+          ]
+        },
+        {
+          "module": "spec_t::hlproof",
+          "time": 220,
+          "rlimit-count": 454017,
+          "function-breakdown": [
+            {
+              "function": "lib::spec_t::hlproof::insert_map_preserves_unique",
+              "time": 21,
+              "rlimit-count": 75761,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::hlproof::insert_non_map_preserves_unique",
+              "time": 13,
+              "rlimit-count": 9162,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::hlproof::unmap_start_preserves_inv",
+              "time": 40,
+              "rlimit-count": 122900,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::hlproof::map_end_preserves_inv",
+              "time": 76,
+              "rlimit-count": 100388,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::hlproof::map_start_preserves_inv",
+              "time": 58,
+              "rlimit-count": 47046,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::hlproof::lemma_overlap",
+              "time": 9,
+              "rlimit-count": 98760,
+              "success": true
+            }
+          ]
+        },
+        {
+          "module": "spec_t::mmu::rl3::refinement::to_rl1",
+          "time": 154,
+          "rlimit-count": 416146,
+          "function-breakdown": [
+            {
+              "function": "lib::spec_t::mmu::rl3::refinement::to_rl1::next_refines",
+              "time": 27,
+              "rlimit-count": 275327,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl3::refinement::to_rl1::next_preserves_inv",
+              "time": 24,
+              "rlimit-count": 25009,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl3::refinement::to_rl1::init_refines",
+              "time": 28,
+              "rlimit-count": 88924,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl3::refinement::to_rl1::init_implies_inv",
+              "time": 73,
+              "rlimit-count": 26886,
+              "success": true
+            }
+          ]
+        },
+        {
+          "module": "spec_t::mmu::defs",
+          "time": 151,
+          "rlimit-count": 209164,
+          "function-breakdown": [
+            {
+              "function": "lib::spec_t::mmu::defs::Arch::entry_base",
+              "time": 0,
+              "rlimit-count": 5237,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::Arch::inv",
+              "time": 2,
+              "rlimit-count": 5363,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::WORD_SIZE",
+              "time": 0,
+              "rlimit-count": 303,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::L2_ENTRY_SIZE",
+              "time": 2,
+              "rlimit-count": 203,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::Arch::contains_entry_size",
+              "time": 0,
+              "rlimit-count": 6816,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::x86_arch_spec_upper_bound",
+              "time": 0,
+              "rlimit-count": 1891,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::x86_arch_exec",
+              "time": 17,
+              "rlimit-count": 17941,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::align_to_usize",
+              "time": 0,
+              "rlimit-count": 2772,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::MemRegionExec::clone",
+              "time": 0,
+              "rlimit-count": 571,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::new_seq",
+              "time": 0,
+              "rlimit-count": 1153,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::Flags::clone",
+              "time": 0,
+              "rlimit-count": 571,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::MAX_BASE",
+              "time": 0,
+              "rlimit-count": 553,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::L0_ENTRY_SIZE",
+              "time": 2,
+              "rlimit-count": 3248,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::Arch::num_entries",
+              "time": 0,
+              "rlimit-count": 1210,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::L3_ENTRY_SIZE",
+              "time": 0,
+              "rlimit-count": 412,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::L1_ENTRY_SIZE",
+              "time": 2,
+              "rlimit-count": 2848,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::aligned",
+              "time": 0,
+              "rlimit-count": 6514,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::Core::clone",
+              "time": 0,
+              "rlimit-count": 22281,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::MAX_PHYADDR_SPEC",
+              "time": 0,
+              "rlimit-count": 1208,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::Arch::entry_size",
+              "time": 0,
+              "rlimit-count": 254,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::overlap_sanity_check",
+              "time": 6,
+              "rlimit-count": 10756,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::Arch::contains_entry_size_at_index_atleast",
+              "time": 0,
+              "rlimit-count": 2485,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::Arch::upper_vaddr",
+              "time": 2,
+              "rlimit-count": 2632,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::Arch::index_for_vaddr",
+              "time": 9,
+              "rlimit-count": 4197,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::Arch::entry_size_is_next_layer_size",
+              "time": 3,
+              "rlimit-count": 254,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::MAX_PHYADDR",
+              "time": 80,
+              "rlimit-count": 10628,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::x86_arch_spec",
+              "time": 0,
+              "rlimit-count": 3634,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::Arch::next_entry_base",
+              "time": 0,
+              "rlimit-count": 13978,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::X86_NUM_LAYERS",
+              "time": 0,
+              "rlimit-count": 66648,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::lemma_x86_arch_spec_inv",
+              "time": 15,
+              "rlimit-count": 5652,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::X86_MAX_ENTRY_SIZE",
+              "time": 0,
+              "rlimit-count": 1278,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::X86_NUM_ENTRIES",
+              "time": 0,
+              "rlimit-count": 410,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::PAGE_SIZE",
+              "time": 0,
+              "rlimit-count": 4692,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::defs::PageTableEntryExec::clone",
+              "time": 0,
+              "rlimit-count": 571,
+              "success": true
+            }
+          ]
+        },
+        {
+          "module": "impl_u::indexing",
+          "time": 72,
+          "rlimit-count": 60181,
+          "function-breakdown": [
+            {
+              "function": "lib::impl_u::indexing::lemma_index_from_base_and_addr",
+              "time": 28,
+              "rlimit-count": 6460,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::indexing::lemma_entry_base_from_index",
+              "time": 38,
+              "rlimit-count": 30025,
+              "success": true
+            },
+            {
+              "function": "lib::impl_u::indexing::lemma_entry_base_from_index_support",
+              "time": 5,
+              "rlimit-count": 23696,
+              "success": true
+            }
+          ]
+        },
+        {
+          "module": "spec_t::hlspec",
+          "time": 68,
+          "rlimit-count": 153983,
+          "function-breakdown": [
+            {
+              "function": "lib::spec_t::hlspec::init_implies_inv",
+              "time": 18,
+              "rlimit-count": 11846,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::hlspec::next_step_preserves_inv",
+              "time": 49,
+              "rlimit-count": 142137,
+              "success": true
+            }
+          ]
+        },
+        {
+          "module": "spec_t::os_ext",
+          "time": 0,
+          "rlimit-count": 0,
+          "function-breakdown": []
+        },
+        {
+          "module": "spec_t::os",
+          "time": 0,
+          "rlimit-count": 0,
+          "function-breakdown": []
+        },
+        {
+          "module": "spec_t::mmu",
+          "time": 0,
+          "rlimit-count": 0,
+          "function-breakdown": []
+        },
+        {
+          "module": "spec_t::os_ext::code",
+          "time": 0,
+          "rlimit-count": 57063,
+          "function-breakdown": [
+            {
+              "function": "lib::spec_t::os_ext::code::Token::prophesy_acquire_lock",
+              "time": 0,
+              "rlimit-count": 4859,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_ext::code::Token::prophesy_deallocate",
+              "time": 0,
+              "rlimit-count": 755,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_ext::code::Token::prophesy_allocate",
+              "time": 0,
+              "rlimit-count": 48592,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_ext::code::Token::prophesy_init_shootdown",
+              "time": 0,
+              "rlimit-count": 816,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_ext::code::Token::prophesy_release_lock",
+              "time": 0,
+              "rlimit-count": 548,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_ext::code::PGTABLE_LOCK",
+              "time": 0,
+              "rlimit-count": 454,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_ext::code::Token::prophesy_ack_shootdown",
+              "time": 0,
+              "rlimit-count": 537,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::os_ext::code::Token::prophesy_wait_shootdown",
+              "time": 0,
+              "rlimit-count": 502,
+              "success": true
+            }
+          ]
+        },
+        {
+          "module": "spec_t::mmu::rl1",
+          "time": 0,
+          "rlimit-count": 0,
+          "function-breakdown": []
+        },
+        {
+          "module": "",
+          "time": 0,
+          "rlimit-count": 0,
+          "function-breakdown": []
+        },
+        {
+          "module": "theorem",
+          "time": 0,
+          "rlimit-count": 321797,
+          "function-breakdown": [
+            {
+              "function": "lib::theorem::lemma1_init",
+              "time": 0,
+              "rlimit-count": 29011,
+              "success": true
+            },
+            {
+              "function": "lib::theorem::lemma1_next",
+              "time": 0,
+              "rlimit-count": 292786,
+              "success": true
+            }
+          ]
+        },
+        {
+          "module": "spec_t::mmu::rl3::code",
+          "time": 0,
+          "rlimit-count": 152936,
+          "function-breakdown": [
+            {
+              "function": "lib::spec_t::mmu::rl3::code::local_phys_to_mem",
+              "time": 0,
+              "rlimit-count": 130,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl3::code::Token::prophesy_write",
+              "time": 0,
+              "rlimit-count": 136664,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl3::code::Token::prophesy_read",
+              "time": 0,
+              "rlimit-count": 13865,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl3::code::mem_to_local_phys",
+              "time": 0,
+              "rlimit-count": 669,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl3::code::Token::prophesy_barrier",
+              "time": 0,
+              "rlimit-count": 919,
+              "success": true
+            },
+            {
+              "function": "lib::spec_t::mmu::rl3::code::Token::prophesy_invlpg",
+              "time": 0,
+              "rlimit-count": 689,
+              "success": true
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "verus": {
+    "profile": "release",
+    "version": "0.2025.04.12.04a69f9",
+    "platform": {
+      "os": "linux",
+      "arch": "x86_64"
+    },
+    "toolchain": "1.82.0-x86_64-unknown-linux-gnu",
+    "commit": "04a69f9f2ccf859e5d39ee52c8b44ff7ec637926"
+  }
+}

@@ -1,0 +1,46 @@
+[package]
+name = "VerOsMicrobenchmarks"
+description = "Microbenchmarks for the Verified OS"
+license = "MIT"
+version = "0.1.0"
+authors = ["Reto Achermann <achreto@cs.ubc.ca>"]
+edition = "2021"
+readme = "README.md"
+
+[dependencies]
+# argument parsing
+# clap = { version = "4.5.8", features = [ "derive" ] }
+
+# for colorful output
+# colored = "2"
+
+# logging and errors
+# log = { version = "0.4.19", features = ["max_level_trace", "release_max_level_warn"] }
+# simplelog = { version = "^0.12.2", features = ["paris"] }
+chrono = "0.4.38"
+
+# dependencies for testing
+[dev-dependencies]
+strip-ansi-escapes = "0.1.1"
+rexpect = "0.5"
+
+indicatif = "0.17.8"
+
+[build-dependencies]
+vergen = { version = "8.3.1", features = ["build", "git", "gitcl", "si"] }
+anyhow = "1.0.86"
+
+# enable optimizations for the tests
+[profile.test]
+opt-level = 3
+
+# benchmarking
+[[bin]]
+name = "page_table_traversal"
+path = "src/page_table_traversal.rs"
+
+
+# benchmarking
+[[bin]]
+name = "systemcall_map_unmap"
+path = "src/mmap_munmap.rs"
