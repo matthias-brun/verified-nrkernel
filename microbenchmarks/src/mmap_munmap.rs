@@ -314,7 +314,7 @@ fn parse_results(output: &str) -> Measurements {
 }
 
 fn main() {
-    println!("# Running Benchmark: Page Table Traversal Measurements");
+    println!("# Running Benchmark: System Call Measurements");
 
     let args: Vec<String> = env::args().collect();
 
