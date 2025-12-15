@@ -33,11 +33,13 @@ malloc_test: malloc_test.c libjemalloc.so
 malloc_test_static: malloc_test.c libjemalloc.so
 	gcc -o $@ -Wall -O3 -g -no-pie $(INCLUDES) $<  libjemalloc.a
 
-libjemalloc.so:
+libjemalloc.so: ../jemalloc/Makefile
 	(cd ../jemalloc && make)
 	cp ../jemalloc/lib/libjemalloc.so .
 	cp ../jemalloc/lib/libjemalloc.a .
 
+../jemalloc/Makefile:
+	(cd ../jemalloc && EXTRA_CXXFLAGS=-DCONFIG_USE_MMAP_MODULE EXTRA_CFLAGS=-DCONFIG_USE_MMAP_MODULE ./autogen.sh)
 
 clean:
 	rm -rf verified_mmap_test
