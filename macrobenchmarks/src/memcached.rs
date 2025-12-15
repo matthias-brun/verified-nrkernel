@@ -23,7 +23,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::{env, result};
+use std::env;
 use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::fs::File;
