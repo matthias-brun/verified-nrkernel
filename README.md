@@ -17,6 +17,12 @@ The citation will be updated once the paper is accepted.
 The artifact is designed and tested to run on an x86-64 server running Ubuntu 24.04 LTS with root privileges.
 Other platforms or architectures might work too, but are not tested.
 
+Moreover, the server machine must be configured to use 4-level paging, no page table isolation, and
+no indirect branch targets. You can achieve thi susing the following kernel commandline parameters:
+```
+nopti ibt=off no5lvl
+```
+
 ## Preparation
 
 Follow the following preparation steps to set up the machine for building and running the artifact.
