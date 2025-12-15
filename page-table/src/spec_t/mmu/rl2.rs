@@ -2083,7 +2083,7 @@ proof fn lemma_valid_implies_equal_walks(state: State, c: Constants, core: Core,
         assert(bit!(0usize) == 1) by (bit_vector);
         axiom_max_phyaddr_width_facts();
         let mw = MAX_PHYADDR_WIDTH;
-        assert(forall|v: usize| (#[trigger] (v & bitmask_inc!(12usize, sub(mw, 1)))) % 4096 == 0) by (bit_vector)
+        assert(forall|v: usize| (v & bitmask_inc!(12usize, sub(mw, 1))) % 4096 == 0) by (bit_vector)
             requires 32 <= mw <= 52;
         crate::spec_t::mmu::translation::lemma_bit_indices_less_512(va);
         broadcast use lemma_valid_implies_equal_reads;
