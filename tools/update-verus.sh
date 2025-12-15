@@ -31,7 +31,7 @@ VERUS_REPO="https://github.com/verus-lang/verus.git"
 VERUS_DIR=".verus"
 
 # the verus release to be used
-VERUS_RELEASE="release/0.2025.11.30.840fa61"
+VERUS_RELEASE="release/0.2025.06.14.9b557d7"
 
 # check if verus repo exists, clone it if needed
 if [ ! -d .verus ]; then
