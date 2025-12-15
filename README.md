@@ -103,8 +103,10 @@ Some checks are taking longer than 2s (diagnostics for these may be reported out
 
 ...[cut output]...
 
-verification results:: 526 verified, 0 errors
+verification results:: 518 verified, 0 errors
 ```
+
+Note, there might be a missing linebreak in the Verus output before "verification results"
 
 
 ## Proof Metrics: Specification Size
