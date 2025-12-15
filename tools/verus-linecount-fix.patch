@@ -1,0 +1,12 @@
+diff --git a/source/tools/line_count/src/main.rs b/source/tools/line_count/src/main.rs
+index 7a692857..913924f3 100644
+--- a/source/tools/line_count/src/main.rs
++++ b/source/tools/line_count/src/main.rs
+@@ -128,6 +128,7 @@ impl ToCodeKind for syn_verus::FnMode {
+             syn_verus::FnMode::Spec(_) | syn_verus::FnMode::SpecChecked(_) => CodeKind::Spec,
+             syn_verus::FnMode::Proof(_) => CodeKind::Proof,
+             syn_verus::FnMode::Exec(_) | syn_verus::FnMode::Default => CodeKind::Exec,
++            syn_verus::FnMode::ProofAxiom(_) => CodeKind::Proof
+         }
+     }
+ }

@@ -34,6 +34,15 @@ GIT_HASH=$(git rev-parse --short HEAD)
 verus --crate-type=lib --rlimit 50 --cfg feature=\"impl\"  --no-verify --emit=dep-info page-table/src/lib.rs
 
 DEP_FILE=$(pwd)/lib.d
+PATCH_FILE=$(pwd)/tools/verus-linecount-fix.patch
+
+pushd ${VERUS_DIR}
+
+echo "Patching bug in linecount tool for verus commit"
+git checkout source/tools/line_count/src/main.rs
+git apply ${PATCH_FILE}
+
+popd
 
 pushd ${VERUS_DIR}/source/tools/line_count
 
