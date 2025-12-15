@@ -23,8 +23,6 @@
 #ifndef __VERIFIED_MMAP_IOCTL_H__
 #define __VERIFIED_MMAP_IOCTL_H__
 
-#include <stdint.h>
-
 #define VA_RANGE_MIN (16UL * (512ULL << 30))
 #define VA_RANGE_MAX (17UL * (512ULL << 30))
 
