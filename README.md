@@ -30,7 +30,7 @@ sudo apt-get update
 
 sudo apt-get install linux-headers-$(uname -r) build-essential dkms libncurses-dev flex bison \
                      openssl libssl-dev libelf-dev libudev-dev libpci-dev libiberty-dev autoconf \
-                     git curl
+                     git curl unzip
 ```
 Note: This includes the build-dependencies of the Linux kernel modules.
 
