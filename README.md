@@ -251,8 +251,8 @@ but the `NoReclaim` variant should match Linux and Velosiratpor.
   \hline % -----------------------------------------------------------------------------------------
   Linux              &     26ns &     29ns &     24ns &     24ns &     24ns &     24ns \\
   Velosiraptor       &     25ns &     25ns &     24ns &     24ns &     24ns &     24ns \\
-  \system            &     26ns &     26ns &     55ns &     57ns &    198ns &    347ns \\
-  \system+NoReclaim  &     19ns &     20ns &     29ns &     30ns &     17ns &     17ns \\
+  VeriMM             &     26ns &     26ns &     55ns &     57ns &    198ns &    347ns \\
+  VeriMM+NoReclaim   &     19ns &     20ns &     29ns &     30ns &     17ns &     17ns \\
   \hline % -----------------------------------------------------------------------------------------
 \end{tabular}
 %
@@ -307,8 +307,8 @@ results, where Linux is expected to be slightly slower due to additional VMA man
   \hline % --------------------------------------------------------------------------------------------
   Linux                &   3208ns &   3559ns &   7922ns &   9583ns &  10607ns &  11534ns \\
   Velosiraptor         &   1406ns &   1698ns &   7770ns &   8031ns &   7678ns &   7848ns \\
-  \system              &   1464ns &   1746ns &   7107ns &   7366ns &   7623ns &   9348ns \\
-  \system+NoReclaim    &   1645ns &   2075ns &   6450ns &   6838ns &   6323ns &   6701ns \\
+  VeriMM               &   1464ns &   1746ns &   7107ns &   7366ns &   7623ns &   9348ns \\
+  VeriMM+NoReclaim     &   1645ns &   2075ns &   6450ns &   6838ns &   6323ns &   6701ns \\
   \hline % --------------------------------------------------------------------------------------------
 \end{tabular}
 %
@@ -337,7 +337,7 @@ Note building might fail if you haven't enabled nightly toolchain, or having a d
 
 **Expected Duration**
 
-The expected duration is 10 minutes on an Intel Xeon Silver 4310 CPU @ 2.10GHz.
+The expected duration is 15 minutes on an Intel Xeon Silver 4310 CPU @ 2.10GHz.
 
 **Expected Results**
 
@@ -347,10 +347,10 @@ The script will print a latex table with the results.
 % ==================================================================================================
 % Table: Memcached Performance
 % ==================================================================================================
-% Git Hash:   1c15460-dirty
+% Git Hash:   9cf39e4
 % CPU:        Intel(R) Xeon(R) Silver 4310 CPU @ 2.10GHz
 % OS:         Linux 24.04 Ubuntu
-% Date:       2025-12-09 08:27:19.537031507 -08:00
+% Date:       2025-12-15 12:53:06.504095890 -08:00
 % ==================================================================================================
 %
 \begin{tabular}{lrrrrrr}
@@ -358,10 +358,10 @@ The script will print a latex table with the results.
   \th{Operation     } & \span{\th{       Get        }} & \span{\th{       Set        }} \\
   \th{Code          } & \th{Tpt} & \th{P50} & \th{P99} & \th{Tpt} & \th{P50} & \th{P99} \\
   \hline % ---------------------------------------------------------------------------
-  Linux               &   772K/s &   0.45ms &   0.73ms &    77K/s &   0.46ms &   0.73ms \\
-  Velosiraptor        &   769K/s &   0.46ms &   0.73ms &    77K/s &   0.47ms &   0.73ms \\
-  \system             &   773K/s &   0.46ms &   0.72ms &    77K/s &   0.46ms &   0.73ms \\
-  \system+NoReclaim   &   777K/s &   0.45ms &   0.81ms &    78K/s &   0.45ms &   0.81ms \\
+  Linux               &   766K/s &   0.44ms &   0.73ms &    77K/s &   0.44ms &   0.74ms \\
+  Velosiraptor        &   759K/s &   0.44ms &   0.74ms &    76K/s &   0.44ms &   0.75ms \\
+  VeriMM              &   750K/s &   0.45ms &   0.75ms &    75K/s &   0.45ms &   0.75ms \\
+  VeriMM+NoReclaim    &   753K/s &   0.44ms &   0.75ms &    75K/s &   0.45ms &   0.75ms \\
   \hline % ---------------------------------------------------------------------------
 \end{tabular}
 %
@@ -401,7 +401,7 @@ For the verification, you should see the following output:
 ```bash
 + verus --version
 Verus
-  Version: 0.2025.06.14.9b557d7.dirty
+  Version: 0.2025.06.14.9b557d7
   Profile: release
   Platform: linux_x86_64
   Toolchain: 1.85.1-x86_64-unknown-linux-gnu
@@ -417,7 +417,8 @@ note: verifying module hlspec_user::util
 
 Some checks are taking longer than 2s (diagnostics for these may be reported out of order)
 • page-table/src/hlspec_user.rs:283:7: 283:29 has finished in 14s
-  ⌝ function body check for lib::hlspec_user::program_threads_4                                                                                                                                                                                                                                  verification results:: 19 verified, 0 errors (partial verification with `--verify-*`)
+  ⌝ function body check for lib::hlspec_user::program_threads_4
+verification results:: 19 verified, 0 errors (partial verification with `--verify-*`)
 ```
 
 For running the litmus tests, you can expect to see the following output. Note, the last
