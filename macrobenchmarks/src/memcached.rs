@@ -337,8 +337,17 @@ fn run_memcached(bin: &PathBuf, dir:&PathBuf, cfg: RunConfiguration) -> std::io:
 
     let jemalloc_path = dir.join(cfg.jemalloc_name());
 
+    let mut args = vec!["-c", "4096", "-t", "8", "-m", "4096"];
+
+    // Check if running as root and add -u root if so
+    let uid = unsafe { libc::getuid() };
+    if uid == 0 {
+        args.push("-u");
+        args.push("root");
+    }
+
     Command::new(prog_path)
-        .args(["-c", "4096", "-t", "8", "-m", "4096"])
+        .args(&args)
         .env("LD_PRELOAD", jemalloc_path)
         .spawn()
 }
