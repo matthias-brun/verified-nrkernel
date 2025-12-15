@@ -6,8 +6,10 @@ This repository contains the artifact oft the ASPLOS'26 paper "*Managing Hardwar
 ## Citation
 
 ```
-Anonymized.
+Managing Hardware Complexity in OS Verification.
+Anonymous Authors of Paper #406. ASPLOS '26.
 ```
+The citation will be updated once the paper is accepted.
 
 
 ## Supported Platforms
@@ -30,7 +32,7 @@ sudo apt-get install linux-headers-$(uname -r) build-essential dkms libncurses-d
                      openssl libssl-dev libelf-dev libudev-dev libpci-dev libiberty-dev autoconf \
                      git curl
 ```
-Note: This includes the build-dependencies of the Linux kernel.
+Note: This includes the build-dependencies of the Linux kernel modules.
 
 
 **2. Initialize the Git Submodules**
@@ -65,7 +67,6 @@ Run the following command to install Verus in the right directory. You can learn
 installing Verus from its [install instructions](https://github.com/verus-lang/verus/blob/main/INSTALL.md).
 
 ```bash
-cd verified-nrkernel
 bash tools/update-verus.sh
 ```
 
@@ -78,15 +79,14 @@ artifact.
 **Claim**
 
 The proof artifacts in this repository successfully verify:
- - Verify the \hihm and \lowhm models.
+ - Verify the `HiHM` and `LowHM` models.
  - Verify the Rust implementation and its refinement proofs.
  - Verify the HlSpec model and its refinement proofs.
 
 **Running the Experiment**
 
 ```bash
-cd verified-nrkernel
-bash tools/verify.sh  --time
+bash tools/verify.sh
 ```
 
 **Expected Duration**
@@ -123,7 +123,6 @@ verification results:: 526 verified, 0 errors
 **Running the Experiment**
 
 ```bash
-cd verified-nrkernel
 bash tools/get-line-count.sh
 ```
 
@@ -188,7 +187,6 @@ The Project verifies in in reasonable time with most functions verifying in a fe
 **Running the Experiment**
 
 ```bash
-cd verified-nrkernel
 bash tools/measure-verification-times.sh
 ```
 
@@ -198,15 +196,14 @@ Less than one minute on an Intel Xeon Silver 4310 CPU @ 2.10GHz.
 
 **Expected Results**
 
-The script will generate a JSON file named `verified-nrkernel/verification-times-<GIT_HASH>.json`
+The script will generate a JSON file named `verification-times-<GIT_HASH>.json`
 containing the the detailed verification times for each function. Additionally, it creates a plot
-`verified-nrkernel/verification-times-<GIT_HASH>.png` that should look similar to the following:
+`verification-times-<GIT_HASH>.png` that should look similar to the following:
 ![Verification Times Plot](_assets/verification-times-cdf.png). Showing that 83% of all functions
 verify in less than one second.
 
 Note, those numbers are for an Intel Xeon Silver 4310 CPU @ 2.10GHz. The verification times may
 differ depending on the CPU used.
-
 
 
 ## Performance Evaluation: Page Table Traversal (Table 2)
@@ -375,7 +372,6 @@ litmus tests to validate the specification.
 
 To verify the three user-level programs against the high-level specification, run following command:
 ```bash
-cd verified-nrkernel
 bash tools/hlspec-verify.sh --verify-module hlspec_user
 ```
 
