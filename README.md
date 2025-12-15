@@ -166,7 +166,8 @@ Total Lines of Code: 15k lines of code and proofs (sum of Trusted, Spec, Proof, 
  * ~12.75k lines are proof script (sum of spec + proof)
  * 436 lines of executable code.
  * ~350 lines of user-space spec (spec_t/hlspec.rs and some definitions in other files)
- * ~5k lines of refinement Proofs Impl->OS+HW->User-Space Spec (impl_u/os_invariant.rs + spec_t/os/rs + impl_u/os_refinement.rs) and (impl_u/l1.rs + l2_impl/rs/impl_u/indexing.rs + impl_u/wrapped_token.rs + impl_u/verified_impl.rs + spec_t/os_code_vc.rs)
+ * ~5k lines of proofs to connect OS+HW to Userspace-spec (sum of spec and proof counts of `impl_u/os_invariant.rs`, `spec_t/os.rs`, `impl_u/os_refinement.rs`)
+ * ~5k lines of refinement proofs to connect the implementation to OS+HW (sum of spec and proof counts of `impl_u/l1.rs`, `impl_u/l2_impl.rs`, `impl_u/indexing.rs`, `impl_u/wrapped_token.rs`, `impl_u/verified_impl.rs`, `spec_t/os_code_vc.rs)`
  * ~2.5k lines of LowHM simplification proofs (spec_t/mmu/rl{1,2,3}.rs + spec_t/mmu/pt_mem.rs + spec_t/mmu/translation.rs + spec_t/mmu/defs.rs)
  * ~1k lines of LowHM specification (spec_t/mmu/rl3.rs)
  * ~400 lines of additional definitions.
