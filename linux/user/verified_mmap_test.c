@@ -1,3 +1,25 @@
+// MIT License
+//
+// Copyright (c) 2025 Paper #406 Authors, ASPLOS'26.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 #include <sys/ioctl.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -13,7 +35,6 @@
 #include <verified_mmap_ioctl.h>
 
 
-// TODO: need to find a way to tell linux not to use this range for mappings!
 #define MY_MMAP_ADDRESS_RANGE_START VA_RANGE_MIN
 #define MY_MMAP_ADDRESS_RANGE_END VA_RANGE_MAX
 #define MY_MMAP_REGION_SIZE (MY_MMAP_ADDRESS_RANGE_END - MY_MMAP_ADDRESS_RANGE_START + 1)
@@ -29,12 +50,6 @@ static int open_mmap_fd(void) {
 		perror("open");
 		return 1;
 	}
-
-	// TODO: make sure to "reserve the address range!"
-	// I believe you should be able to achieve the same by mapping anonymous memory with PROT_NONE.
-	// Accessing PROT_NONE memory will result in a segfault, but the memory region will be reserved
-	// and not used for any other purpose. If you want to allocate a very big chunk of memory, add
-	// MAP_NORESERVE to ensure that the default overcommit mechanism won't check your allocation.
 
 	// PROT_NONE is commonly employed for "guard" pages at the end of stacks.
 	// void *addr = mmap((void *)MY_MMAP_ADDRESS_RANGE_START, MY_MMAP_REGION_SIZE, PROT_NONE, MAP_NORESERVE|MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
