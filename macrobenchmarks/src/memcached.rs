@@ -220,6 +220,12 @@ fn get_memcached(dir: &PathBuf) -> Result<PathBuf, ()> {
             .output()
             .expect("failed to build clone memcached");
 
+        Command::new("git")
+            .args(["checkout", "62b3447380d3fd547e432d1128d94cd12f2e6852"])
+            .current_dir(dir.as_path())
+            .output()
+            .expect("failed to build clone memcached");
+
         let status = Command::new("./autogen.sh")
             .current_dir(memcached_dir.as_path())
             .output()
