@@ -148,9 +148,15 @@ fn compile_module(module_dir: &PathBuf, dir: &PathBuf, cfg: RunConfiguration) ->
 fn compile_jemalloc(jemalloc_dir: &PathBuf, dir: &PathBuf, cfg: RunConfiguration) -> Result<(), ()> {
     println!(" - Compiling jemalloc in {}...", jemalloc_dir.display());
 
-        // clean
-    let build = Command::new("make")
-        .args(["clean"])
+    let extra_flags = if cfg == RunConfiguration::Linux {
+        "-DCONFIG_DONT_USE_MMAP_MODULE"
+    } else {
+        "-DCONFIG_USE_MMAP_MODULE"
+    };
+
+    let build = Command::new("./configure")
+        .env("EXTRA_CXXFLAGS", extra_flags)
+        .env("EXTRA_CFLAGS", extra_flags)
         .current_dir(jemalloc_dir.as_path())
         .output()
         .expect("failed to build the benchmark");
@@ -161,15 +167,9 @@ fn compile_jemalloc(jemalloc_dir: &PathBuf, dir: &PathBuf, cfg: RunConfiguration
         return Err(());
     }
 
-    let extra_flags = if cfg == RunConfiguration::Linux {
-        "-DCONFIG_DONT_USE_MMAP_MODULE"
-    } else {
-        "-DCONFIG_USE_MMAP_MODULE"
-    };
-
-    let build = Command::new("./configure")
-        .env("EXTRA_CXXFLAGS", extra_flags)
-        .env("EXTRA_CFLAGS", extra_flags)
+    // clean
+    let build = Command::new("make")
+        .args(["clean"])
         .current_dir(jemalloc_dir.as_path())
         .output()
         .expect("failed to build the benchmark");
