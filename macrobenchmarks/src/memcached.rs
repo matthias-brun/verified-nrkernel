@@ -154,6 +154,19 @@ fn compile_jemalloc(jemalloc_dir: &PathBuf, dir: &PathBuf, cfg: RunConfiguration
         "-DCONFIG_USE_MMAP_MODULE"
     };
 
+    let build = Command::new("./autogen.sh")
+        .env("EXTRA_CXXFLAGS", extra_flags)
+        .env("EXTRA_CFLAGS", extra_flags)
+        .current_dir(jemalloc_dir.as_path())
+        .output()
+        .expect("failed to build the benchmark");
+
+    if !build.status.success() {
+        println!("Build failed: {}", String::from_utf8_lossy(&build.stdout));
+        println!("Build failed: {}", String::from_utf8_lossy(&build.stderr));
+        return Err(());
+    }
+
     let build = Command::new("./configure")
         .env("EXTRA_CXXFLAGS", extra_flags)
         .env("EXTRA_CFLAGS", extra_flags)
