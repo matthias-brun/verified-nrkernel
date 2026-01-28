@@ -22,9 +22,9 @@ pub proof fn lemma_bits_prot()
                 // (due to arith/non-arith mixing rules).
                 ==> (v1 & ((!(!0usize << #[trigger] (((b2+1usize)-b1) as usize))) << b1))
                     == v2 & bitmask_inc!(b1,b2),
-        forall|v1: usize, v2: usize, mw: usize| #![auto]
-            v1 & MASK_NEG_PROT_FLAGS == v2 & MASK_NEG_PROT_FLAGS && 32 <= mw <= 52
-            ==> v1 & bitmask_inc!(mw, 51) == v2 & bitmask_inc!(mw, 51),
+        forall|v1: usize, v2: usize, mw: usize|
+            (#[trigger] (v1 & MASK_NEG_PROT_FLAGS) == #[trigger] (v2 & MASK_NEG_PROT_FLAGS) && 32 <= mw <= 52)
+            ==> #[trigger] (v1 & bitmask_inc!(mw, 51)) == v2 & bitmask_inc!(mw, 51),
 {
         assert(forall|v1: usize, v2: usize, b: usize|
             ((v1 & MASK_NEG_PROT_FLAGS) == #[trigger] (v2 & MASK_NEG_PROT_FLAGS))
@@ -37,9 +37,9 @@ pub proof fn lemma_bits_prot()
                 // (due to arith/non-arith mixing rules).
                 ==> (v1 & ((!(!0usize << #[trigger] (((b2+1usize)-b1) as usize))) << b1))
                     == v2 & bitmask_inc!(b1,b2)) by (bit_vector);
-        assert(forall|v1: usize, v2: usize, mw: usize| #![auto]
-            v1 & MASK_NEG_PROT_FLAGS == v2 & MASK_NEG_PROT_FLAGS && 32 <= mw <= 52
-            ==> v1 & bitmask_inc!(mw, 51) == v2 & bitmask_inc!(mw, 51)) by (bit_vector);
+        assert(forall|v1: usize, v2: usize, mw: usize|
+            #[trigger] (v1 & MASK_NEG_PROT_FLAGS) == #[trigger] (v2 & MASK_NEG_PROT_FLAGS) && 32 <= mw <= 52
+            ==> #[trigger] (v1 & bitmask_inc!(mw, 51)) == v2 & bitmask_inc!(mw, 51)) by (bit_vector);
 }
 
 pub proof fn lemma_bits_misc()

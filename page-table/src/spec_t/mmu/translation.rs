@@ -151,7 +151,7 @@ pub exec const MASK_DIR_ADDR: usize ensures MASK_DIR_ADDR == MASK_DIR_ADDR_SPEC 
     MASK_ADDR
 }
 
-#[allow(repr_transparent_external_private_fields)]
+#[allow(repr_transparent_non_zst_fields)]
 // An entry in any page directory (i.e. in PML4, PDPT, PD or PT)
 #[repr(transparent)]
 pub struct PDE {
