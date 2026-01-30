@@ -1275,7 +1275,13 @@ impl State {
                         | CoreState::UnmapOpDone { ult_id, vaddr, result }
                         | CoreState::UnmapShootdownWaiting { ult_id, vaddr, result } => {
                             if ult_id == ult_id2 {
-                                hlspec::ThreadState::Unmap { vaddr, pte: result.ok() }
+                                // Some day we can again use .ok() instead of this
+                                // https://github.com/verus-lang/verus/issues/2123
+                                let pte = match result {
+                                    Ok(t) => Some(t),
+                                    Err(_) => None,
+                                };
+                                hlspec::ThreadState::Unmap { vaddr, pte }
                             } else {
                                 hlspec::ThreadState::Idle
                             }
@@ -1297,7 +1303,13 @@ impl State {
                         | CoreState::ProtectOpDone { ult_id, vaddr, flags, result }
                         | CoreState::ProtectShootdownWaiting { ult_id, vaddr, flags, result } => {
                             if ult_id == ult_id2 {
-                                hlspec::ThreadState::Protect { vaddr, flags, pte: result.ok() }
+                                // Some day we can again use .ok() instead of this
+                                // https://github.com/verus-lang/verus/issues/2123
+                                let pte = match result {
+                                    Ok(t) => Some(t),
+                                    Err(_) => None,
+                                };
+                                hlspec::ThreadState::Protect { vaddr, flags, pte }
                             } else {
                                 hlspec::ThreadState::Idle
                             }
