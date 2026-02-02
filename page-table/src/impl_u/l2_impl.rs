@@ -1020,7 +1020,11 @@ pub broadcast proof fn lemma_inv_implies_interp_inv(tok: WrappedTokenView, pt: P
     assert(interp.directories_are_in_next_layer());
     assert(interp.directories_match_arch());
     assert(interp.directories_obey_invariant());
-    assert(interp_at(tok, pt, layer, ptr, base).inv());
+
+    assert(interp_at(tok, pt, layer, ptr, base).inv()) by {
+        assert(interp_at(tok, pt, layer, ptr, base).pages_match_entry_size());
+        assert(interp_at(tok, pt, layer, ptr, base).directories_obey_invariant());
+    };
 }
 
 /// The token has changed but the relevant views are unchanged.
