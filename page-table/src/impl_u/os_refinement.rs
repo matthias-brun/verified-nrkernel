@@ -2973,7 +2973,7 @@ proof fn step_UnmapOpChange_refines(
             let critical_core = choose|cr|
                 s1.core_states.contains_key(cr) && match s1.core_states[cr] {
                     os::CoreState::MapDone {ult_id, vaddr, result: Ok(()), .. }
-                    |os::CoreState::UnmapWaiting { ult_id, vaddr }
+                    | os::CoreState::UnmapWaiting { ult_id, vaddr }
                     | os::CoreState::UnmapExecuting { ult_id, vaddr, .. }
                     | os::CoreState::UnmapOpDone { ult_id, vaddr, .. }
                     | os::CoreState::UnmapShootdownWaiting { ult_id, vaddr, .. } => {

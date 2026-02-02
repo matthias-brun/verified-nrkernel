@@ -2362,7 +2362,6 @@ pub exec fn start_protect_and_acquire_lock(Tracked(tok): Tracked<&mut Token>, Gh
             &&& #[trigger] wtok.regions_derived_from_view()
         }) ==> exists|pt| PT::inv_and_nonempty(wtok, pt),
 {
-    proof { admit(); }
     let ghost state1 = tok.st();
     let ghost core = tok.core();
     let ghost pidx = tok.do_concurrent_trs();
@@ -2371,14 +2370,14 @@ pub exec fn start_protect_and_acquire_lock(Tracked(tok): Tracked<&mut Token>, Gh
         lemma_concurrent_trs_no_lock(state1, state2, tok.consts(), core, pidx);
         let new_cs = os::CoreState::ProtectWaiting { ult_id: tok.thread(), vaddr, flags };
         let pte_size = if state2.interp_pt_mem().contains_key(vaddr) { state2.interp_pt_mem()[vaddr].frame.size } else { 0 };
-        let new_sound = tok.st().sound && os::step_Unmap_sound(tok.st(), vaddr, pte_size);
+        let new_sound = tok.st().sound && os::step_Protect_sound(tok.st(), vaddr, pte_size);
         let post = os::State {
             core_states: tok.st().core_states.insert(core, new_cs),
             sound: new_sound,
             ..tok.st()
         };
         let lbl = RLbl::ProtectStart { thread_id: tok.thread(), vaddr, flags };
-        assert(os::step_UnmapStart(tok.consts(), tok.st(), post, core, lbl));
+        assert(os::step_ProtectStart(tok.consts(), tok.st(), post, core, lbl));
         let step = os::Step::ProtectStart { core };
         assert(os::next_step(tok.consts(), tok.st(), post, step, lbl));
         tok.register_external_step(post, step, lbl);
@@ -2403,7 +2402,7 @@ pub exec fn start_protect_and_acquire_lock(Tracked(tok): Tracked<&mut Token>, Gh
             ..tok.st()
         };
         assert(os_ext::step_AcquireLock(tok.st().os_ext, post.os_ext, tok.consts().common, osext_tok.lbl()));
-        assert(os::step_UnmapOpStart(tok.consts(), tok.st(), post, core, RLbl::Tau));
+        assert(os::step_ProtectOpStart(tok.consts(), tok.st(), post, core, RLbl::Tau));
         let step = os::Step::ProtectOpStart { core };
         assert(os::next_step(tok.consts(), tok.st(), post, step, RLbl::Tau));
         tok.register_internal_step_osext(&mut osext_tok, post, step, RLbl::Tau);
