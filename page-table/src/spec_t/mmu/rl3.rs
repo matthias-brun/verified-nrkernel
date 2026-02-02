@@ -966,7 +966,7 @@ pub mod code {
             &&& rl3::next(new.pre(), new.post(), new.consts(), new.lbl())
         }
 
-        pub proof fn prophesy_read(tracked &mut self, addr: usize)
+        pub axiom fn prophesy_read(tracked &mut self, addr: usize)
             requires
                 old(self).tstate() is Init,
                 old(self).consts().valid_core(old(self).core()),
@@ -976,12 +976,9 @@ pub mod code {
                 self.lbl() is Read,
                 self.lbl()->Read_0 == self.core(),
                 self.lbl()->Read_1 == addr,
-                old(self).prophesied_step(*self),
-        {
-            admit(); // axiom
-        }
+                old(self).prophesied_step(*self);
 
-        pub proof fn prophesy_write(tracked &mut self, addr: usize, value: usize)
+        pub axiom fn prophesy_write(tracked &mut self, addr: usize, value: usize)
             requires
                 old(self).tstate() is Init,
                 old(self).consts().valid_core(old(self).core()),
@@ -989,32 +986,23 @@ pub mod code {
                 aligned(addr as nat, 8),
             ensures
                 self.lbl() == mmu::Lbl::Write(self.core(), addr, value),
-                old(self).prophesied_step(*self),
-        {
-            admit(); // axiom
-        }
+                old(self).prophesied_step(*self);
 
-        pub proof fn prophesy_barrier(tracked &mut self)
+        pub axiom fn prophesy_barrier(tracked &mut self)
             requires
                 old(self).tstate() is Init,
                 old(self).consts().valid_core(old(self).core()),
             ensures
                 self.lbl() == mmu::Lbl::Barrier(self.core()),
-                old(self).prophesied_step(*self),
-        {
-            admit(); // axiom
-        }
+                old(self).prophesied_step(*self);
 
-        pub proof fn prophesy_invlpg(tracked &mut self, addr: usize)
+        pub axiom fn prophesy_invlpg(tracked &mut self, addr: usize)
             requires
                 old(self).tstate() is Init,
                 old(self).consts().valid_core(old(self).core()),
             ensures
                 self.lbl() == mmu::Lbl::Invlpg(self.core(), addr),
-                old(self).prophesied_step(*self),
-        {
-            admit(); // axiom
-        }
+                old(self).prophesied_step(*self);
     }
 
     // External interface to the  memory allocation of the linux module

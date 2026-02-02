@@ -37,20 +37,6 @@ pub struct ShootdownVector {
     pub open_requests: Set<Core>,
 }
 
-//pub struct Constants {
-//    pub node_count: nat,
-//    pub core_count: nat,
-//}
-//
-//impl Constants {
-//    // FIXME: This is duplicated in mmu constants. Can we somehow get rid of one of these?
-//    #[verifier(opaque)]
-//    pub open spec fn valid_core(self, core: Core) -> bool {
-//        &&& core.node_id < self.node_count
-//        &&& core.core_id < self.core_count
-//    }
-//}
-
 impl State {
     pub open spec fn disjoint_from_allocations(self, reg: MemRegion) -> bool {
         forall|reg2| #[trigger] self.allocated.contains(reg2) ==> !overlap(reg, reg2)
@@ -262,84 +248,63 @@ pub mod code {
             &&& os_ext::next(new.pre(), new.post(), new.consts(), new.lbl())
         }
 
-        pub proof fn prophesy_acquire_lock(tracked &mut self)
+        pub axiom fn prophesy_acquire_lock(tracked &mut self)
             requires
                 //old(self).consts().valid_core(old(self).core()), TODO: ??
                 old(self).tstate() is Init,
             ensures
                 self.lbl() == (os_ext::Lbl::AcquireLock { core: self.core() }),
-                old(self).prophesied_step(*self),
-        {
-            admit(); // axiom
-        }
+                old(self).prophesied_step(*self);
 
         // We have enabling conditions that need to be ensured by the caller and "technical"
         // enabling conditions, which are guaranteed by executing the function. In the first case,
         // the user must show that after an arbitrary sequence of concurrent transitions the
         // condition holds. In the second case, this is a guarantee obtained from the function that
         // must not conflict with what we can derive ourselves from the concurrent transitions.
-        pub proof fn prophesy_release_lock(tracked &mut self)
+        pub axiom fn prophesy_release_lock(tracked &mut self)
             requires
                 old(self).tstate() is Init,
                 old(self).pre().lock == Some(old(self).core())
             ensures
                 self.lbl() == (os_ext::Lbl::ReleaseLock { core: self.core() }),
-                old(self).prophesied_step(*self),
-        {
-            admit(); // axiom
-        }
+                old(self).prophesied_step(*self);
 
-        pub proof fn prophesy_init_shootdown(tracked &mut self, vaddr: usize)
+        pub axiom fn prophesy_init_shootdown(tracked &mut self, vaddr: usize)
             requires
                 old(self).tstate() is Init,
             ensures
                 self.lbl() == (os_ext::Lbl::InitShootdown { core: self.core(), vaddr: vaddr as nat }),
-                old(self).prophesied_step(*self),
-        {
-            admit(); // axiom
-        }
+                old(self).prophesied_step(*self);
 
-        pub proof fn prophesy_wait_shootdown(tracked &mut self)
+        pub axiom fn prophesy_wait_shootdown(tracked &mut self)
             requires
                 old(self).tstate() is Init,
             ensures
                 self.lbl() == (os_ext::Lbl::WaitShootdown { core: self.core() }),
-                old(self).prophesied_step(*self),
-        {
-            admit(); // axiom
-        }
+                old(self).prophesied_step(*self);
 
-        pub proof fn prophesy_ack_shootdown(tracked &mut self)
+        pub axiom fn prophesy_ack_shootdown(tracked &mut self)
             requires
                 old(self).tstate() is Init,
             ensures
                 self.lbl() == (os_ext::Lbl::AckShootdown { core: self.core() }),
-                old(self).prophesied_step(*self),
-        {
-            admit(); // axiom
-        }
+                old(self).prophesied_step(*self);
 
-        pub proof fn prophesy_allocate(tracked &mut self)
+        pub axiom fn prophesy_allocate(tracked &mut self)
             requires
                 old(self).tstate() is Init,
             ensures
                 self.lbl() is Allocate,
                 self.lbl()->Allocate_core == self.core(),
-                old(self).prophesied_step(*self),
-        {
-            admit(); // axiom
-        }
+                old(self).prophesied_step(*self);
 
-        pub proof fn prophesy_deallocate(tracked &mut self, reg: MemRegionExec)
+        pub axiom fn prophesy_deallocate(tracked &mut self, reg: MemRegionExec)
             requires
                 old(self).tstate() is Init,
                 old(self).pre().allocated.contains(reg@),
             ensures
                 self.lbl() == (os_ext::Lbl::Deallocate { core: self.core(), reg: reg@ }),
-                old(self).prophesied_step(*self),
-        {
-            admit(); // axiom
-        }
+                old(self).prophesied_step(*self);
     }
 
     // External interface to the  memory allocation of the linux module

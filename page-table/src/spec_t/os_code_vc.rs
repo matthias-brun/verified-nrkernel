@@ -287,7 +287,7 @@ impl Token {
     }
 
 
-    pub proof fn do_concurrent_trs(tracked &mut self) -> (pidx: nat)
+    pub axiom fn do_concurrent_trs(tracked &mut self) -> (pidx: nat)
         requires
             old(self).progress() is Unready,
         ensures
@@ -297,15 +297,12 @@ impl Token {
             self.steps() == old(self).steps(),
             self.steps_taken() == old(self).steps_taken(),
             self.on_first_step() == old(self).on_first_step(),
-            concurrent_trs(old(self).st(), self.st(), old(self).consts(), old(self).core(), pidx),
-    { admit(); arbitrary() } // axiom
-
+            concurrent_trs(old(self).st(), self.st(), old(self).consts(), old(self).core(), pidx);
 
 
     // Take MMU steps
 
-    #[verifier(external_body)] // axiom
-    pub proof fn get_mmu_token(tracked &mut self) -> (tracked tok: mmu::rl3::code::Token)
+    pub axiom fn get_mmu_token(tracked &mut self) -> (tracked tok: mmu::rl3::code::Token)
         requires
             !old(self).on_first_step(),
             old(self).steps().len() > 0,
@@ -315,10 +312,9 @@ impl Token {
             tok.pre() == old(self).st().mmu,
             tok.consts() == old(self).consts().common,
             tok.core() == old(self).core(),
-            tok.tstate() is Init,
-    { unimplemented!() }
+            tok.tstate() is Init;
 
-    pub proof fn register_internal_step_mmu(
+    pub axiom fn register_internal_step_mmu(
         tracked &mut self,
         tracked tok: &mut mmu::rl3::code::Token,
         post: os::State,
@@ -338,11 +334,10 @@ impl Token {
             self.steps() == old(self).steps(),
             self.steps_taken() == old(self).steps_taken(),
             self.progress() == old(self).progress(),
-            old(tok).set_validated(*tok),
-    { admit(); } // axiom
+            old(tok).set_validated(*tok);
 
     // Not needed.
-    //pub proof fn register_external_step_mmu(
+    //pub axiom fn register_external_step_mmu(
     //    tracked &mut self,
     //    tracked tok: &mut mmu::rl3::code::Token,
     //    post: os::State,
@@ -362,10 +357,9 @@ impl Token {
     //        self.steps() == old(self).steps().drop_first(),
     //        self.steps_taken() == old(self).steps_taken().push(lbl),
     //        self.progress() == old(self).progress(),
-    //        old(tok).set_validated(*tok),
-    //{ admit(); } // axiom
+    //        old(tok).set_validated(*tok);
 
-    pub proof fn return_mmu_token(tracked &mut self, tracked tok: mmu::rl3::code::Token)
+    pub axiom fn return_mmu_token(tracked &mut self, tracked tok: mmu::rl3::code::Token)
         requires tok.tstate() is Spent,
         ensures
             self.on_first_step() == old(self).on_first_step(),
@@ -374,15 +368,13 @@ impl Token {
             self.st() == old(self).st(),
             self.steps() == old(self).steps(),
             self.steps_taken() == old(self).steps_taken(),
-            self.progress() is Unready,
-    { admit(); } // axiom
+            self.progress() is Unready;
 
 
 
     // Take os_ext steps
 
-    #[verifier(external_body)]
-    pub proof fn get_osext_token(tracked &mut self) -> (tracked tok: os_ext::code::Token)
+    pub axiom fn get_osext_token(tracked &mut self) -> (tracked tok: os_ext::code::Token)
         requires
             !old(self).on_first_step(),
             old(self).steps().len() > 0,
@@ -392,10 +384,9 @@ impl Token {
             tok.consts() == old(self).consts().common,
             tok.pre() == old(self).st().os_ext,
             tok.core() == old(self).core(),
-            tok.tstate() is Init,
-    { unimplemented!() } // axiom
+            tok.tstate() is Init;
 
-    pub proof fn register_internal_step_osext(
+    pub axiom fn register_internal_step_osext(
         tracked &mut self,
         tracked tok: &mut os_ext::code::Token,
         post: os::State,
@@ -417,10 +408,9 @@ impl Token {
             self.steps() == old(self).steps(),
             self.steps_taken() == old(self).steps_taken(),
             self.progress() == old(self).progress(),
-            old(tok).set_valid(*tok),
-    { admit(); } // axiom
+            old(tok).set_valid(*tok);
 
-    pub proof fn register_external_step_osext(
+    pub axiom fn register_external_step_osext(
         tracked &mut self,
         tracked tok: &mut os_ext::code::Token,
         post: os::State,
@@ -442,10 +432,9 @@ impl Token {
             self.steps() == old(self).steps().drop_first(),
             self.steps_taken() == old(self).steps_taken().push(lbl),
             self.progress() == old(self).progress(),
-            old(tok).set_valid(*tok),
-    { admit(); } // axiom
+            old(tok).set_valid(*tok);
 
-    pub proof fn return_osext_token(tracked &mut self, tracked tok: os_ext::code::Token)
+    pub axiom fn return_osext_token(tracked &mut self, tracked tok: os_ext::code::Token)
         requires tok.tstate() is Spent,
         ensures
             self.on_first_step() == old(self).on_first_step(),
@@ -454,12 +443,11 @@ impl Token {
             self.st() == old(self).st(),
             self.steps() == old(self).steps(),
             self.steps_taken() == old(self).steps_taken(),
-            self.progress() is Unready,
-    { admit(); } // axiom
+            self.progress() is Unready;
 
 
     /// Register a step that corresponds to stutter in both mmu and os_ext.
-    pub proof fn register_internal_step(tracked &mut self, post: os::State, step: os::Step)
+    pub axiom fn register_internal_step(tracked &mut self, post: os::State, step: os::Step)
         requires
             old(self).progress() is Ready,
             os::next_step(old(self).consts(), old(self).st(), post, step, RLbl::Tau),
@@ -473,11 +461,10 @@ impl Token {
             self.st() == post,
             self.steps() == old(self).steps(),
             self.steps_taken() == old(self).steps_taken(),
-            self.progress() == Progress::Unready,
-    { admit(); } // axiom
+            self.progress() == Progress::Unready;
 
     /// Register a step that corresponds to stutter in both mmu and os_ext.
-    pub proof fn register_external_step(tracked &mut self, post: os::State, step: os::Step, lbl: RLbl)
+    pub axiom fn register_external_step(tracked &mut self, post: os::State, step: os::Step, lbl: RLbl)
         requires
             old(self).progress() is Ready,
             os::next_step(old(self).consts(), old(self).st(), post, step, lbl),
@@ -492,8 +479,7 @@ impl Token {
             self.st() == post,
             self.steps() == old(self).steps().drop_first(),
             self.steps_taken() == old(self).steps_taken().push(lbl),
-            self.progress() == Progress::Unready,
-    { admit(); } // axiom
+            self.progress() == Progress::Unready;
 }
 
 pub trait CodeVC {
