@@ -1,7 +1,7 @@
 use vstd::prelude::*;
 use vstd::{ assert_by_contradiction, assert_seqs_equal };
 
-use crate::extra::lemma_bits_misc;
+use crate::extra::{ lemma_bits_misc, lemma_bits_prot };
 use crate::spec_t::os;
 use crate::spec_t::os_invariant;
 use crate::spec_t::mmu::{ self, WalkResult };
@@ -17,7 +17,7 @@ use crate::spec_t::mmu::defs::{
 };
 use crate::spec_t::mmu::translation::{
     MASK_NEG_DIRTY_ACCESS, l0_bits, l1_bits, l2_bits, l3_bits,
-    GPDE, PDE, MASK_NEG_PROT_FLAGS,
+    GPDE, PDE, MASK_NEG_PROT_FLAGS, MASK_PROT_FLAGS,
 };
 use crate::theorem::RLbl;
 use crate::spec_t::mmu::rl3::refinement::to_rl1;
@@ -1813,13 +1813,13 @@ impl WrappedProtectToken {
             &&& vaddr == self.tok.steps()[0]->ProtectEnd_vaddr
             &&& ult_id == self.tok.thread()
             &&& pte == self.orig_st.interp_pt_mem()[vaddr]
-            //&&& self@.args == OpArgs::Unmap { base: vaddr as usize }
+            &&& self@.args == OpArgs::Protect { base: vaddr as usize, flags }
         } else {
             &&& self.tok.st().mmu@.pt_mem == self.orig_st.mmu@.pt_mem
             &&& self.tok.st().core_states[self.tok.core()] matches os::CoreState::ProtectExecuting { vaddr, flags, ult_id, result: None }
             &&& vaddr == self.tok.steps()[0]->ProtectEnd_vaddr
             &&& ult_id == self.tok.thread()
-            //&&& self@.args == OpArgs::Unmap { base: vaddr as usize }
+            &&& self@.args == OpArgs::Protect { base: vaddr as usize, flags }
         }
     }
 
@@ -1840,44 +1840,42 @@ impl WrappedProtectToken {
             tok@ == old(tok)@,
             tok.inv(),
     {
-        proof { admit(); }
-        0
-        // let addr = pbase + idx * 8;
-        // let ghost state1 = tok.tok.st();
-        // let ghost core = tok.tok.core();
-        // assert(core == tok.tok.consts().ult2core[tok.tok.thread()]);
-        // assert(tok.tok.consts().valid_core(core));
-        // let tracked mut mmu_tok = tok.tok.get_mmu_token();
-        // proof {
-        //     assert(tok.tok.st().core_states[core] is UnmapExecuting);
-        //     mmu_tok.prophesy_read(addr);
-        //     let post = os::State {
-        //         mmu: mmu_tok.post(),
-        //         ..tok.tok.st()
-        //     };
-        //     let read_result = mmu_tok.lbl()->Read_2;
-        //     assert(mmu::rl3::next(tok.tok.st().mmu, post.mmu, tok.tok.consts().common, mmu_tok.lbl()));
-        //     assert(os::step_ReadPTMem(tok.tok.consts(), tok.tok.st(), post, core, addr, read_result, RLbl::Tau));
-        //     let step = os::Step::ReadPTMem { core, paddr: addr, value: read_result };
-        //     assert(os::next_step(tok.tok.consts(), tok.tok.st(), post, step, RLbl::Tau));
-        //     tok.tok.register_internal_step_mmu(&mut mmu_tok, post, step);
-        //     os_invariant::next_preserves_inv(tok.tok.consts(), state1, tok.tok.st(), RLbl::Tau);
-        // }
+        let addr = pbase + idx * 8;
+        let ghost state1 = tok.tok.st();
+        let ghost core = tok.tok.core();
+        assert(core == tok.tok.consts().ult2core[tok.tok.thread()]);
+        assert(tok.tok.consts().valid_core(core));
+        let tracked mut mmu_tok = tok.tok.get_mmu_token();
+        proof {
+            assert(tok.tok.st().core_states[core] is ProtectExecuting);
+            mmu_tok.prophesy_read(addr);
+            let post = os::State {
+                mmu: mmu_tok.post(),
+                ..tok.tok.st()
+            };
+            let read_result = mmu_tok.lbl()->Read_2;
+            assert(mmu::rl3::next(tok.tok.st().mmu, post.mmu, tok.tok.consts().common, mmu_tok.lbl()));
+            assert(os::step_ReadPTMem(tok.tok.consts(), tok.tok.st(), post, core, addr, read_result, RLbl::Tau));
+            let step = os::Step::ReadPTMem { core, paddr: addr, value: read_result };
+            assert(os::next_step(tok.tok.consts(), tok.tok.st(), post, step, RLbl::Tau));
+            tok.tok.register_internal_step_mmu(&mut mmu_tok, post, step);
+            os_invariant::next_preserves_inv(tok.tok.consts(), state1, tok.tok.st(), RLbl::Tau);
+        }
 
-        // let res = mmu::rl3::code::read(Tracked(&mut mmu_tok), addr);
-        // let ghost state2 = tok.tok.st();
+        let res = mmu::rl3::code::read(Tracked(&mut mmu_tok), addr);
+        let ghost state2 = tok.tok.st();
 
-        // proof {
-        //     broadcast use to_rl1::next_refines;
-        //     assert(state1.mmu@.is_tso_read_deterministic(core, addr));
-        //     assert(state1.os_ext.lock == Some(core));
-        //     tok.tok.return_mmu_token(mmu_tok);
-        //     let pidx = tok.tok.do_concurrent_trs();
-        //     let ghost state3 = tok.tok.st();
-        //     lemma_concurrent_trs(state2, state3, tok.tok.consts(), tok.tok.core(), pidx);
-        //     assert(tok.inv());
-        // }
-        // res & MASK_NEG_DIRTY_ACCESS
+        proof {
+            broadcast use to_rl1::next_refines;
+            assert(state1.mmu@.is_tso_read_deterministic(core, addr));
+            assert(state1.os_ext.lock == Some(core));
+            tok.tok.return_mmu_token(mmu_tok);
+            let pidx = tok.tok.do_concurrent_trs();
+            let ghost state3 = tok.tok.st();
+            lemma_concurrent_trs(state2, state3, tok.tok.consts(), tok.tok.core(), pidx);
+            assert(tok.inv());
+        }
+        res & MASK_NEG_DIRTY_ACCESS
     }
 
     #[verifier(spinoff_prover)]
@@ -1895,71 +1893,93 @@ impl WrappedProtectToken {
             r.base == pbase,
             idx < 512,
             old(tok).inv(),
-            value & 1 == 0,
-            old(tok)@.read(idx, r) & 1 == 1,
-            PT::interp_to_l0(old(tok)@, root_pt).contains_key(old(tok)@.args->Unmap_base as nat),
+            value & MASK_PROT_FLAGS != old(tok)@.read(idx, r) & MASK_PROT_FLAGS,
+            value & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_FLAGS == old(tok)@.read(idx, r) & MASK_NEG_PROT_FLAGS,
+            old(tok)@.read(idx, r) & bit!(7usize) == 1,
+            PT::interp_to_l0(old(tok)@, root_pt).contains_key(old(tok)@.args->Protect_base as nat),
             PT::inv(old(tok)@, root_pt),
             PT::inv(old(tok)@.write(idx, value, r, true), root_pt),
             PT::interp_to_l0(old(tok)@.write(idx, value, r, true), root_pt)
-                == PT::interp_to_l0(old(tok)@, root_pt).remove(old(tok)@.args->Unmap_base as nat),
+                == PT::interp_to_l0(old(tok)@, root_pt)
+                        .insert(
+                            old(tok)@.args->Protect_base as nat,
+                            PTE {
+                                frame: PT::interp_to_l0(old(tok)@, root_pt)[old(tok)@.args->Protect_base as nat].frame,
+                                flags: old(tok)@.args->Protect_flags,
+                            }),
         ensures
             tok@ == old(tok)@.write(idx, value, r, true),
             tok.inv(),
     {
 
-        proof { admit(); lemma_bits_misc(); }
+        proof { lemma_bits_misc(); }
 
-        // let addr = pbase + idx * 8;
-        // let ghost state1 = tok.tok.st();
-        // let ghost core = tok.tok.core();
-        // let tracked mut mmu_tok = tok.tok.get_mmu_token();
-        // //assert(core == tok.tok.core());
-        // let ghost vaddr = tok.tok.st().core_states[core]->UnmapExecuting_vaddr as usize;
-        // let ghost pte = PT::interp_to_l0(tok@, root_pt)[old(tok)@.args->Unmap_base as nat];
-        // proof {
-        //     assert(tok.tok.st().core_states[core] == os::CoreState::UnmapExecuting { vaddr: vaddr as nat, ult_id: tok.tok.thread(), result: None });
-        //     broadcast use to_rl1::next_refines;
-        //     assert(!state1.mmu@.writes.tso.is_empty() ==> core == state1.mmu@.writes.core);
-        //     mmu_tok.prophesy_write(addr, value);
-        //     let new_cs = os::CoreState::UnmapExecuting { ult_id: tok.tok.thread(), vaddr: vaddr as nat, result: Some(Ok((pte))) };
-        //     let post = os::State {
-        //         core_states: tok.tok.st().core_states.insert(core, new_cs),
-        //         mmu: mmu_tok.post(),
-        //         ..tok.tok.st()
-        //     };
+        let addr = pbase + idx * 8;
+        let ghost state1 = tok.tok.st();
+        let ghost core = tok.tok.core();
+        let tracked mut mmu_tok = tok.tok.get_mmu_token();
+        //assert(core == tok.tok.core());
+        let ghost vaddr = tok.tok.st().core_states[core]->ProtectExecuting_vaddr as usize;
+        let ghost flags = tok.tok.st().core_states[core]->ProtectExecuting_flags;
+        let ghost pte = PT::interp_to_l0(tok@, root_pt)[old(tok)@.args->Protect_base as nat];
+        proof {
+            assert(tok.tok.st().core_states[core] == os::CoreState::ProtectExecuting { vaddr: vaddr as nat, ult_id: tok.tok.thread(), flags, result: None });
+            broadcast use to_rl1::next_refines;
+            mmu_tok.prophesy_write(addr, value);
+            let new_cs = os::CoreState::ProtectExecuting { ult_id: tok.tok.thread(), vaddr: vaddr as nat, flags, result: Some(Ok((pte))) };
+            let post = os::State {
+                core_states: tok.tok.st().core_states.insert(core, new_cs),
+                mmu: mmu_tok.post(),
+                ..tok.tok.st()
+            };
 
-        //     assert(mmu::rl3::next(tok.tok.st().mmu, post.mmu, tok.tok.consts().common, mmu_tok.lbl()));
-        //     assert(mmu::rl1::next_step(tok.tok.st().mmu@, post.mmu@, tok.tok.consts().common, mmu::rl1::Step::WriteNonpos, mmu_tok.lbl()));
-        //     old(tok)@.lemma_interps_match(root_pt);
-        //     old(tok).lemma_regions_derived_from_view_after_write(r, idx, value, true);
-        //     old(tok)@.write(idx, value, r, true).lemma_interps_match(root_pt);
-        //     assert(pte == tok.orig_st.interp_pt_mem()[vaddr as nat]);
-        //     assert(os::step_UnmapOpChange(tok.tok.consts(), tok.tok.st(), post, core, addr, value, RLbl::Tau));
-        //     let step = os::Step::UnmapOpChange { core, paddr: addr, value };
-        //     assert(os::next_step(tok.tok.consts(), tok.tok.st(), post, step, RLbl::Tau));
-        //     tok.tok.register_internal_step_mmu(&mut mmu_tok, post, step);
-        //     os_invariant::next_preserves_inv(tok.tok.consts(), state1, tok.tok.st(), RLbl::Tau);
-        // }
+            assert(tok.tok.st().mmu@.pt_mem.is_prot_write(addr, value)) by {
+                let val_read = tok.tok.st().mmu@.pt_mem.read(addr);
+                assert(value & MASK_PROT_FLAGS != val_read & MASK_PROT_FLAGS) by (bit_vector)
+                    requires value & MASK_PROT_FLAGS != val_read & MASK_NEG_DIRTY_ACCESS & MASK_PROT_FLAGS;
+                assert(tok.tok.st().mmu@.pt_mem.read(addr) & bit!(7usize) == 1) by {
+                    lemma_bits_prot();
+                };
+            };
+            // TODO: Not sure how to get this the easiest way. Should follow from some invariant.
+            assume(tok.tok.st().mmu@.writes.tso =~= set![]);
+            assume(tok.tok.st().mmu@.writes.nonpos =~= set![]);
+            assert(tok.tok.st().mmu@.is_happy_writeprotect(core, addr, value));
 
-        // mmu::rl3::code::write(Tracked(&mut mmu_tok), addr, value);
-        // let ghost state2 = tok.tok.st();
-        // proof { tok.change_made = true; }
 
-        // proof {
-        //     assert(state1.os_ext.lock == Some(core));
-        //     tok.tok.return_mmu_token(mmu_tok);
-        //     let pidx = tok.tok.do_concurrent_trs();
-        //     let state3 = tok.tok.st();
-        //     lemma_concurrent_trs(state2, state3, tok.tok.consts(), tok.tok.core(), pidx);
-        //     assert(unchanged_state_during_concurrent_trs(state2, state3, core));
-        //     assert(state2.mmu@.pt_mem == state1.mmu@.pt_mem.write(add(pbase, mul(idx, 8)), value));
-        //     assert(tok.inv());
-        // }
-        // assert(tok@.regions[r] =~= old(tok)@.regions[r].update(idx as int, value));
-        // assert(tok@.pt_mem == old(tok)@.pt_mem.write(add(r.base as usize, mul(idx, 8)), value));
-        // assert(tok@.regions =~= old(tok)@.regions.insert(r, old(tok)@.regions[r].update(idx as int, value)));
-        // assert(tok@.result === Ok(()));
-        // assert(tok@ =~= old(tok)@.write(idx, value, r, true));
+            assert(mmu::rl3::next(tok.tok.st().mmu, post.mmu, tok.tok.consts().common, mmu_tok.lbl()));
+            assert(mmu::rl1::step_WriteProtect(tok.tok.st().mmu@, post.mmu@, tok.tok.consts().common, mmu_tok.lbl()));
+            assert(mmu::rl1::next_step(tok.tok.st().mmu@, post.mmu@, tok.tok.consts().common, mmu::rl1::Step::WriteProtect, mmu_tok.lbl()));
+            old(tok)@.lemma_interps_match(root_pt);
+            old(tok).lemma_regions_derived_from_view_after_write(r, idx, value, true);
+            old(tok)@.write(idx, value, r, true).lemma_interps_match(root_pt);
+            assert(pte == tok.orig_st.interp_pt_mem()[vaddr as nat]);
+            assert(os::step_ProtectOpChange(tok.tok.consts(), tok.tok.st(), post, core, addr, value, RLbl::Tau));
+            let step = os::Step::ProtectOpChange { core, paddr: addr, value };
+            assert(os::next_step(tok.tok.consts(), tok.tok.st(), post, step, RLbl::Tau));
+            tok.tok.register_internal_step_mmu(&mut mmu_tok, post, step);
+            os_invariant::next_preserves_inv(tok.tok.consts(), state1, tok.tok.st(), RLbl::Tau);
+        }
+
+        mmu::rl3::code::write(Tracked(&mut mmu_tok), addr, value);
+        let ghost state2 = tok.tok.st();
+        proof { tok.change_made = true; }
+
+        proof {
+            assert(state1.os_ext.lock == Some(core));
+            tok.tok.return_mmu_token(mmu_tok);
+            let pidx = tok.tok.do_concurrent_trs();
+            let state3 = tok.tok.st();
+            lemma_concurrent_trs(state2, state3, tok.tok.consts(), tok.tok.core(), pidx);
+            assert(unchanged_state_during_concurrent_trs(state2, state3, core));
+            assert(state2.mmu@.pt_mem == state1.mmu@.pt_mem.write(add(pbase, mul(idx, 8)), value));
+            assert(tok.inv());
+        }
+        assert(tok@.regions[r] =~= old(tok)@.regions[r].update(idx as int, value));
+        assert(tok@.pt_mem == old(tok)@.pt_mem.write(add(r.base as usize, mul(idx, 8)), value));
+        assert(tok@.regions =~= old(tok)@.regions.insert(r, old(tok)@.regions[r].update(idx as int, value)));
+        assert(tok@.result === Ok(()));
+        assert(tok@ =~= old(tok)@.write(idx, value, r, true));
     }
 
     // TODO: duplicated from WrappedMapToken

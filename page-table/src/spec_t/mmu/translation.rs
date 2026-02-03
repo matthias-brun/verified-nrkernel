@@ -195,8 +195,8 @@ impl PDE {
     pub broadcast proof fn lemma_view_unchanged_prot_flags(self, other: PDE)
         requires
             self.layer@ < 4,
-            #[trigger] (self.entry & MASK_NEG_PROT_FLAGS)
-                == #[trigger] (other.entry & MASK_NEG_PROT_FLAGS),
+            #[trigger] (self.entry & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_FLAGS)
+                == #[trigger] (other.entry & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_FLAGS),
             self.layer == other.layer,
         ensures
             other@ is Directory <==> self@ is Directory,
@@ -206,8 +206,8 @@ impl PDE {
             other@ matches GPDE::Page { addr, .. }      ==> self@->Page_addr == addr,
     {
         reveal(PDE::all_mb0_bits_are_zero);
-        extra::lemma_bits_prot();
         axiom_max_phyaddr_width_facts();
+        extra::lemma_bits_prot_equality();
     }
 
 

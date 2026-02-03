@@ -690,6 +690,7 @@ pub mod refinement {
                 !self.writer_mem().is_nonpos_write(addr, value),
                 !self.writer_mem().is_nonneg_write(addr, value),
         {
+            lemma_bits_misc();
             let v2 = self.writer_mem().read(addr);
             assert((v2 & 1) != (value & 1) ==>
                 v2 & !(bit!(63usize) | bit!(2usize) | bit!(1usize)) !=

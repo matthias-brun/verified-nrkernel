@@ -9,37 +9,59 @@ use crate::spec_t::mmu::translation::{ MASK_NEG_PROT_FLAGS, MASK_NEG_DIRTY_ACCES
 
 verus! {
 
+/// The bitmask properties have the implication's antecedent written that way because in some
+/// cases, we can have a `bitmask_inc!(52, 51)` (when dealing with physical address max width), so
+/// we can't just have e.g. `3 < b1 <= b2 < 63`. See `lemma_bits_maxwidth`.
 pub proof fn lemma_bits_prot()
     ensures
-        forall|v1: usize, v2: usize, b: usize|
-            ((v1 & MASK_NEG_PROT_FLAGS) == #[trigger] (v2 & MASK_NEG_PROT_FLAGS))
-                && b < 64 && b != 1 && b != 2 && b != 63
-                ==> #[trigger] (v1 & bit!(b)) == v2 & bit!(b),
-        forall|v1: usize, v2: usize, b1: usize, b2: usize|
-            (#[trigger] (v1 & MASK_NEG_PROT_FLAGS) == #[trigger] (v2 & MASK_NEG_PROT_FLAGS))
-                && 2 < b1 <= b2 < 63
-                // The line below is just bitmask_inc!(b1, b2) but we can't trigger on that directly
-                // (due to arith/non-arith mixing rules).
-                ==> (v1 & ((!(!0usize << #[trigger] (((b2+1usize)-b1) as usize))) << b1))
-                    == v2 & bitmask_inc!(b1,b2),
-        forall|v1: usize, v2: usize, mw: usize|
-            (#[trigger] (v1 & MASK_NEG_PROT_FLAGS) == #[trigger] (v2 & MASK_NEG_PROT_FLAGS) && 32 <= mw <= 52)
-            ==> #[trigger] (v1 & bitmask_inc!(mw, 51)) == v2 & bitmask_inc!(mw, 51),
+        forall|v: usize, b: usize| b < 64 && b != 5 && b != 6
+            ==> #[trigger] (v & MASK_NEG_DIRTY_ACCESS & bit!(b)) == v & bit!(b),
+        forall|v: usize, b1: usize, b2: usize| 6 < b1 < 64 && 6 < b2 < 64
+            ==> #[trigger] (v & MASK_NEG_DIRTY_ACCESS & bitmask_inc!(b1, b2)) == v & bitmask_inc!(b1, b2),
+        forall|v: usize, b: usize| b < 63 && b != 1 && b != 2
+            ==> #[trigger] (v & MASK_NEG_PROT_FLAGS & bit!(b)) == v & bit!(b),
+        forall|v: usize, b1: usize, b2: usize| 3 < b1 <= b2 + 1 && 3 < b2 < 63
+            ==> #[trigger] (v & MASK_NEG_PROT_FLAGS & bitmask_inc!(b1, b2)) == v & bitmask_inc!(b1, b2),
 {
-        assert(forall|v1: usize, v2: usize, b: usize|
-            ((v1 & MASK_NEG_PROT_FLAGS) == #[trigger] (v2 & MASK_NEG_PROT_FLAGS))
-                && b < 64 && b != 1 && b != 2 && b != 63
-                ==> #[trigger] (v1 & bit!(b)) == v2 & bit!(b)) by (bit_vector);
-        assert(forall|v1: usize, v2: usize, b1: usize, b2: usize|
-            (#[trigger] (v1 & MASK_NEG_PROT_FLAGS) == #[trigger] (v2 & MASK_NEG_PROT_FLAGS))
-                && 2 < b1 <= b2 < 63
-                // The line below is just bitmask_inc!(b1, b2) but we can't trigger on that directly
-                // (due to arith/non-arith mixing rules).
-                ==> (v1 & ((!(!0usize << #[trigger] (((b2+1usize)-b1) as usize))) << b1))
-                    == v2 & bitmask_inc!(b1,b2)) by (bit_vector);
-        assert(forall|v1: usize, v2: usize, mw: usize|
-            #[trigger] (v1 & MASK_NEG_PROT_FLAGS) == #[trigger] (v2 & MASK_NEG_PROT_FLAGS) && 32 <= mw <= 52
-            ==> #[trigger] (v1 & bitmask_inc!(mw, 51)) == v2 & bitmask_inc!(mw, 51)) by (bit_vector);
+        assert(forall|v: usize, b: usize| b < 64 && b != 5 && b != 6
+            ==> #[trigger] (v & MASK_NEG_DIRTY_ACCESS & bit!(b)) == v & bit!(b)) by (bit_vector);
+        assert(forall|v: usize, b: usize| b < 64 && b != 1 && b != 2 && b != 63
+            ==> #[trigger] (v & MASK_NEG_PROT_FLAGS & bit!(b)) == v & bit!(b)) by (bit_vector);
+        assert(forall|v: usize, b1: usize, b2: usize| 6 < b1 < 64 && 6 < b2 < 64
+            ==> #[trigger] (v & MASK_NEG_DIRTY_ACCESS & bitmask_inc!(b1, b2)) == v & bitmask_inc!(b1, b2)) by (bit_vector);
+        assert(forall|v: usize, b1: usize, b2: usize| 3 < b1 <= b2 + 1 && 3 < b2 < 63
+            ==> #[trigger] (v & MASK_NEG_PROT_FLAGS & bitmask_inc!(b1, b2)) == v & bitmask_inc!(b1, b2)) by (bit_vector);
+}
+
+/// These trigger much better in some proofs. I don't quite understand why.
+pub proof fn lemma_bits_prot_equality()
+    ensures
+        forall|v1: usize, v2: usize, b: usize| b < 63 && b != 1 && b != 2 && b != 5 && b != 6
+            && #[trigger] (v1 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_FLAGS)
+                == #[trigger] (v2 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_FLAGS)
+            ==> #[trigger] (v1 & bit!(b)) == v2 & bit!(b),
+        forall|v1: usize, v2: usize, b1: usize, b2: usize| 6 < b1 <= b2 + 1 && 6 < b2 < 63
+            && #[trigger] (v1 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_FLAGS)
+                == #[trigger] (v2 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_FLAGS)
+            ==> #[trigger] (v1 & bitmask_inc!(b1, b2)) == v2 & bitmask_inc!(b1, b2),
+{
+    lemma_bits_prot();
+
+    assert forall|v1: usize, v2: usize, b: usize| b < 63 && b != 1 && b != 2 && b != 5 && b != 6
+        && #[trigger] (v1 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_FLAGS)
+            == #[trigger] (v2 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_FLAGS)
+        implies #[trigger] (v1 & bit!(b)) == v2 & bit!(b)
+    by {
+        assert(v1 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_FLAGS & bit!(b) == v1 & bit!(b));
+    };
+    assert forall|v1: usize, v2: usize, b1: usize, b2: usize| 6 < b1 <= b2 + 1 && 6 < b2 < 63
+        && #[trigger] (v1 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_FLAGS)
+            == #[trigger] (v2 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_FLAGS)
+        implies #[trigger] (v1 & bitmask_inc!(b1, b2)) == v2 & bitmask_inc!(b1, b2)
+    by {
+        assert(6 < b2 < 64);
+        assert(v1 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_FLAGS & bitmask_inc!(b1, b2) == v1 & bitmask_inc!(b1, b2));
+    };
 }
 
 pub proof fn lemma_bits_misc()

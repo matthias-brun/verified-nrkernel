@@ -25,7 +25,7 @@ pub struct State {
     /// Tracks the virtual addresses and entries for which we may see non-atomic results.
     /// If polarity is positive, translations may non-atomically fail.
     /// If polarity is negative, translations may non-atomically succeed.
-    /// If polarity is protect, translations may non-atomically have different permissions.
+    /// If polarity is protect, translations may non-atomically still have old permissions.
     pub pending_maps: Map<usize, PTE>,
     pub pending_unmaps: Map<usize, PTE>,
     pub pending_protects: Map<usize, PTE>,

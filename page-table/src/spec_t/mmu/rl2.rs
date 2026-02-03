@@ -1964,11 +1964,13 @@ proof fn next_step_preserves_inv_protect__sbuf_implies_bit7(pre: State, post: St
         },
         Step::WriteProtect => {
             reveal(rl2::walk_next);
+            extra::lemma_bits_prot();
             lemma_mem_view_after_step_write(pre, post, c, lbl);
             assert(pre.writer_sbuf() =~= seq![]) by {
                 broadcast use lemma_writes_tso_empty_implies_sbuf_empty;
             };
-            extra::lemma_bits_prot();
+            let addr = lbl->Write_1;
+            assert((pre.writer_mem().read(addr) & MASK_NEG_DIRTY_ACCESS) & MASK_NEG_PROT_FLAGS & bit!(7usize) == 1);
             assert(post.inv_protect__sbuf_implies_bit7(c));
         },
         Step::Writeback { core } => {
