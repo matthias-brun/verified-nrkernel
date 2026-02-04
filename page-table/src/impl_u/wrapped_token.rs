@@ -231,7 +231,7 @@ impl WrappedTokenView {
                                     low_bits == vaddr % mul(512, 4096);
 
                             match l2e@ {
-                                GPDE::Page { addr: page_addr, .. } => {
+                                GPDE::Page { .. } => {
                                     let l3_base = x86_arch_spec.entry_base(2, l2_base, l2_bidx as nat);
                                     assert(aligned(l3_base, L2_ENTRY_SIZE as nat)) by {
                                         crate::impl_u::indexing::lemma_entry_base_from_index(0, l0_bidx as nat, L0_ENTRY_SIZE as nat);
@@ -239,6 +239,7 @@ impl WrappedTokenView {
                                         crate::impl_u::indexing::lemma_entry_base_from_index(l2_base, l2_bidx as nat, L2_ENTRY_SIZE as nat);
                                     };
                                     assert(interp_l2.interp_of_entry(l2_bidx as nat).dom() =~= set![l3_base as nat]);
+                                    assert(aligned(vaddr as nat, L2_ENTRY_SIZE as nat));
                                     assert(align_to_usize(vaddr, L2_ENTRY_SIZE) == vaddr);
                                     assert(self.pt_mem.is_base_pt_walk(vaddr));
                                 },
@@ -254,6 +255,7 @@ impl WrappedTokenView {
                                     let interp_l3 = PT::interp_at(self, l3_ghost_pt, 3, l3_daddr, l3_base);
                                     let interp_l3_entry = PT::interp_at_entry(self, l3_ghost_pt, 3, l3_daddr, l3_base, l3_bidx as nat);
                                     crate::impl_u::l2_impl::PT::lemma_inv_implies_interp_inv(self, l3_ghost_pt, 3, l3_daddr, l3_base);
+                                    assert(interp_l3.interp().contains_key(vaddr as nat));
                                     interp_l3.lemma_interp_contains_key_implies_interp_of_entry_contains_key_at_index(vaddr as nat);
                                     assert(interp_l3.interp_of_entry(interp_l3.index_for_vaddr(vaddr as nat)).contains_key(vaddr as nat));
 
@@ -287,15 +289,16 @@ impl WrappedTokenView {
                                             low_bits == vaddr % 4096;
 
                                     match l3e@ {
-                                        GPDE::Page { addr: page_addr, .. } => {
+                                        GPDE::Page { .. } => {
                                             let l4_base = x86_arch_spec.entry_base(3, l3_base, l3_bidx as nat);
+                                            crate::impl_u::indexing::lemma_entry_base_from_index(l3_base, l3_bidx as nat, L3_ENTRY_SIZE as nat);
                                             assert(aligned(l4_base, L3_ENTRY_SIZE as nat)) by {
                                                 crate::impl_u::indexing::lemma_entry_base_from_index(0, l0_bidx as nat, L0_ENTRY_SIZE as nat);
                                                 crate::impl_u::indexing::lemma_entry_base_from_index(l1_base, l1_bidx as nat, L1_ENTRY_SIZE as nat);
                                                 crate::impl_u::indexing::lemma_entry_base_from_index(l2_base, l2_bidx as nat, L2_ENTRY_SIZE as nat);
-                                                crate::impl_u::indexing::lemma_entry_base_from_index(l3_base, l3_bidx as nat, L3_ENTRY_SIZE as nat);
                                             };
                                             assert(interp_l3.interp_of_entry(l3_bidx as nat).dom() =~= set![l4_base as nat]);
+                                            assert(aligned(vaddr as nat, L3_ENTRY_SIZE as nat));
                                             assert(align_to_usize(vaddr, L3_ENTRY_SIZE) == vaddr);
                                             assert(self.pt_mem.is_base_pt_walk(vaddr));
                                         },
