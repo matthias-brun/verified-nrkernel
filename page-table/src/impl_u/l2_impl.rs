@@ -29,10 +29,11 @@ use crate::impl_u::wrapped_token::{ WrappedMapToken, WrappedUnmapToken, WrappedP
 verus! {
 
 mod aux {
-
 use super::*;
+
 pub proof fn nonlinear_query1(entry_base: nat, vaddr: nat, layer: nat, base: nat, idx: nat) by (nonlinear_arith)
     requires
+        idx < 512,
         layer < 4,
         base <= vaddr,
         idx == x86_arch_spec.index_for_vaddr(layer as nat, base as nat, vaddr as nat),
@@ -40,7 +41,7 @@ pub proof fn nonlinear_query1(entry_base: nat, vaddr: nat, layer: nat, base: nat
         aligned(vaddr as nat, x86_arch_spec.entry_size(layer as nat)),
         aligned(base as nat, x86_arch_spec.entry_size(layer as nat))
     ensures
-          entry_base == vaddr as nat
+          entry_base == vaddr
 { admit(); }
 
 pub proof fn nonlinear_query2(i: nat, idx: nat, vaddr: nat, pte_size: nat, ppte_size: nat, layer: nat, base: nat, b: nat) by (nonlinear_arith)
@@ -3317,7 +3318,6 @@ pub open spec fn accepted_protect(vaddr: nat, layer: nat, base: nat) -> bool {
 }
 
 
-// TODO: pt remains unchanged
 #[verifier(spinoff_prover)]
 fn protect_aux(
     Tracked(tok): Tracked<&mut WrappedProtectToken>,
@@ -3328,7 +3328,7 @@ fn protect_aux(
     vaddr: usize,
     permissions: Flags,
     Ghost(rebuild_root_pt): Ghost<spec_fn(PTDir, Set<MemRegion>) -> PTDir>,
-) -> (res: Result<(usize, Ghost<PTDir>),()>)
+) -> (res: Result<(),()>)
     requires
         old(tok).inv(),
         !old(tok)@.change_made,
@@ -3357,23 +3357,20 @@ fn protect_aux(
         tok.inv(),
         tok@.pt_mem.pml4 == old(tok)@.pt_mem.pml4,
         match res {
-            Ok(resv) => {
-                let (sz, Ghost(pt_res)) = resv;
+            Ok(_) => {
                 // this one needs to change to say we only changed the permissions.
-                // &&& interp_at(tok@, pt_res, layer as nat, ptr, base as nat).interp().update()
+                // &&& interp_at(tok@, pt, layer as nat, ptr, base as nat).interp().update()
                 //     == interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp()
                 // We return the regions that we removed
                 &&& tok@.regions.dom() == old(tok)@.regions.dom()
-                &&& pt_res.used_regions == pt.used_regions
                 // Invariant preserved
-                &&& inv_at(tok@, pt_res, layer as nat, ptr)
-                &&& no_empty_directories(tok@, pt_res, layer as nat, ptr)
+                &&& inv_at(tok@, pt, layer as nat, ptr)
+                &&& no_empty_directories(tok@, pt, layer as nat, ptr)
                 &&& interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp().contains_key(vaddr as nat)
         //         // We only touch regions in pt.used_regions
                 &&& (forall|r: MemRegion|
                      !pt.used_regions.contains(r) ==>
                      #[trigger] tok@.regions[r] === old(tok)@.regions[r])
-                &&& pt_res.region === pt.region
                 &&& tok@.change_made
                 &&& tok@.args == old(tok)@.args
             },
@@ -3607,7 +3604,7 @@ fn protect_aux(
                     //         lemma_no_empty_directories_framing(old(tok)@, pt, tok@, pt_res, layer as nat, ptr, base as nat, idx as nat);
                     //     };
                     // }
-                    Ok((x86_arch_exec.entry_size(layer), Ghost(arbitrary())))
+                    Ok(())
                     // Ok(Ghost((pt_res, removed_regions)))
                 },
                 Err(e) => {
@@ -3687,8 +3684,7 @@ fn protect_aux(
                 //     assert(tok@.regions.dom() =~= old(tok)@.regions.dom().difference(removed_regions));
                 //     assert(pt.used_regions =~= pt.used_regions.difference(removed_regions));
                 // }
-                Ok((x86_arch_exec.entry_size(layer), Ghost(arbitrary())))
-                // Ok(Ghost((pt, removed_regions)))
+                Ok(())
             } else {
                 // proof {
                 //     assert(entry_base != vaddr);
@@ -3714,8 +3710,7 @@ fn protect_aux(
 }
 
 
-/// `frame` will be set to the frame that was unmapped.
-pub fn protect(Tracked(tok): Tracked<&mut WrappedProtectToken>, pt: &mut Ghost<PTDir>, pml4: usize, vaddr: usize, permissions: Flags) -> (res: Result<usize,()>)
+pub fn protect(Tracked(tok): Tracked<&mut WrappedProtectToken>, pt: &mut Ghost<PTDir>, pml4: usize, vaddr: usize, permissions: Flags) -> (res: Result<(),()>)
     requires
         !old(tok)@.change_made,
         inv_and_nonempty(old(tok)@, old(pt)@),
@@ -3741,9 +3736,9 @@ pub fn protect(Tracked(tok): Tracked<&mut WrappedProtectToken>, pt: &mut Ghost<P
 {
     proof { admit(); }
     let ghost rebuild_root_pt = |pt_new, removed_regions| pt_new;
-    if let Ok((sz, _)) = protect_aux(Tracked(tok), *pt, 0, pml4, 0, vaddr, permissions, Ghost(rebuild_root_pt)) {
+    if let Ok(_) = protect_aux(Tracked(tok), *pt, 0, pml4, 0, vaddr, permissions, Ghost(rebuild_root_pt)) {
         assert(inv_and_nonempty(tok@, pt@));
-        Ok(sz)
+        Ok(())
     } else {
         assert(inv_and_nonempty(tok@, pt@));
         Err(())

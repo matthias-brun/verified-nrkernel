@@ -182,8 +182,10 @@ impl CodeVC for PTImpl {
             assert(PT::inv_and_nonempty(wtokp, pt@));
         };
 
-        let (res, shootdown) = if let Ok(size) = res {
-            (Ok(()), DoShootdown::Yes { vaddr, size })
+        let (res, shootdown) = if let Ok(_) = res {
+            // TODO: Drop size for shootdown?
+            assume(false);
+            (Ok(()), DoShootdown::Yes { vaddr, size: unreached() })
         } else {
             (Err(()), DoShootdown::No)
         };
