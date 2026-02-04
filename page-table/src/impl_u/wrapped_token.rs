@@ -1584,14 +1584,6 @@ impl WrappedUnmapToken {
                 os_invariant::next_preserves_inv(tok.tok.consts(), state5, tok.tok.st(), RLbl::Tau);
             }
 
-            // Note on the invlpg here:
-            // For the Linux integration this invlpg isn't necessary but due to our modeling we
-            // still need to do it. Our definition of concurrent transitions doesn't allow a local
-            // `AckShootdownIPI` (or invlpg) to happen as a "concurrent" transition. This in turn
-            // means we'd be able to prove that the post state given by the `WaitShootdown`
-            // transition contradicts our knowledge (which would be consistent with that function
-            // not terminating).
-
             // Execute invlpg to evict from local TLB
             mmu::rl3::code::invlpg(Tracked(&mut mmu_tok), vaddr);
             let ghost state6 = tok.tok.st();
@@ -1944,7 +1936,7 @@ impl WrappedProtectToken {
                     lemma_bits_prot();
                 };
             };
-            // TODO: Not sure how to get this the easiest way. Should follow from some invariant.
+            // TODO: Should follow from shootdown invariant once updated
             assume(tok.tok.st().mmu@.writes.tso =~= set![]);
             assume(tok.tok.st().mmu@.writes.nonpos =~= set![]);
             assert(tok.tok.st().mmu@.is_happy_writeprotect(core, addr, value));
@@ -2002,7 +1994,7 @@ impl WrappedProtectToken {
         };
     }
 
-    /// Completes the remaining unmap transitions and performs a shootdown if necessary.
+    /// Completes the remaining protect transitions and performs a shootdown if necessary.
     #[verifier(spinoff_prover)]
     pub exec fn finish_protect_and_release_lock(Tracked(tok): Tracked<WrappedProtectToken>, shootdown: DoShootdown, Ghost(root_pt): Ghost<PTDir>) -> (rtok: Tracked<Token>)
         requires
@@ -2025,239 +2017,229 @@ impl WrappedProtectToken {
             rtok@.steps() === seq![],
             rtok@.steps_taken().last()->ProtectEnd_result == (if shootdown is Yes { Ok(()) } else { Err(()) }),
     {
+        let ghost core = tok.tok.core();
+        let tracked mut tok = tok;
+        let ghost state1 = tok.tok.st();
+        let ghost vaddr = tok.tok.st().core_states[core]->ProtectExecuting_vaddr;
+        let ghost flags = tok.tok.st().core_states[core]->ProtectExecuting_flags;
+        let ghost result = tok.tok.st().core_states[core]->ProtectExecuting_result;
 
-        proof { admit(); }
+        if let DoShootdown::Yes { vaddr, size } = shootdown {
+            assert(result matches Some(Ok(_)));
+
+            let tracked mut mmu_tok = tok.tok.get_mmu_token();
+            proof {
+                mmu_tok.prophesy_barrier();
+                let post = os::State {
+                    mmu: mmu_tok.post(),
+                    ..tok.tok.st()
+                };
+                assert(mmu::rl3::next(tok.tok.st().mmu, post.mmu, tok.tok.consts().common, mmu_tok.lbl()));
+                assert(os::step_Barrier(tok.tok.consts(), tok.tok.st(), post, core, RLbl::Tau));
+                let step = os::Step::Barrier { core };
+                assert(os::next_step(tok.tok.consts(), tok.tok.st(), post, step, RLbl::Tau));
+                tok.tok.register_internal_step_mmu(&mut mmu_tok, post, step);
+                os_invariant::next_preserves_inv(tok.tok.consts(), state1, tok.tok.st(), RLbl::Tau);
+            }
+
+            // Execute barrier to make writes globally visible
+            mmu::rl3::code::barrier(Tracked(&mut mmu_tok));
+            let ghost state2 = tok.tok.st();
+
+            proof {
+                broadcast use to_rl1::next_refines;
+                tok.tok.return_mmu_token(mmu_tok);
+                let pidx = tok.tok.do_concurrent_trs();
+                lemma_concurrent_trs(state2, tok.tok.st(), tok.tok.consts(), tok.tok.core(), pidx);
+            }
+            let ghost state3 = tok.tok.st();
+
+            let tracked mut osext_tok = tok.tok.get_osext_token();
+            proof {
+                osext_tok.prophesy_init_shootdown(vaddr);
+                let new_cs = os::CoreState::ProtectShootdownWaiting { ult_id: tok.tok.thread(), vaddr: vaddr as nat, flags, result: result->Some_0 };
+                let post = os::State {
+                    core_states: tok.tok.st().core_states.insert(core, new_cs),
+                    os_ext: osext_tok.post(),
+                    ..tok.tok.st()
+                };
+                assert(tok.tok.st().mmu@.writes.tso =~= set![]);
+                assert(os_ext::next(tok.tok.st().os_ext, post.os_ext, tok.tok.consts().common, osext_tok.lbl()));
+                assert(os::step_ProtectInitiateShootdown(tok.tok.consts(), tok.tok.st(), post, core, RLbl::Tau));
+                let step = os::Step::ProtectInitiateShootdown { core };
+                assert(os::next_step(tok.tok.consts(), tok.tok.st(), post, step, RLbl::Tau));
+                tok.tok.register_internal_step_osext(&mut osext_tok, post, step, RLbl::Tau);
+                os_invariant::next_preserves_inv(tok.tok.consts(), state3, tok.tok.st(), RLbl::Tau);
+            }
+
+            // Initiate shootdown
+            os_ext::code::init_shootdown(Tracked(&mut osext_tok), vaddr, size);
+            let ghost state4 = tok.tok.st();
+
+            proof {
+                broadcast use to_rl1::next_refines;
+                tok.tok.return_osext_token(osext_tok);
+                let pidx = tok.tok.do_concurrent_trs();
+                lemma_concurrent_trs(state4, tok.tok.st(), tok.tok.consts(), tok.tok.core(), pidx);
+            }
+
+            let ghost state5 = tok.tok.st();
+
+            let tracked mut mmu_tok = tok.tok.get_mmu_token();
+            proof {
+                mmu_tok.prophesy_invlpg(vaddr);
+                let post = os::State {
+                    mmu: mmu_tok.post(),
+                    ..tok.tok.st()
+                };
+                assert(mmu::rl3::next(tok.tok.st().mmu, post.mmu, tok.tok.consts().common, mmu_tok.lbl()));
+                assert(tok.tok.st().os_ext.shootdown_vec.open_requests.contains(core));
+                assert(os::step_Invlpg(tok.tok.consts(), tok.tok.st(), post, core, RLbl::Tau));
+                let step = os::Step::Invlpg { core };
+                assert(os::next_step(tok.tok.consts(), tok.tok.st(), post, step, RLbl::Tau));
+                tok.tok.register_internal_step_mmu(&mut mmu_tok, post, step);
+                os_invariant::next_preserves_inv(tok.tok.consts(), state5, tok.tok.st(), RLbl::Tau);
+            }
+
+            // Execute invlpg to evict from local TLB
+            mmu::rl3::code::invlpg(Tracked(&mut mmu_tok), vaddr);
+            let ghost state6 = tok.tok.st();
+
+            proof {
+                broadcast use to_rl1::next_refines;
+                tok.tok.return_mmu_token(mmu_tok);
+                let pidx = tok.tok.do_concurrent_trs();
+                lemma_concurrent_trs(state6, tok.tok.st(), tok.tok.consts(), tok.tok.core(), pidx);
+            }
+            let ghost state7 = tok.tok.st();
+
+            let tracked mut osext_tok = tok.tok.get_osext_token();
+            proof {
+                osext_tok.prophesy_ack_shootdown();
+                let post = os::State {
+                    os_ext: osext_tok.post(),
+                    ..tok.tok.st()
+                };
+                assert(os_ext::next(tok.tok.st().os_ext, post.os_ext, tok.tok.consts().common, osext_tok.lbl()));
+                assert(!tok.tok.st().mmu@.writes.nonpos.contains(core));
+                assert(!tok.tok.st().mmu@.tlbs[core].contains_key(vaddr)) by {
+                    assert(tok.tok.st().core_states[core] is ProtectShootdownWaiting);
+                    assert(vaddr == tok.tok.st().core_states[core]->ProtectShootdownWaiting_vaddr);
+                    assert(state6.os_ext.shootdown_vec.open_requests.contains(core));
+                    broadcast use to_rl1::next_refines;
+                    assert(!state6.mmu@.tlbs[core].contains_key(vaddr));
+                };
+                let lbl = RLbl::AckShootdownIPI { core: tok.tok.core() };
+                assert(os::step_AckShootdownIPI(tok.tok.consts(), tok.tok.st(), post, core, lbl));
+                let step = os::Step::AckShootdownIPI { core };
+                assert(os::next_step(tok.tok.consts(), tok.tok.st(), post, step, lbl));
+                tok.tok.register_internal_step_osext(&mut osext_tok, post, step, lbl);
+                os_invariant::next_preserves_inv(tok.tok.consts(), state7, tok.tok.st(), lbl);
+            }
+
+            // Initiate shootdown
+            os_ext::code::ack_shootdown(Tracked(&mut osext_tok));
+            let ghost state8 = tok.tok.st();
+
+            proof {
+                broadcast use to_rl1::next_refines;
+                tok.tok.return_osext_token(osext_tok);
+                let pidx = tok.tok.do_concurrent_trs();
+                lemma_concurrent_trs(state8, tok.tok.st(), tok.tok.consts(), tok.tok.core(), pidx);
+            }
+
+            let ghost state9 = tok.tok.st();
+
+            let tracked mut osext_tok = tok.tok.get_osext_token();
+            proof {
+                osext_tok.prophesy_wait_shootdown();
+                let post = state9; // read-only step
+                assert(os_ext::next(tok.tok.st().os_ext, post.os_ext, tok.tok.consts().common, osext_tok.lbl()));
+                assert(os::step_WaitShootdown(tok.tok.consts(), tok.tok.st(), post, core, RLbl::Tau));
+                let step = os::Step::WaitShootdown { core };
+                assert(os::next_step(tok.tok.consts(), tok.tok.st(), post, step, RLbl::Tau));
+                tok.tok.register_internal_step_osext(&mut osext_tok, post, step, RLbl::Tau);
+            }
+
+            // Wait for completion of shootdown
+            os_ext::code::wait_shootdown(Tracked(&mut osext_tok));
+            let ghost state10 = tok.tok.st();
+
+            proof {
+                broadcast use to_rl1::next_refines;
+                tok.tok.return_osext_token(osext_tok);
+                let pidx = tok.tok.do_concurrent_trs();
+                lemma_concurrent_trs(state10, tok.tok.st(), tok.tok.consts(), tok.tok.core(), pidx);
+            }
+
+            assert(state10.os_ext.shootdown_vec.open_requests.is_empty());
+            assert(tok.tok.st().mmu@.writes.tso === set![]);
+            assert(tok.tok.st().mmu@.writes.nonpos =~= set![]);
+        } else {
+            // register fail
+            assert(result is None);
+
+            proof {
+                tok@.lemma_interps_match(root_pt);
+                let new_cs = os::CoreState::ProtectOpDone { ult_id: tok.tok.thread(), vaddr: vaddr as nat, flags, result: Err(()) };
+                let post = os::State {
+                    core_states: tok.tok.st().core_states.insert(core, new_cs),
+                    ..tok.tok.st()
+                };
+
+                assert(os::step_ProtectOpFail(tok.tok.consts(), tok.tok.st(), post, core, RLbl::Tau));
+                let step = os::Step::ProtectOpFail { core };
+                assert(os::next_step(tok.tok.consts(), tok.tok.st(), post, step, RLbl::Tau));
+                tok.tok.register_internal_step(post, step);
+                os_invariant::next_preserves_inv(tok.tok.consts(), state1, tok.tok.st(), RLbl::Tau);
+                let ghost state2 = tok.tok.st();
+                let pidx = tok.tok.do_concurrent_trs();
+                lemma_concurrent_trs(state2, tok.tok.st(), tok.tok.consts(), tok.tok.core(), pidx);
+                // TODO: Should follow from shootdown invariant once updated
+                assume(tok.tok.st().mmu@.writes.tso === set![]);
+                assume(tok.tok.st().mmu@.writes.nonpos === set![]);
+            }
+        }
+
+        let tracked mut osext_tok = tok.tok.get_osext_token();
+
+        proof {
+            let ghost statex1 = tok.tok.st();
+
+            let cs = tok.tok.st().core_states[core];
+            let result = if cs is ProtectShootdownWaiting { Ok(()) } else { Err(()) };
+
+            broadcast use to_rl1::next_refines;
+            osext_tok.prophesy_release_lock();
+            let post = os::State {
+                core_states: tok.tok.st().core_states.insert(core, os::CoreState::Idle),
+                os_ext: osext_tok.post(),
+                ..tok.tok.st()
+            };
+            assert(os_ext::step_ReleaseLock(tok.tok.st().os_ext, post.os_ext, tok.tok.consts().common, osext_tok.lbl()));
+            let lbl = RLbl::ProtectEnd { thread_id: tok.tok.thread(), vaddr, result };
+
+            assert(post.inv_impl()) by {
+                assert(tok.tok.st().mmu@.pt_mem == tok@.pt_mem);
+                assert(tok.tok.st().os_ext.allocated == tok@.regions.dom());
+            };
+            assert(tok.tok.st().mmu@.pending_protects === map![]);
+            assert(os::step_ProtectEnd(tok.tok.consts(), tok.tok.st(), post, core, lbl));
+            let step = os::Step::ProtectEnd { core };
+            assert(os::next_step(tok.tok.consts(), tok.tok.st(), post, step, lbl));
+            tok.tok.register_external_step_osext(&mut osext_tok, post, step, lbl);
+            os_invariant::next_preserves_inv(tok.tok.consts(), statex1, tok.tok.st(), lbl);
+        }
+
+        os_ext::code::release_lock(Tracked(&mut osext_tok));
+
+        proof {
+            broadcast use to_rl1::next_refines;
+            tok.tok.return_osext_token(osext_tok);
+            assert(tok.tok.steps() === seq![]);
+        }
+
         Tracked(tok.tok)
-
-        // let ghost core = tok.tok.core();
-        // let tracked mut tok = tok;
-        // let ghost state1 = tok.tok.st();
-        // let ghost vaddr = tok.tok.st().core_states[core]->UnmapExecuting_vaddr;
-        // let ghost result = tok.tok.st().core_states[core]->UnmapExecuting_result;
-
-        // if let DoShootdown::Yes { vaddr, size } = shootdown {
-        //     assert(result matches Some(Ok(_)));
-
-        //     let tracked mut mmu_tok = tok.tok.get_mmu_token();
-        //     proof {
-        //         mmu_tok.prophesy_barrier();
-        //         let post = os::State {
-        //             mmu: mmu_tok.post(),
-        //             ..tok.tok.st()
-        //         };
-        //         assert(mmu::rl3::next(tok.tok.st().mmu, post.mmu, tok.tok.consts().common, mmu_tok.lbl()));
-        //         assert(os::step_Barrier(tok.tok.consts(), tok.tok.st(), post, core, RLbl::Tau));
-        //         let step = os::Step::Barrier { core };
-        //         assert(os::next_step(tok.tok.consts(), tok.tok.st(), post, step, RLbl::Tau));
-        //         tok.tok.register_internal_step_mmu(&mut mmu_tok, post, step);
-        //         os_invariant::next_preserves_inv(tok.tok.consts(), state1, tok.tok.st(), RLbl::Tau);
-        //     }
-
-        //     // Execute barrier to make writes globally visible
-        //     mmu::rl3::code::barrier(Tracked(&mut mmu_tok));
-        //     let ghost state2 = tok.tok.st();
-
-        //     proof {
-        //         broadcast use to_rl1::next_refines;
-        //         tok.tok.return_mmu_token(mmu_tok);
-        //         let pidx = tok.tok.do_concurrent_trs();
-        //         lemma_concurrent_trs(state2, tok.tok.st(), tok.tok.consts(), tok.tok.core(), pidx);
-        //     }
-        //     let ghost state3 = tok.tok.st();
-
-        //     let tracked mut osext_tok = tok.tok.get_osext_token();
-        //     proof {
-        //         osext_tok.prophesy_init_shootdown(vaddr);
-        //         let new_cs = os::CoreState::UnmapShootdownWaiting { ult_id: tok.tok.thread(), vaddr: vaddr as nat, result: result->Some_0 };
-        //         let post = os::State {
-        //             core_states: tok.tok.st().core_states.insert(core, new_cs),
-        //             os_ext: osext_tok.post(),
-        //             ..tok.tok.st()
-        //         };
-        //         assert(tok.tok.st().mmu@.writes.tso =~= set![]);
-        //         assert(os_ext::next(tok.tok.st().os_ext, post.os_ext, tok.tok.consts().common, osext_tok.lbl()));
-        //         assert(os::step_UnmapInitiateShootdown(tok.tok.consts(), tok.tok.st(), post, core, RLbl::Tau));
-        //         let step = os::Step::UnmapInitiateShootdown { core };
-        //         assert(os::next_step(tok.tok.consts(), tok.tok.st(), post, step, RLbl::Tau));
-        //         tok.tok.register_internal_step_osext(&mut osext_tok, post, step, RLbl::Tau);
-        //         os_invariant::next_preserves_inv(tok.tok.consts(), state3, tok.tok.st(), RLbl::Tau);
-        //     }
-
-        //     // Initiate shootdown
-        //     os_ext::code::init_shootdown(Tracked(&mut osext_tok), vaddr, size);
-        //     let ghost state4 = tok.tok.st();
-
-        //     proof {
-        //         broadcast use to_rl1::next_refines;
-        //         tok.tok.return_osext_token(osext_tok);
-        //         let pidx = tok.tok.do_concurrent_trs();
-        //         lemma_concurrent_trs(state4, tok.tok.st(), tok.tok.consts(), tok.tok.core(), pidx);
-        //     }
-
-        //     let ghost state5 = tok.tok.st();
-
-        //     let tracked mut mmu_tok = tok.tok.get_mmu_token();
-        //     proof {
-        //         mmu_tok.prophesy_invlpg(vaddr);
-        //         let post = os::State {
-        //             mmu: mmu_tok.post(),
-        //             ..tok.tok.st()
-        //         };
-        //         assert(mmu::rl3::next(tok.tok.st().mmu, post.mmu, tok.tok.consts().common, mmu_tok.lbl()));
-        //         assert(tok.tok.st().os_ext.shootdown_vec.open_requests.contains(core));
-        //         assert(os::step_Invlpg(tok.tok.consts(), tok.tok.st(), post, core, RLbl::Tau));
-        //         let step = os::Step::Invlpg { core };
-        //         assert(os::next_step(tok.tok.consts(), tok.tok.st(), post, step, RLbl::Tau));
-        //         tok.tok.register_internal_step_mmu(&mut mmu_tok, post, step);
-        //         os_invariant::next_preserves_inv(tok.tok.consts(), state5, tok.tok.st(), RLbl::Tau);
-        //     }
-
-        //     // Note on the invlpg here:
-        //     // For the Linux integration this invlpg isn't necessary but due to our modeling we
-        //     // still need to do it. Our definition of concurrent transitions doesn't allow a local
-        //     // `AckShootdownIPI` (or invlpg) to happen as a "concurrent" transition. This in turn
-        //     // means we'd be able to prove that the post state given by the `WaitShootdown`
-        //     // transition contradicts our knowledge (which would be consistent with that function
-        //     // not terminating).
-
-        //     // Execute invlpg to evict from local TLB
-        //     mmu::rl3::code::invlpg(Tracked(&mut mmu_tok), vaddr);
-        //     let ghost state6 = tok.tok.st();
-
-        //     proof {
-        //         broadcast use to_rl1::next_refines;
-        //         tok.tok.return_mmu_token(mmu_tok);
-        //         let pidx = tok.tok.do_concurrent_trs();
-        //         lemma_concurrent_trs(state6, tok.tok.st(), tok.tok.consts(), tok.tok.core(), pidx);
-        //     }
-        //     let ghost state7 = tok.tok.st();
-
-        //     let tracked mut osext_tok = tok.tok.get_osext_token();
-        //     proof {
-        //         osext_tok.prophesy_ack_shootdown();
-        //         let post = os::State {
-        //             os_ext: osext_tok.post(),
-        //             ..tok.tok.st()
-        //         };
-        //         assert(os_ext::next(tok.tok.st().os_ext, post.os_ext, tok.tok.consts().common, osext_tok.lbl()));
-        //         assert(!tok.tok.st().mmu@.writes.nonpos.contains(core));
-        //         assert(!tok.tok.st().mmu@.tlbs[core].contains_key(vaddr)) by {
-        //             assert(tok.tok.st().core_states[core] is UnmapShootdownWaiting);
-        //             assert(vaddr == tok.tok.st().core_states[core]->UnmapShootdownWaiting_vaddr);
-        //             assert(state6.os_ext.shootdown_vec.open_requests.contains(core));
-        //             broadcast use to_rl1::next_refines;
-        //             assert(!state6.mmu@.tlbs[core].contains_key(vaddr));
-        //         };
-        //         let lbl = RLbl::AckShootdownIPI { core: tok.tok.core() };
-        //         assert(os::step_AckShootdownIPI(tok.tok.consts(), tok.tok.st(), post, core, lbl));
-        //         let step = os::Step::AckShootdownIPI { core };
-        //         assert(os::next_step(tok.tok.consts(), tok.tok.st(), post, step, lbl));
-        //         tok.tok.register_internal_step_osext(&mut osext_tok, post, step, lbl);
-        //         os_invariant::next_preserves_inv(tok.tok.consts(), state7, tok.tok.st(), lbl);
-        //     }
-
-        //     // Initiate shootdown
-        //     os_ext::code::ack_shootdown(Tracked(&mut osext_tok));
-        //     let ghost state8 = tok.tok.st();
-
-        //     proof {
-        //         broadcast use to_rl1::next_refines;
-        //         tok.tok.return_osext_token(osext_tok);
-        //         let pidx = tok.tok.do_concurrent_trs();
-        //         lemma_concurrent_trs(state8, tok.tok.st(), tok.tok.consts(), tok.tok.core(), pidx);
-        //     }
-
-        //     let ghost state9 = tok.tok.st();
-
-        //     let tracked mut osext_tok = tok.tok.get_osext_token();
-        //     proof {
-        //         osext_tok.prophesy_wait_shootdown();
-        //         let post = state9; // read-only step
-        //         assert(os_ext::next(tok.tok.st().os_ext, post.os_ext, tok.tok.consts().common, osext_tok.lbl()));
-        //         assert(os::step_WaitShootdown(tok.tok.consts(), tok.tok.st(), post, core, RLbl::Tau));
-        //         let step = os::Step::WaitShootdown { core };
-        //         assert(os::next_step(tok.tok.consts(), tok.tok.st(), post, step, RLbl::Tau));
-        //         tok.tok.register_internal_step_osext(&mut osext_tok, post, step, RLbl::Tau);
-        //     }
-
-        //     // Wait for completion of shootdown
-        //     os_ext::code::wait_shootdown(Tracked(&mut osext_tok));
-        //     let ghost state10 = tok.tok.st();
-
-        //     proof {
-        //         broadcast use to_rl1::next_refines;
-        //         tok.tok.return_osext_token(osext_tok);
-        //         let pidx = tok.tok.do_concurrent_trs();
-        //         lemma_concurrent_trs(state10, tok.tok.st(), tok.tok.consts(), tok.tok.core(), pidx);
-        //     }
-
-        //     assert(state10.os_ext.shootdown_vec.open_requests.is_empty());
-        //     assert(tok.tok.st().mmu@.writes.tso === set![]);
-        //     assert(tok.tok.st().mmu@.writes.nonpos =~= set![]);
-        // } else {
-        //     // register fail
-        //     assert(result is None);
-
-        //     proof {
-        //         tok@.lemma_interps_match(root_pt);
-        //         let new_cs = os::CoreState::UnmapOpDone { ult_id: tok.tok.thread(), vaddr: vaddr as nat, result: Err(()) };
-        //         let post = os::State {
-        //             core_states: tok.tok.st().core_states.insert(core, new_cs),
-        //             ..tok.tok.st()
-        //         };
-
-        //         assert(os::step_UnmapOpFail(tok.tok.consts(), tok.tok.st(), post, core, RLbl::Tau));
-        //         let step = os::Step::UnmapOpFail { core };
-        //         assert(os::next_step(tok.tok.consts(), tok.tok.st(), post, step, RLbl::Tau));
-        //         tok.tok.register_internal_step(post, step);
-        //         os_invariant::next_preserves_inv(tok.tok.consts(), state1, tok.tok.st(), RLbl::Tau);
-        //         let ghost state2 = tok.tok.st();
-        //         let pidx = tok.tok.do_concurrent_trs();
-        //         lemma_concurrent_trs(state2, tok.tok.st(), tok.tok.consts(), tok.tok.core(), pidx);
-        //         assert(tok.tok.st().mmu@.writes.tso === set![]);
-        //         assert(tok.tok.st().mmu@.writes.nonpos === set![]);
-        //     }
-        // }
-
-        // let tracked mut osext_tok = tok.tok.get_osext_token();
-
-        // proof {
-        //     let ghost statex1 = tok.tok.st();
-
-        //     let cs = tok.tok.st().core_states[core];
-        //     let result = if cs is UnmapShootdownWaiting { Ok(()) } else { Err(()) };
-
-        //     broadcast use to_rl1::next_refines;
-        //     osext_tok.prophesy_release_lock();
-        //     let post = os::State {
-        //         core_states: tok.tok.st().core_states.insert(core, os::CoreState::Idle),
-        //         os_ext: osext_tok.post(),
-        //         ..tok.tok.st()
-        //     };
-        //     assert(os_ext::step_ReleaseLock(tok.tok.st().os_ext, post.os_ext, tok.tok.consts().common, osext_tok.lbl()));
-        //     let lbl = RLbl::UnmapEnd { thread_id: tok.tok.thread(), vaddr, result };
-
-        //     assert(post.inv_impl()) by {
-        //         assert(tok.tok.st().mmu@.pt_mem == tok@.pt_mem);
-        //         assert(tok.tok.st().os_ext.allocated == tok@.regions.dom());
-        //     };
-        //     assert(tok.tok.st().mmu@.pending_unmaps === map![]);
-        //     assert(os::step_UnmapEnd(tok.tok.consts(), tok.tok.st(), post, core, lbl));
-        //     let step = os::Step::UnmapEnd { core };
-        //     assert(os::next_step(tok.tok.consts(), tok.tok.st(), post, step, lbl));
-        //     tok.tok.register_external_step_osext(&mut osext_tok, post, step, lbl);
-        //     os_invariant::next_preserves_inv(tok.tok.consts(), statex1, tok.tok.st(), lbl);
-        // }
-
-        // os_ext::code::release_lock(Tracked(&mut osext_tok));
-
-        // proof {
-        //     broadcast use to_rl1::next_refines;
-        //     tok.tok.return_osext_token(osext_tok);
-        //     assert(tok.tok.steps() === seq![]);
-        // }
-
-        // Tracked(tok.tok)
     }
 }
 

@@ -84,6 +84,8 @@ impl RLbl {
                 => thread_id == t2 && vaddr == v2,
             (RLbl::UnmapEnd { thread_id, vaddr, .. }, RLbl::UnmapEnd { thread_id: t2, vaddr: v2, .. })
                 => thread_id == t2 && vaddr == v2,
+            (RLbl::ProtectEnd { thread_id, vaddr, .. }, RLbl::ProtectEnd { thread_id: t2, vaddr: v2, .. })
+                => thread_id == t2 && vaddr == v2,
             _ => other == self,
         }
     }
