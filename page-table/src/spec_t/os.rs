@@ -1491,10 +1491,11 @@ impl State {
     }
 
     pub open spec fn inv_shootdown(self, c: Constants) -> bool {
-        &&& !(self.os_ext.lock matches Some(core) && self.core_states[core] is UnmapShootdownWaiting)
+        &&&   !(self.os_ext.lock matches Some(core) 
+            && (self.core_states[core] is UnmapShootdownWaiting || self.core_states[core] is ProtectShootdownWaiting))
             ==> self.os_ext.shootdown_vec.open_requests.is_empty()
         &&& (self.os_ext.lock matches Some(core) &&
-            self.core_states[core] matches CoreState::UnmapShootdownWaiting { .. })
+            (self.core_states[core] is UnmapShootdownWaiting || self.core_states[core] is ProtectShootdownWaiting))
             ==> {
                 &&& self.mmu@.writes.tso === set![]
                 &&& self.mmu@.writes.nonpos.subset_of(self.os_ext.shootdown_vec.open_requests)

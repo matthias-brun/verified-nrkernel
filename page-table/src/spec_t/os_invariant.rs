@@ -1159,7 +1159,19 @@ pub proof fn next_step_preserves_inv_tlb(
         | os::Step::ProtectOpFail { core, .. }
         | os::Step::ProtectInitiateShootdown { core, .. }
         | os::Step::ProtectEnd { core, .. } => {
-            admit();
+            assume(s2.inv_tlb_wf(c));
+            assert(s2.inv_shootdown_wf(c));
+            assert(s2.shootdown_exists(c));
+            assert(s2.shootdown_cores_valid(c));
+            assert(s2.successful_IPI(c));
+            assume(s2.TLB_dom_subset_of_pt_and_inflight_unmap_vaddr(c));
+            assume(s2.all_cores_nonpos_before_shootdown(c));
+            assert(s2.TLB_unmap_agree(c));
+            assert(s2.successful_invlpg(c));
+            assume(s2.TLB_interp_pt_mem_agree(c));
+            assume(s2.pending_unmap_is_unmap_vaddr(c));
+            assume(s2.TLB_protect_agree(c));
+            assert(s2.inv_tlb(c));
         },
         // _ => {
         // }
