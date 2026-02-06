@@ -2772,10 +2772,16 @@ fn unmap_aux(
            #[trigger] unmap_builder_pre(old(tok)@, pt, tok_new, pt_new, layer as nat, ptr, removed_regions)
                ==> {
                    &&& inv(tok_new, rebuild_root_pt(pt_new, removed_regions))
-                   &&& interp_at(tok_new, pt_new, layer as nat, ptr, base as nat).interp()
-                           == interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp()
-                        ==> interp_to_l0(tok_new, rebuild_root_pt(pt_new, removed_regions))
-                                == interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![]))
+                       // For unmapping we only need this property, whereas map_frame needs a
+                       // second one to lift unchanged interps to l0 as well. Because unmap makes
+                       // the observable change first and the stutter writes afterwards, we can
+                       // rely on just the one property, e.g.:
+                       // * We start in state s1
+                       // * Write to remove entry -> now in s2
+                       // * We know interp_l0(s1) == interp_l0(s2).remove(vaddr)
+                       // * Then write to remove empty directory -> now in s3
+                       // * We know interp_l0(s1) == interp_l0(s3).remove(vaddr)
+                       // * and hence interp_l0(s2) == interp_l0(s3)
                    &&& interp_at(tok_new, pt_new, layer as nat, ptr, base as nat).interp()
                            === interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp().remove(vaddr as nat)
                         ==> interp_to_l0(tok_new, rebuild_root_pt(pt_new, removed_regions))
@@ -2864,10 +2870,6 @@ fn unmap_aux(
                    implies {
                        &&& inv(tok_new, rebuild_root_pt_inner(pt_new_inner, removed_regions))
                        &&& interp_at(tok_new, pt_new_inner, layer as nat + 1, dir_addr, entry_base as nat).interp()
-                               == interp_at(tok@, dir_pt, layer as nat + 1, dir_addr, entry_base as nat).interp()
-                            ==> interp_to_l0(tok_new, rebuild_root_pt_inner(pt_new_inner, removed_regions))
-                                    == interp_to_l0(tok@, rebuild_root_pt_inner(dir_pt, set![]))
-                       &&& interp_at(tok_new, pt_new_inner, layer as nat + 1, dir_addr, entry_base as nat).interp()
                                === interp_at(tok@, dir_pt, layer as nat + 1, dir_addr, entry_base as nat).interp().remove(vaddr as nat)
                             ==> interp_to_l0(tok_new, rebuild_root_pt_inner(pt_new_inner, removed_regions))
                                     === interp_to_l0(tok@, rebuild_root_pt_inner(dir_pt, set![])).remove(vaddr as nat)
@@ -2890,29 +2892,6 @@ fn unmap_aux(
 
                 assert(unmap_builder_pre(tok@, pt, tok_new, pt_new, layer as nat, ptr, removed_regions));
                 assert(inv(tok_new, rebuild_root_pt(pt_new, removed_regions)));
-
-                // Prove the first interp property for the new builder
-                if interp_at(tok_new, pt_new_inner, layer as nat + 1, dir_addr, entry_base as nat).interp()
-                       == interp_at(tok@, dir_pt, layer as nat + 1, dir_addr, entry_base as nat).interp()
-                {
-                    assert(interp_at(tok_new, pt_new, layer as nat, ptr, base as nat).interp()
-                            == interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp())
-                    by {
-                        lemma_interp_at_aux_facts(tok_new, pt_new, layer as nat, ptr, base as nat, seq![]);
-                        assert forall|i: nat| i < X86_NUM_ENTRIES && i != idx implies
-                                interp_at(tok_new, pt_new, layer as nat, ptr, base as nat).entries[i as int]
-                                === #[trigger] interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).entries[i as int]
-                        by {
-                            reveal(ghost_pt_used_regions_pairwise_disjoint);
-                            lemma_interp_at_entry_changed_tok(old(tok)@, pt, tok_new, pt_new, layer as nat, ptr, base as nat, i);
-                        };
-                        interp_at(tok_new, pt_new, layer as nat, ptr, base as nat)
-                            .lemma_entries_interp_equal_implies_interp_equal(
-                                interp_at(old(tok)@, pt, layer as nat, ptr, base as nat)
-                            );
-                    };
-                    assert(interp_to_l0(tok_new, rebuild_root_pt_inner(pt_new_inner, removed_regions)) == interp_to_l0(tok@, rebuild_root_pt_inner(dir_pt, set![])));
-                }
 
                 let interp_now_inner = interp_at(tok@, dir_pt, layer as nat + 1, dir_addr, entry_base as nat);
                 let interp_new_inner = interp_at(tok_new, pt_new_inner, layer as nat + 1, dir_addr, entry_base as nat);
@@ -3068,7 +3047,7 @@ fn unmap_aux(
                                 interp_old.lemma_entries_interp_equal_implies_interp_equal(interp_now);
                             };
                             assert(PT::interp_to_l0(tok_after_write, root_pt_after_write) == PT::interp_to_l0(tok_after_rec, root_pt_after_rec)) by {
-                                assert(unmap_builder_pre(old(tok)@, pt, tok_after_write, pt_after_write, layer as nat, ptr, removed_regions));
+                                // See comment in preconditions for why this lifting works.
                             };
                         }
                         assert(tok@.regions.contains_key(pt.region));
