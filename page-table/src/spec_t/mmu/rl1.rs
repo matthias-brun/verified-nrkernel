@@ -74,12 +74,10 @@ impl State {
 
     pub open spec fn is_happy_writeprotect(self, core: Core, addr: usize, value: usize) -> bool {
         &&& self.pt_mem.is_prot_write(addr, value)
-        // We only allow one modification per protect period. We could allow more but that would make
-        // it more complex to determine the possible non-atomic walk results. E.g. if we change the RW
-        // bit on a directory mapping, and the XD bit on a page mapping in that directory, I think we
-        // could observe all 4 possibilities: RW/XD, (not RW)/XD, RW/(not XD), (not RW)/(not XD)
-        // Our implementation only makes one modification, so we choose the simpler option, where the
-        // only possible outcomes are that we see the new or the old translation.
+        // We only allow one modification per protect period for simplicity. Lifting this
+        // restriction probably wouldn't be very hard, since writes (due to the bit 7 condition)
+        // can only affect pages and thus we would retain the rl2::inv_inflight_walks_are_prefixes
+        // invariant. But our code only makes a single modification, so we keep it simple.
         &&& self.writes.tso === set![]
         &&& self.writes.nonpos === set![]
     }
