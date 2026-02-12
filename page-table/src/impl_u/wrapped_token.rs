@@ -17,7 +17,7 @@ use crate::spec_t::mmu::defs::{
 };
 use crate::spec_t::mmu::translation::{
     MASK_NEG_DIRTY_ACCESS, l0_bits, l1_bits, l2_bits, l3_bits,
-    GPDE, PDE, MASK_NEG_PROT_FLAGS, MASK_PROT_FLAGS,
+    GPDE, PDE, MASK_NEG_PROT_FLAGS,
 };
 use crate::theorem::RLbl;
 use crate::spec_t::mmu::rl3::refinement::to_rl1;
@@ -1507,7 +1507,7 @@ impl WrappedUnmapToken {
         let ghost vaddr = tok.tok.st().core_states[core]->UnmapExecuting_vaddr;
         let ghost result = tok.tok.st().core_states[core]->UnmapExecuting_result;
 
-        if let DoShootdown::Yes { vaddr, size } = shootdown {
+        if let DoShootdown::Yes { vaddr } = shootdown {
             assert(result matches Some(Ok(_)));
 
             let tracked mut mmu_tok = tok.tok.get_mmu_token();
@@ -1556,7 +1556,7 @@ impl WrappedUnmapToken {
             }
 
             // Initiate shootdown
-            os_ext::code::init_shootdown(Tracked(&mut osext_tok), vaddr, size);
+            os_ext::code::init_shootdown(Tracked(&mut osext_tok), vaddr);
             let ghost state4 = tok.tok.st();
 
             proof {
@@ -1888,9 +1888,8 @@ impl WrappedProtectToken {
             r.base == pbase,
             idx < 512,
             old(tok).inv(),
-            value & MASK_PROT_FLAGS != old(tok)@.read(idx, r) & MASK_PROT_FLAGS,
             value & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_FLAGS == old(tok)@.read(idx, r) & MASK_NEG_PROT_FLAGS,
-            old(tok)@.read(idx, r) & bit!(7usize) == 1,
+            old(tok)@.read(idx, r) & bit!(7usize) == bit!(7usize),
             PT::interp_to_l0(old(tok)@, root_pt).contains_key(old(tok)@.args->Protect_base as nat),
             PT::inv(old(tok)@, root_pt),
             PT::inv(old(tok)@.write(idx, value, r, true), root_pt),
@@ -1930,9 +1929,7 @@ impl WrappedProtectToken {
 
             assert(tok.tok.st().mmu@.pt_mem.is_prot_write(addr, value)) by {
                 let val_read = tok.tok.st().mmu@.pt_mem.read(addr);
-                assert(value & MASK_PROT_FLAGS != val_read & MASK_PROT_FLAGS) by (bit_vector)
-                    requires value & MASK_PROT_FLAGS != val_read & MASK_NEG_DIRTY_ACCESS & MASK_PROT_FLAGS;
-                assert(tok.tok.st().mmu@.pt_mem.read(addr) & bit!(7usize) == 1) by {
+                assert(tok.tok.st().mmu@.pt_mem.read(addr) & bit!(7usize) == bit!(7usize)) by {
                     lemma_bits_prot();
                 };
             };
@@ -2024,7 +2021,7 @@ impl WrappedProtectToken {
         let ghost flags = tok.tok.st().core_states[core]->ProtectExecuting_flags;
         let ghost result = tok.tok.st().core_states[core]->ProtectExecuting_result;
 
-        if let DoShootdown::Yes { vaddr, size } = shootdown {
+        if let DoShootdown::Yes { vaddr } = shootdown {
             assert(result matches Some(Ok(_)));
 
             let tracked mut mmu_tok = tok.tok.get_mmu_token();
@@ -2073,7 +2070,7 @@ impl WrappedProtectToken {
             }
 
             // Initiate shootdown
-            os_ext::code::init_shootdown(Tracked(&mut osext_tok), vaddr, size);
+            os_ext::code::init_shootdown(Tracked(&mut osext_tok), vaddr);
             let ghost state4 = tok.tok.st();
 
             proof {
@@ -2245,7 +2242,7 @@ impl WrappedProtectToken {
 
 
 pub enum DoShootdown {
-    Yes { vaddr: usize, size: usize },
+    Yes { vaddr: usize },
     No,
 }
 

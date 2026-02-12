@@ -318,6 +318,7 @@ pub proof fn next_step_preserves_inv_protect_vaddr_same_core(c: os::Constants, s
     }
 }
 
+#[verifier(spinoff_prover)]
 pub proof fn next_step_preserves_inv_protect_frame_unchanged(c: os::Constants, s1: os::State, s2: os::State, step: os::Step, lbl: RLbl)
     requires
         s1.inv(c),

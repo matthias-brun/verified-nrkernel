@@ -731,7 +731,7 @@ impl State {
     pub open spec fn inv_protect__sbuf_implies_bit7(self, c: Constants) -> bool {
         forall|core, i: int| #![trigger c.valid_core(core), self.sbuf[self.writes.core][i]]
             c.valid_core(core) && 0 <= i < self.sbuf[self.writes.core].len()
-            ==> self.core_mem(core).read(self.sbuf[self.writes.core][i].0) & bit!(7) == 1
+            ==> self.core_mem(core).read(self.sbuf[self.writes.core][i].0) & bit!(7) == bit!(7usize)
     }
 
     pub open spec fn inv_protect__core_walks(self, c: Constants) -> bool {
@@ -1925,6 +1925,7 @@ proof fn next_step_preserves_inv_inflight_walks_are_prefixes_during_prot(pre: St
 {
     broadcast use group_ambient;
     reveal(PDE::all_mb0_bits_are_zero);
+    assert(bit!(7usize) != 0) by (bit_vector);
     match step {
         Step::WalkStep { core, walk } => {
             reveal(rl2::walk_next);
@@ -1933,11 +1934,19 @@ proof fn next_step_preserves_inv_inflight_walks_are_prefixes_during_prot(pre: St
         Step::WriteProtect => {
             reveal(rl2::walk_next);
             lemma_mem_view_after_step_write(pre, post, c, lbl);
+            let wrvalue = lbl->Write_2;
+            assert(wrvalue & bit!(7usize) == bit!(7usize)) by {
+                assert(forall|v1: usize, v2: usize|
+                    #[trigger] (v1 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_FLAGS)
+                        == #[trigger] (v2 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_FLAGS)
+                    ==> v1 & bit!(7usize) == v2 & bit!(7usize)) by (bit_vector);
+            };
             assert(post.inv_inflight_walks_are_prefixes(c));
         },
         Step::Writeback { core } => {
             reveal(rl2::walk_next);
             lemma_step_Writeback_preserves_writer_mem(pre, post, c, core, lbl);
+            assert(post.inv_inflight_walks_are_prefixes(c))
         },
         _ => assert(post.inv_inflight_walks_are_prefixes(c)),
     }
@@ -1970,7 +1979,7 @@ proof fn next_step_preserves_inv_protect__sbuf_implies_bit7(pre: State, post: St
                 broadcast use lemma_writes_tso_empty_implies_sbuf_empty;
             };
             let addr = lbl->Write_1;
-            assert((pre.writer_mem().read(addr) & MASK_NEG_DIRTY_ACCESS) & MASK_NEG_PROT_FLAGS & bit!(7usize) == 1);
+            assert((pre.writer_mem().read(addr) & MASK_NEG_DIRTY_ACCESS) & MASK_NEG_PROT_FLAGS & bit!(7usize) == bit!(7usize));
             assert(post.inv_protect__sbuf_implies_bit7(c));
         },
         Step::Writeback { core } => {

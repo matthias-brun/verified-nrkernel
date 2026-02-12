@@ -128,7 +128,7 @@ impl CodeVC for PTImpl {
         };
 
         let shootdown = if let Ok(pte) = res {
-            DoShootdown::Yes { vaddr, size: frame.size }
+            DoShootdown::Yes { vaddr }
         } else {
             DoShootdown::No
         };
@@ -145,13 +145,12 @@ impl CodeVC for PTImpl {
         pml4: usize,
         vaddr: usize,
         flags: Flags,
-        // Ghost(frame): Ghost<MemRegion>,
     ) -> (res: (Result<(),()>, Tracked<Token>))
     {
         let tracked mut tok = tok;
 
         wrapped_token::start_protect_and_acquire_lock(Tracked(&mut tok), Ghost(vaddr as nat), Ghost(flags));
-        let tracked wtok = WrappedProtectToken::new(tok); //, tok.steps()[0]->MapEnd_result);
+        let tracked wtok = WrappedProtectToken::new(tok);
         proof {
             wtok.lemma_regions_derived_from_view();
         }
@@ -183,9 +182,7 @@ impl CodeVC for PTImpl {
         };
 
         let (res, shootdown) = if let Ok(_) = res {
-            // TODO: Drop size for shootdown?
-            assume(false);
-            (Ok(()), DoShootdown::Yes { vaddr, size: unreached() })
+            (Ok(()), DoShootdown::Yes { vaddr })
         } else {
             (Err(()), DoShootdown::No)
         };

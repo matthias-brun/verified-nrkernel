@@ -214,10 +214,9 @@ impl PDE {
     pub broadcast proof fn lemma_view_unchanged_dirty_access(self, other: PDE)
         requires
             self.layer@ < 4,
-            #[trigger] (self.entry & MASK_NEG_DIRTY_ACCESS)
-                == #[trigger] (other.entry & MASK_NEG_DIRTY_ACCESS),
+            self.entry & MASK_NEG_DIRTY_ACCESS == other.entry & MASK_NEG_DIRTY_ACCESS,
             self.layer == other.layer,
-        ensures other@ == self@
+        ensures #[trigger] other@ == #[trigger] self@
     {
         reveal(PDE::all_mb0_bits_are_zero);
         let v1 = self.entry;

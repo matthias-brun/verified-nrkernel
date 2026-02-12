@@ -4,7 +4,7 @@
 use vstd::prelude::*;
 
 use crate::spec_t::mmu::translation::{
-    PDE, GPDE, l0_bits, l1_bits, l2_bits, l3_bits, MASK_NEG_PROT_FLAGS, MASK_PROT_FLAGS,
+    PDE, GPDE, l0_bits, l1_bits, l2_bits, l3_bits, MASK_NEG_PROT_FLAGS,
     MASK_NEG_DIRTY_ACCESS,
 };
 use crate::spec_t::mmu::defs::{ PTE, bitmask_inc, WORD_SIZE, bit, PAGE_SIZE,
@@ -74,13 +74,12 @@ impl PTMem {
     /// can only change permissions for existing entries but never add or remove entries.
     /// We also require bit 7 to be set, which excludes permission changes for any directories.
     /// Changes to Dirty/Access bits are also technically allowed because we don't care about their
-    /// values. This is necessary because we overapproximate reads so we literally don't know what
-    /// D/A are, meaning we wouldn't be able to prove that we don't change them.
+    /// values. This is necessary because D/A could change between reading and writing, so we
+    /// wouldn't be able to prove that we don't change them.
     pub open spec fn is_prot_write(self, addr: usize, value: usize) -> bool {
-        &&& value & MASK_PROT_FLAGS     != self.read(addr) & MASK_PROT_FLAGS
         &&& (value & MASK_NEG_DIRTY_ACCESS) & MASK_NEG_PROT_FLAGS
                 == (self.read(addr) & MASK_NEG_DIRTY_ACCESS) & MASK_NEG_PROT_FLAGS
-        &&& self.read(addr) & bit!(7usize) == 1
+        &&& self.read(addr) & bit!(7usize) == bit!(7usize)
     }
 
     pub open spec fn pt_walk(self, vaddr: usize) -> Walk {

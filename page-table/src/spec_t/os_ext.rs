@@ -250,7 +250,6 @@ pub mod code {
 
         pub axiom fn prophesy_acquire_lock(tracked &mut self)
             requires
-                //old(self).consts().valid_core(old(self).core()), TODO: ??
                 old(self).tstate() is Init,
             ensures
                 self.lbl() == (os_ext::Lbl::AcquireLock { core: self.core() }),
@@ -424,12 +423,9 @@ pub mod code {
         fn print(s: *const c_char, v: usize);
     }
 
-    /// initiates a shootdown for a given virtual page of a given size
-    ///
-    /// this only covers tlb invalidations of a single page at `vaddr` with a page size of `size`
-    /// `size` is a hint, as it doesn't appear in the corresponding `InitShootdown` transition
+    /// initiates a shootdown for a given virtual page
     #[verifier(external_body)]
-    pub exec fn init_shootdown(Tracked(tok): Tracked<&mut Token>, vaddr: usize, size: usize)
+    pub exec fn init_shootdown(Tracked(tok): Tracked<&mut Token>, vaddr: usize)
         requires
             old(tok).tstate() is Validated,
             old(tok).lbl() == (os_ext::Lbl::InitShootdown { core: old(tok).core(), vaddr: vaddr as nat }),
