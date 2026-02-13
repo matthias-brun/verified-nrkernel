@@ -1205,9 +1205,26 @@ pub proof fn next_step_preserves_inv_tlb(
             assert(s2.successful_invlpg_protect(c));
             assert(s2.successful_IPI(c));
             assert(s2.TLB_interp_pt_mem_agree(c)) by {
-                admit();
+                assert forall|core2: Core, v: usize|
+                    #[trigger] c.valid_core(core2)
+                    && #[trigger] s2.mmu@.tlbs[core2].contains_key(v)
+                    && s2.interp_pt_mem().contains_key(v as nat)
+                    && !s2.is_inflight_critical_protect_vaddr(v as nat)
+                implies s2.mmu@.tlbs[core2][v] == s2.interp_pt_mem()[v as nat] by {
+                    let vaddr = s2.core_states[core].vaddr();
+                    assert(s2.core_states[core].vaddr() == s1.core_states[core].vaddr());
+                    if ((v as nat) == vaddr) {
+                        assert(s2.is_inflight_critical_protect_vaddr_core(v as nat, core));
+                        assert(s2.is_inflight_critical_protect_vaddr(v as nat));
+                    } 
+                };
             };
-            assume(s2.pending_unmap_is_unmap_vaddr(c));
+            assert(s2.pending_unmap_is_unmap_vaddr(c)) by {
+                    assert forall|va| s2.mmu@.pending_unmaps.contains_key(va) implies false by {
+                        assume(s1.mmu@.pending_unmaps.contains_key(va));
+                        assert(!s1.is_unmap_vaddr_core(s1.os_ext.lock->Some_0, va as nat));
+                }
+            }
             assert(s2.TLB_protect_agree(c));
             assert(s2.inv_tlb(c));
         },
