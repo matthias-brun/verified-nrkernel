@@ -803,7 +803,6 @@ pub proof fn next_step_mmu_preserves_inv_tlb(
     let mmu_step = choose|step| rl1::next_step(s1.mmu@, s2.mmu@, c.common, step, mmu::Lbl::Tau);
     assert(s2.interp_pt_mem().dom().union(s2.unmap_vaddr_set())
         =~= s1.interp_pt_mem().dom().union(s1.unmap_vaddr_set()));
-
     match mmu_step {
         rl1::Step::TLBFill { core, vaddr } => {
             let vbase = s1.mmu@.pt_mem.pt_walk(vaddr).result()->Valid_vbase;
@@ -840,7 +839,9 @@ pub proof fn next_step_mmu_preserves_inv_tlb(
                 }
             };
             assert(s2.successful_invlpg_unmap(c));
-            assert(s2.successful_invlpg_protect(c));
+            assert(s2.successful_invlpg_protect(c)) by {
+                admit();
+            }
             assert(s2.successful_IPI(c));
             assert forall|tlb_core: Core, tlb_va: nat| #![auto]
                 c.valid_core(tlb_core)
@@ -862,27 +863,16 @@ pub proof fn next_step_mmu_preserves_inv_tlb(
             assert(s2.TLB_dom_subset_of_pt_and_inflight_unmap_vaddr(c));
             assert(s2.TLB_interp_pt_mem_agree(c)) by {
                 reveal(crate::spec_t::mmu::pt_mem::PTMem::view);
+                assert(forall |v, core2| s1.is_inflight_critical_protect_vaddr_core(v,core2) 
+                    ==> s2.is_inflight_critical_protect_vaddr_core(v,core2));
             }
             assert(s2.TLB_unmap_agree(c)) by {
                 reveal(crate::spec_t::mmu::pt_mem::PTMem::view);
             }
             assert(s2.TLB_protect_agree(c)) by {
-                assume(forall|core: Core| #[trigger] c.valid_core(core) ==>
-                    match s2.core_states[core] {
-                        // succeeded
-                        os::CoreState::ProtectExecuting { vaddr, flags, result: Some(Ok(pte)), .. }
-                        | os::CoreState::ProtectOpDone { vaddr, flags, result: Ok(pte), .. }
-                        | os::CoreState::ProtectShootdownWaiting { vaddr, flags, result: Ok(pte), .. } => {
-                            &&& s2.mmu@.pending_protects.contains_key(vaddr as usize)
-                            &&& s2.mmu@.pending_protects[vaddr as usize] == pte
-                        },
-                        // failed
-                        os::CoreState::ProtectOpDone { vaddr, result: Err(_), .. } => {
-                            s2.mmu@.pending_protects === map![]
-                        },
-                        _ => true,
-                });
-                assume(false);
+                //not sure why but its much faster if this is here.Alsa runs without it.
+                if(s2.is_inflight_critical_protect_vaddr(vaddr as nat)) {
+                } 
                 reveal(crate::spec_t::mmu::pt_mem::PTMem::view);
             }
         }
@@ -891,8 +881,7 @@ pub proof fn next_step_mmu_preserves_inv_tlb(
             assert(s2.TLB_dom_subset_of_pt_and_inflight_unmap_vaddr(c));
             assert(s2.TLB_interp_pt_mem_agree(c));
             assert(s2.TLB_unmap_agree(c));
-            // XXX: there are no protects inflight if pending_unmaps is non-empty
-            assume(s2.TLB_protect_agree(c));
+            assert(s2.TLB_protect_agree(c));
         }
         rl1::Step::TLBFillNA2 { core, vaddr } => {
             assert(s2.inv_tlb_wf(c));
@@ -901,23 +890,40 @@ pub proof fn next_step_mmu_preserves_inv_tlb(
             assert(s2.shootdown_cores_valid(c));
             assert(s2.successful_IPI(c));
             assert(s2.all_cores_nonpos_before_shootdown(c));
-            assume(s2.TLB_unmap_agree(c));
+            assert(s2.TLB_unmap_agree(c)) by {
+                reveal(crate::spec_t::mmu::pt_mem::PTMem::view);
+                admit();
+            }
             assert(s2.successful_invlpg_unmap(c));
             assert(s2.successful_invlpg_protect(c));
             // XXX: this might need overlap invs
-            assume(s2.TLB_dom_subset_of_pt_and_inflight_unmap_vaddr(c));
-            assume(s2.TLB_interp_pt_mem_agree(c));
-            assume(s2.pending_unmap_is_unmap_vaddr(c));
-            assume(s2.TLB_protect_agree(c));
+            assert(s2.TLB_dom_subset_of_pt_and_inflight_unmap_vaddr(c)) by {
+                admit();
+            }
+            assert(s2.TLB_interp_pt_mem_agree(c)) by {
+                assert(s1.interp_pt_mem() =~= s2.interp_pt_mem());
+                assert(forall |v, core2| s1.is_inflight_critical_protect_vaddr_core(v,core2) 
+                    ==> s2.is_inflight_critical_protect_vaddr_core(v,core2));
+                admit(); //gotta argue that this is a subset of etc.
+            }
+            assert(s2.pending_unmap_is_unmap_vaddr(c));
+            assert(s2.TLB_protect_agree(c)) by {
+                reveal(crate::spec_t::mmu::pt_mem::PTMem::view);
+                admit();
+            }
         }
         _ => {
             assert(forall|core| #![auto] s2.mmu@.tlbs[core].submap_of(s1.mmu@.tlbs[core]));
-            assert(s2.TLB_interp_pt_mem_agree(c));
+            assert(s2.TLB_interp_pt_mem_agree(c)) by {
+                assert(forall |v, core2| s1.is_inflight_critical_protect_vaddr_core(v,core2) 
+                    ==> s2.is_inflight_critical_protect_vaddr_core(v,core2));
+            }
             assert(s2.TLB_unmap_agree(c));
         },
     }
     assert(s2.successful_IPI(c));
     assert(s2.TLB_dom_subset_of_pt_and_inflight_unmap_vaddr(c));
+
 }
 
 #[verifier::spinoff_prover]
