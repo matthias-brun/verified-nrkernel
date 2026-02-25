@@ -1650,15 +1650,14 @@ impl State {
 
      pub open spec fn successful_invlpg_protect(self, c: Constants) -> bool {
         forall|dispatcher: Core, handler: Core| {
-            let vaddr = (self.core_states[dispatcher]->ProtectShootdownWaiting_vaddr);
+            let vaddr = self.core_states[dispatcher]->ProtectShootdownWaiting_vaddr;
             #[trigger] c.valid_core(dispatcher)
             && c.valid_core(handler)
             && self.core_states[dispatcher] is ProtectShootdownWaiting
             && !#[trigger] self.mmu@.writes.nonpos.contains(handler)
-            && self.mmu@.tlbs[handler].contains_key( vaddr as usize)
-                ==> (self.mmu@.tlbs[handler][vaddr as usize]
-                            == self.interp_pt_mem()[vaddr])
-                
+            && self.mmu@.tlbs[handler].contains_key(vaddr as usize)
+                ==> self.mmu@.tlbs[handler][vaddr as usize]
+                            == self.interp_pt_mem()[vaddr]
         }
     }
 

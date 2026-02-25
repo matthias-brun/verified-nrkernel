@@ -840,8 +840,8 @@ pub proof fn next_step_mmu_preserves_inv_tlb(
             };
             assert(s2.successful_invlpg_unmap(c));
             assert(s2.successful_invlpg_protect(c)) by {
-                admit();
-            }
+                reveal(crate::spec_t::mmu::pt_mem::PTMem::view);
+            };
             assert(s2.successful_IPI(c));
             assert forall|tlb_core: Core, tlb_va: nat| #![auto]
                 c.valid_core(tlb_core)
@@ -870,9 +870,10 @@ pub proof fn next_step_mmu_preserves_inv_tlb(
                 reveal(crate::spec_t::mmu::pt_mem::PTMem::view);
             }
             assert(s2.TLB_protect_agree(c)) by {
-                //not sure why but its much faster if this is here.Alsa runs without it.
-                if(s2.is_inflight_critical_protect_vaddr(vaddr as nat)) {
-                } 
+                // not sure why but its much faster if this is here. Also runs without it.
+                // (instability)
+                // if(s2.is_inflight_critical_protect_vaddr(vaddr as nat)) {
+                // } 
                 reveal(crate::spec_t::mmu::pt_mem::PTMem::view);
             }
         }
