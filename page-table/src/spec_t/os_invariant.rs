@@ -919,39 +919,21 @@ pub proof fn next_step_mmu_preserves_inv_tlb(
             }
         }
         rl1::Step::TLBFillNA1 { core, vaddr } => {
-            assert(s2.successful_IPI(c));
-            assert(s2.TLB_dom_subset_of_pt_and_inflight_unmap_vaddr(c));
-            assert(s2.TLB_interp_pt_mem_agree(c));
-            assert(s2.TLB_unmap_agree(c));
-            assert(s2.TLB_protect_agree(c));
+            assert(s2.inv_tlb(c));
         }
         rl1::Step::TLBFillNA2 { core, vaddr } => {
-            assert(s2.inv_tlb_wf(c));
-            assert(s2.inv_shootdown_wf(c));
-            assert(s2.shootdown_exists(c));
-            assert(s2.shootdown_cores_valid(c));
-            assert(s2.successful_IPI(c));
-            assert(s2.all_cores_nonpos_before_shootdown(c));
             assert(s2.TLB_unmap_agree(c)) by {
                 reveal(crate::spec_t::mmu::pt_mem::PTMem::view);
-            }
-            assert(s2.successful_invlpg_unmap(c));
-            assert(s2.successful_invlpg_protect(c));
-            assert(s2.TLB_dom_subset_of_pt_and_inflight_unmap_vaddr(c)) by {
-                // XXX: this is false. unmap_vaddr_set doesn't include protect addrs, so either
-                // need to include them in this invariant or predicate the invariant on unmapping
-                // and have a second one for protect probably
-                admit();
             }
             assert(s2.TLB_interp_pt_mem_agree(c)) by {
                 assert(s1.interp_pt_mem() =~= s2.interp_pt_mem());
                 assert(forall|v, core2| s1.is_inflight_critical_protect_vaddr_core(v, core2)
                     <==> s2.is_inflight_critical_protect_vaddr_core(v, core2));
             }
-            assert(s2.pending_unmap_is_unmap_vaddr(c));
             assert(s2.TLB_protect_agree(c)) by {
                 reveal(crate::spec_t::mmu::pt_mem::PTMem::view);
             }
+            assert(s2.inv_tlb(c));
         }
         _ => {
             assert(forall|core| #![auto] s2.mmu@.tlbs[core].submap_of(s1.mmu@.tlbs[core]));
@@ -962,8 +944,6 @@ pub proof fn next_step_mmu_preserves_inv_tlb(
             assert(s2.TLB_unmap_agree(c));
         },
     }
-    assert(s2.successful_IPI(c));
-    assert(s2.TLB_dom_subset_of_pt_and_inflight_unmap_vaddr(c));
 }
 
 #[verifier::spinoff_prover]

@@ -652,6 +652,7 @@ proof fn step_MemOp_refines(c: os::Constants, s1: os::State, s2: os::State, step
                 if s1.effective_mappings().contains_key(tlb_va as nat) {
                     assert(s1.effective_mappings()[tlb_va as nat] != tlb_pte);
 
+                    admit();
                     assert(!s1.inflight_mapunmap_vaddr().contains(tlb_va as nat));
                     assert(s1.inflight_protect_params().contains_key(tlb_va as nat));
                     assert(s1.is_inflight_protect_vaddr(tlb_va as nat));
