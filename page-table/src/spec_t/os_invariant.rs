@@ -796,8 +796,7 @@ pub proof fn next_step_preserves_inv_writes(c: os::Constants, s1: os::State, s2:
             assume(!rl1::step_WriteProtect(s1.mmu@, s2.mmu@, c.common, step.mmu_lbl(s1, lbl)));
         },
         os::Step::ProtectOpChange { core, .. } => {
-            // TODO: easy
-            assume(!rl1::step_WriteNonneg(s1.mmu@, s2.mmu@, c.common, step.mmu_lbl(s1, lbl)));
+            assert(forall|va, core| s2.is_unmap_vaddr_core(va, core) <==> s1.is_unmap_vaddr_core(va, core));
         },
         os::Step::MapStart { core, .. } => assert(c.valid_core(core)), // Trigger inv_lock
         _ => {},
@@ -1028,29 +1027,17 @@ pub proof fn next_step_preserves_inv_tlb_1(
                     assert(s2.is_inflight_critical_protect_vaddr_core(v as nat, critical_core));
                 };
             }
-            assert(s2.TLB_protect_agree(c));
-            assert(s2.successful_invlpg_unmap(c));
-            assert(s2.successful_invlpg_protect(c));
-            assert(s2.successful_IPI(c));
             assert(s2.inv_tlb(c));
         },
         os::Step::MapOpStutter { core, .. } => {
-            assume(!rl1::step_WriteProtect(s1.mmu@, s2.mmu@, c.common, step.mmu_lbl(s1, lbl)));
             assert(forall|va, core| s2.is_inflight_protect_vaddr_core(va, core)
                 <==> s1.is_inflight_protect_vaddr_core(va, core));
             to_rl1::next_preserves_inv(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
-            assert(s2.shootdown_cores_valid(c));
             assert(forall|core, vaddr: nat| s2.is_unmap_vaddr_core(core, vaddr)
                 <==> s1.is_unmap_vaddr_core(core, vaddr));
-            assert(s2.successful_invlpg_unmap(c));
-            assert(s2.successful_invlpg_protect(c));
-            assert(s2.successful_IPI(c));
-            assert(s2.TLB_dom_subset_of_pt_and_inflight_unmap_vaddr(c));
-            assert(s2.TLB_interp_pt_mem_agree(c)) by {
-                admit();
-            };
-            assert(s2.TLB_unmap_agree(c));
-            assert(s2.TLB_protect_agree(c));
+            assert(forall|va, core| s2.is_inflight_critical_protect_vaddr_core(va, core)
+                <==> s1.is_inflight_critical_protect_vaddr_core(va, core));
+            assert(s2.TLB_interp_pt_mem_agree(c));
             assert(s2.inv_tlb(c));
         },
         os::Step::MapOpStart { core }
@@ -1061,25 +1048,15 @@ pub proof fn next_step_preserves_inv_tlb_1(
                 <==> s1.is_unmap_vaddr_core(core, vaddr));
             assert(forall|va, core| s2.is_inflight_protect_vaddr_core(va, core)
                 <==> s1.is_inflight_protect_vaddr_core(va, core));
-            assert(s2.successful_invlpg_unmap(c));
-            assert(s2.successful_invlpg_protect(c));
-            assert(s2.successful_IPI(c));
-            assert(s2.TLB_dom_subset_of_pt_and_inflight_unmap_vaddr(c));
-            assert(s2.TLB_interp_pt_mem_agree(c));
-            assert(s2.TLB_unmap_agree(c));
-            assert(s2.TLB_protect_agree(c));
             assert(s2.inv_tlb(c));
         },
         os::Step::MapOpChange { core, .. } => {
             assume(!rl1::step_WriteProtect(s1.mmu@, s2.mmu@, c.common, step.mmu_lbl(s1, lbl)));
             to_rl1::next_preserves_inv(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
-            assert(s2.shootdown_cores_valid(c));
             assert(forall|core, vaddr: nat| s2.is_unmap_vaddr_core(core, vaddr)
                 <==> s1.is_unmap_vaddr_core(core, vaddr));
-            assert(s2.successful_invlpg_unmap(c));
-            assert(s2.successful_invlpg_protect(c));
-            assert(s2.successful_IPI(c));
-            assert(s2.TLB_dom_subset_of_pt_and_inflight_unmap_vaddr(c));
+            // assert(forall|va, core| s2.is_inflight_critical_protect_vaddr_core(va, core)
+            //     <==> s1.is_inflight_critical_protect_vaddr_core(va, core));
             assert(s2.TLB_interp_pt_mem_agree(c)) by {
                 assert forall|tlb_core: Core, v: usize|
                     #[trigger] c.valid_core(tlb_core)
@@ -1095,9 +1072,6 @@ pub proof fn next_step_preserves_inv_tlb_1(
                     });
                 };
             };
-
-            assert(s2.TLB_unmap_agree(c));
-            assert(s2.TLB_protect_agree(c));
             assert(s2.inv_tlb(c));
         },
         _ => {},
@@ -1385,9 +1359,8 @@ pub proof fn next_step_preserves_inv_tlb_3(
                     && s2.interp_pt_mem().contains_key(v as nat)
                     && !s2.is_inflight_critical_protect_vaddr(v as nat)
                 implies s2.mmu@.tlbs[core2][v] == s2.interp_pt_mem()[v as nat] by {
-                    let vaddr = s2.core_states[core].vaddr();
                     assert(s2.core_states[core].vaddr() == s1.core_states[core].vaddr());
-                    if ((v as nat) == vaddr) {
+                    if v == s2.core_states[core].vaddr() {
                         assert(s2.is_inflight_critical_protect_vaddr_core(v as nat, core));
                         assert(s2.is_inflight_critical_protect_vaddr(v as nat));
                     }
@@ -1409,9 +1382,7 @@ pub proof fn next_step_preserves_inv_tlb_3(
             assert(s2.inv_tlb(c));
         },
         os::Step::ProtectEnd { core, .. } => {
-            let vaddr = s1.core_states[core].vaddr();
             assert(s2.TLB_interp_pt_mem_agree(c)) by {
-                let v = s1.core_states[core].vaddr() as usize;
                 assert(s1.os_ext.shootdown_vec.open_requests.is_empty());
                 assert(forall|core2: Core| #![auto] c.valid_core(core2) ==> !s1.mmu@.writes.nonpos.contains(core2));
             };
@@ -1488,9 +1459,9 @@ pub proof fn next_step_preserves_inv_tlb(
         | os::Step::ReadPTMem { core, .. }
         | os::Step::Barrier { core }
         | os::Step::Invlpg { core } => {
+            to_rl1::next_preserves_inv(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
             assert(forall|va, core| s2.is_inflight_protect_vaddr_core(va, core)
                 <==> s1.is_inflight_protect_vaddr_core(va, core));
-            to_rl1::next_preserves_inv(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
             assert(s2.shootdown_cores_valid(c));
             assert(forall|core, vaddr: nat| s2.is_unmap_vaddr_core(core, vaddr)
                 <==> s1.is_unmap_vaddr_core(core, vaddr));
