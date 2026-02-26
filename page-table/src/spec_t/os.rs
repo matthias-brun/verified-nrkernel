@@ -1061,6 +1061,7 @@ impl State {
         })
     }
 
+    // MB: Why do we include ProtectWaiting here but for unmap, we do not include UnmapWaiting?
     pub open spec fn is_inflight_protect_vaddr_core(self, va: nat, core: Core) -> bool {
         &&& self.interp_pt_mem().contains_key(va)
         &&& self.core_states.contains_key(core)
@@ -1080,7 +1081,7 @@ impl State {
         &&& self.interp_pt_mem().contains_key(va)
         &&& self.core_states.contains_key(core)
         &&& match self.core_states[core] {
-            | CoreState::ProtectExecuting {vaddr, result: Some(Ok(pte)), ..}
+            | CoreState::ProtectExecuting { vaddr, result: Some(Ok(pte)), .. }
             | CoreState::ProtectOpDone { vaddr, result: Ok(pte), .. }
             | CoreState::ProtectShootdownWaiting { vaddr, result: Ok(pte), .. }
                 => vaddr == va,
@@ -1102,7 +1103,7 @@ impl State {
     }
 
     pub open spec fn is_inflight_critical_protect_vaddr(self, va: nat) -> bool {
-        exists |core: Core|self.is_inflight_critical_protect_vaddr_core(va, core)
+        exists|core: Core| self.is_inflight_critical_protect_vaddr_core(va, core)
     }
 
     pub open spec fn is_inflight_protect_vaddr(self, va: nat) -> bool {
@@ -1692,8 +1693,8 @@ impl State {
             && #[trigger] self.mmu@.tlbs[core].contains_key(v)
             && #[trigger] c.valid_core(core2)
             &&  self.is_inflight_critical_protect_vaddr_core(v as nat, core2)
-            ==> ( self.mmu@.tlbs[core][v] == self.interp_pt_mem()[v as nat] 
-                || self.mmu@.tlbs[core][v] == self.core_states[core2].PTE() )
+            ==> self.mmu@.tlbs[core][v] == self.interp_pt_mem()[v as nat] 
+                    || self.mmu@.tlbs[core][v] == self.core_states[core2].PTE()
     }
 
     pub open spec fn TLB_unmap_agree(self, c: Constants) -> bool {
@@ -1726,7 +1727,16 @@ impl State {
         &&& self.successful_invlpg_protect(c)
         &&& self.TLB_interp_pt_mem_agree(c)
         &&& self.pending_unmap_is_unmap_vaddr(c)
+        &&& self.pending_protect_is_protect_vaddr(c)
         &&& self.TLB_protect_agree(c)
+    }
+
+    pub open spec fn pending_protect_is_protect_vaddr(self, c: Constants) -> bool {
+        forall|va| #[trigger] self.mmu@.pending_protects.contains_key(va)
+                ==> {
+                    &&& self.is_inflight_critical_protect_vaddr_core(va as nat, self.os_ext.lock->Some_0)
+                    &&& self.mmu@.pending_protects[va] == self.core_states[self.os_ext.lock->Some_0].PTE()
+                }
     }
 
     pub open spec fn pending_unmap_is_unmap_vaddr(self, c: Constants) -> bool {
@@ -1829,6 +1839,34 @@ impl State {
 }
 
 impl Step {
+    // is_map_step, etc. are just used to split invariant proofs up. E.g. one lemma shows the
+    // invariant for all map steps, one for all unmap steps, etc.
+    pub open spec fn is_map_step(self) -> bool {
+        match self {
+            Step::MapStart { .. } | Step::MapOpStart { .. } | Step::MapOpStutter { .. }
+            | Step::MapOpChange { .. } | Step::MapNoOp { .. } | Step::MapEnd { .. } => true,
+            _ => false,
+        }
+    }
+
+    pub open spec fn is_unmap_step(self) -> bool {
+        match self {
+            Step::UnmapStart { .. } | Step::UnmapOpStart { .. }
+            | Step::UnmapOpChange { .. } | Step::UnmapOpStutter { .. } | Step::UnmapOpFail { .. }
+            | Step::UnmapInitiateShootdown { .. } | Step::UnmapEnd { .. } => true,
+            _ => false,
+        }
+    }
+
+    pub open spec fn is_protect_step(self) -> bool {
+        match self {
+            Step::ProtectStart { .. } | Step::ProtectOpStart { .. }
+            | Step::ProtectOpChange { .. } | Step::ProtectOpFail { .. }
+            | Step::ProtectInitiateShootdown { .. } | Step::ProtectEnd { .. } => true,
+            _ => false,
+        }
+    }
+
     pub open spec fn interp(self, pre: State, post: State, c: Constants, lbl: RLbl) -> hlspec::Step {
         match self {
             Step::MemOp { core } => {

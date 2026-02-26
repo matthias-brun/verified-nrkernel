@@ -234,7 +234,7 @@ pub open spec fn step_TLBEvict(pre: State, post: State, c: Constants, core: Core
     }
 }
 
-/// A TLB fill resulting from a non-atomic page table walk, when unmapping
+/// A stale TLB fill when unmapping
 pub open spec fn step_TLBFillNA1(pre: State, post: State, c: Constants, core: Core, vaddr: usize, lbl: Lbl) -> bool {
     let pte = pre.pending_unmaps[vaddr];
     &&& lbl is Tau
@@ -251,7 +251,7 @@ pub open spec fn step_TLBFillNA1(pre: State, post: State, c: Constants, core: Co
     }
 }
 
-/// A TLB fill resulting from a non-atomic page table walk, during mprotect
+/// A stale TLB fill during mprotect
 pub open spec fn step_TLBFillNA2(pre: State, post: State, c: Constants, core: Core, vaddr: usize, lbl: Lbl) -> bool {
     let pte = pre.pending_protects[vaddr];
     &&& lbl is Tau
