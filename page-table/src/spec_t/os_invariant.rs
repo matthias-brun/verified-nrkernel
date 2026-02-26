@@ -1295,12 +1295,9 @@ pub proof fn next_step_preserves_inv_tlb_3(
             assert(s2.inv_tlb(c));
         },
         os::Step::ProtectInitiateShootdown { core } => {
-            assert(s2.shootdown_cores_valid(c));
             assert(forall|core, vaddr: nat| s2.is_unmap_vaddr_core(core, vaddr)
                 <==> s1.is_unmap_vaddr_core(core, vaddr));
             assert(s1.mmu@.writes.nonpos == Set::new(|core| c.valid_core(core)));
-            assert(s2.successful_invlpg_unmap(c));
-            assert(s2.TLB_dom_subset_of_pt_and_inflight_unmap_vaddr(c));
             assert(s2.TLB_interp_pt_mem_agree(c)) by {
                 if step is ProtectInitiateShootdown {
                     let vaddr = s1.core_states[core].vaddr();
@@ -1320,18 +1317,12 @@ pub proof fn next_step_preserves_inv_tlb_3(
             assert(s2.inv_tlb(c));
         },
         os::Step::ProtectOpChange { core, .. } => {
-            assert(s2.inv_tlb_wf(c));
-            assert(s2.inv_shootdown_wf(c));
-            assert(s2.shootdown_exists(c));
-            assert(s2.shootdown_cores_valid(c));
-            assert(s2.TLB_dom_subset_of_pt_and_inflight_unmap_vaddr(c));
+            to_rl1::next_preserves_inv(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
+            assert(bit!(0usize) == 1) by (bit_vector);
+            lemma_bits_misc();
             assert(s2.all_cores_nonpos_before_shootdown(c)) by {
-                assume(s2.mmu@.writes.nonpos =~= Set::new(|core| c.valid_core(core)));
+                assert(s2.mmu@.writes.nonpos =~= Set::new(|core| c.valid_core(core)));
             };
-            assert(s2.TLB_unmap_agree(c));
-            assert(s2.successful_invlpg_unmap(c));
-            assert(s2.successful_invlpg_protect(c));
-            assert(s2.successful_IPI(c));
             assert(s2.TLB_interp_pt_mem_agree(c)) by {
                 assert forall|core2: Core, v: usize|
                     #[trigger] c.valid_core(core2)
@@ -1348,7 +1339,7 @@ pub proof fn next_step_preserves_inv_tlb_3(
             };
             assert(s2.pending_unmap_is_unmap_vaddr(c)) by {
                     assert forall|va| s2.mmu@.pending_unmaps.contains_key(va) implies false by {
-                        assume(s1.mmu@.pending_unmaps.contains_key(va));
+                        assert(s1.mmu@.pending_unmaps.contains_key(va));
                         assert(!s1.is_unmap_vaddr_core(s1.os_ext.lock->Some_0, va as nat));
                 }
             }
@@ -1357,8 +1348,6 @@ pub proof fn next_step_preserves_inv_tlb_3(
                         &&& s2.is_inflight_critical_protect_vaddr_core(va as nat, s2.os_ext.lock->Some_0)
                         &&& s2.mmu@.pending_protects[va] == s2.core_states[s2.os_ext.lock->Some_0].PTE()
             } by {};
-            assert(s2.TLB_protect_agree(c));
-            assert(s2.pending_protect_is_protect_vaddr(c));
             assert(s2.inv_tlb(c));
         },
         os::Step::ProtectEnd { core, .. } => {
