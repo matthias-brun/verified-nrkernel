@@ -2119,13 +2119,6 @@ impl WrappedProtectToken {
                 };
                 assert(os_ext::next(tok.tok.st().os_ext, post.os_ext, tok.tok.consts().common, osext_tok.lbl()));
                 assert(!tok.tok.st().mmu@.writes.nonpos.contains(core));
-                assert(!tok.tok.st().mmu@.tlbs[core].contains_key(vaddr)) by {
-                    assert(tok.tok.st().core_states[core] is ProtectShootdownWaiting);
-                    assert(vaddr == tok.tok.st().core_states[core]->ProtectShootdownWaiting_vaddr);
-                    assert(state6.os_ext.shootdown_vec.open_requests.contains(core));
-                    broadcast use to_rl1::next_refines;
-                    assert(!state6.mmu@.tlbs[core].contains_key(vaddr));
-                };
                 let lbl = RLbl::AckShootdownIPI { core: tok.tok.core() };
                 assert(os::step_AckShootdownIPI(tok.tok.consts(), tok.tok.st(), post, core, lbl));
                 let step = os::Step::AckShootdownIPI { core };
