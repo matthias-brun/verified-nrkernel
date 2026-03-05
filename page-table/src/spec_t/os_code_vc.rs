@@ -173,10 +173,10 @@ pub proof fn lemma_concurrent_trs_during_shootdown(pre: os::State, post: os::Sta
         post.mmu@.writes.nonpos.subset_of(pre.mmu@.writes.nonpos),
         post.inv(c),
 {
-    assert(pre.core_states[pre.os_ext.lock->Some_0] is UnmapShootdownWaiting);
+    assert(pre.core_states[pre.os_ext.lock->Some_0].is_in_shootdown());
     let pred = |pre: os::State, post: os::State|
         pre.inv(c)
-        && pre.core_states[pre.os_ext.lock->Some_0] is UnmapShootdownWaiting
+        && pre.core_states[pre.os_ext.lock->Some_0].is_in_shootdown()
         && pre.os_ext.shootdown_vec.open_requests.contains(core)
         ==> {
             &&& post.mmu@.pt_mem.pml4 == pre.mmu@.pt_mem.pml4
@@ -197,7 +197,7 @@ pub proof fn lemma_concurrent_trs_during_shootdown(pre: os::State, post: os::Sta
         implies pred(pre, post)
     by {
         if pre.inv(c)
-            && pre.core_states[pre.os_ext.lock->Some_0] is UnmapShootdownWaiting
+            && pre.core_states[pre.os_ext.lock->Some_0].is_in_shootdown()
             && pre.os_ext.shootdown_vec.open_requests.contains(core)
         {
             os_invariant::next_preserves_inv(c, mid, post, lbl);

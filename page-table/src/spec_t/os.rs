@@ -132,11 +132,7 @@ impl CoreState {
     }
 
     pub open spec fn is_in_shootdown(self) -> bool {
-        match self {
-            CoreState::UnmapShootdownWaiting { .. } => true,
-            CoreState::ProtectShootdownWaiting { .. } => true,
-            _ => false,
-        }
+        self is UnmapShootdownWaiting || self is ProtectShootdownWaiting
     }
 
     pub open spec fn shootdown_vaddr(self) -> nat {
