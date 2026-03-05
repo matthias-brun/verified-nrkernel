@@ -641,114 +641,115 @@ proof fn step_MemOp_refines(c: os::Constants, s1: os::State, s2: os::State, step
                 }
             }
 
-            let tlb_pte = s1.mmu@.tlbs[core][tlb_va as usize];
             if s1.effective_mappings().contains_key(tlb_va)
-                && s1.effective_mappings()[tlb_va] == tlb_pte
+                && s1.effective_mappings()[tlb_va] == pte
             {
-                assert(s1.effective_mappings().contains_pair(tlb_va, tlb_pte));
-                assert(s1.effective_mappings().contains_pair(tlb_va, tlb_pte));
+                assert(s1.effective_mappings().contains_pair(tlb_va, pte));
+                assert(s1.effective_mappings().contains_pair(tlb_va, pte));
                 assert(hlspec::step_MemOp(c.interp(), s1.interp(c), s2.interp(c), hl_pte, lbl));
             } else {
                 if s1.effective_mappings().contains_key(tlb_va) {
-                    assert(s1.effective_mappings()[tlb_va] != tlb_pte);
-
-                    assume(
-                        tlb_pte == s1.interp_pt_mem()[tlb_va]
-                            || s1.inflight_protect_params().contains_pair(tlb_va, tlb_pte));
+                    assert(s1.effective_mappings()[tlb_va] != pte);
+                    assert(s1.effective_mappings().contains_pair(tlb_va, s1.effective_mappings()[tlb_va]));
 
                     assert(!s1.inflight_mapunmap_vaddr().contains(tlb_va));
-                    assert(s1.inflight_protect_params().contains_key(tlb_va));
-                    admit();
-                    assert(s1.is_inflight_protect_vaddr(tlb_va));
-                    let prot_core = s1.choose_inflight_protect_vaddr_core(tlb_va);
-                    assert(s1.is_inflight_protect_vaddr_core(tlb_va, prot_core));
-                    assert(c.valid_core(prot_core));
-                    admit();
-                    // assume(forall|core: Core, v: usize|
-                    //             #[trigger] c.valid_core(core)
-                    //             && #[trigger] s1.mmu@.tlbs[core].contains_key(v)
-                    //             && s1.interp_pt_mem().contains_key(v as nat)
-                    //                 ==> (s1.mmu@.tlbs[core][v] == s1.interp_pt_mem()[v as nat]
-                    //                     || s1.is_inflight_protect_vaddr(v as nat)
-                    //                         && (s1.inflight_protect_core_get_pte(s1.choose_inflight_protect_vaddr_core(v as nat)) == s1.mmu@.tlbs[core][v])
-                    //                    ));
+                    assert(s1.interp_pt_mem().contains_key(tlb_va));
 
-                    // match s1.core_states[prot_core] {
-                    //     CoreState::ProtectWaiting { vaddr, .. }
-                    //     | CoreState::ProtectExecuting { vaddr, result: None, .. } => {
-                    //         assert(tlb_pte == s1.interp_pt_mem()[tlb_va]);
-                    //         // assert(tlb_pte == s1.core_states[prot_core].PTE());
-                    //     },
-                    //     CoreState::ProtectExecuting { vaddr, flags, result: Some(Ok(pte)), .. }
-                    //     | CoreState::ProtectOpDone { vaddr, flags, result: Ok(pte), .. }
-                    //     | CoreState::ProtectShootdownWaiting { vaddr, flags, result: Ok(pte), .. } => {
-                    //         assert(vaddr == tlb_va);
-                    //         assert(s1.interp_pt_mem().contains_key(tlb_va));
-                    //         assert(s1.interp_pt_mem()[tlb_va] == PTE { flags, ..pte });
-                    //         assert(s1.inflight_protect_core_get_pte(prot_core) == s1.interp_pt_mem()[vaddr]);
-                    //         assert(tlb_pte == pte);
-                    //
-                    //         assert(s1.effective_mappings()[tlb_va] == PTE { flags, ..pte });
-                    //         assert(s1.interp_pt_mem()[tlb_va] == PTE { flags, ..pte });
-                    //         assert(tlb_pte != PTE { flags, ..pte });
-                    //
-                    //         admit();
-                    //         // assert(s1.effective_mappings()[tlb_va] == tlb_pte);
-                    //         // assert(false);
-                    //
-                    //         // if tlb_pte == (PTE { flags, ..pte }) {
-                    //         //     assert(false);
-                    //         // } else {
-                    //         //     assert(tlb_pte == pte);
-                    //         //     // assert(tlb_pte == s1.interp_pt_mem()[tlb_va]);
-                    //         // }
-                    //         // s1.mmu@.tlbs[core][tlb_va] == PTE { flags, ..pte }
-                    //         //     || s1.mmu@.tlbs[core][tlb_va] == pte,
-                    //         assert(tlb_pte == s1.interp_pt_mem()[tlb_va]);
-                    //     },
-                    //     _ => {},
-                    // }
-                    // admit();
-                    assert(tlb_pte.frame == s1.interp_pt_mem()[tlb_va].frame);
-            // admit();
-                    // XXX: Invariants:
-                    // * pending_protects is PTE() (after change)
-                    // * tlb entries are either in interp_pt_mem or in pending_protects
-                    // assume(tlb_pte == s1.core_states[core].PTE());
-                    admit();
-                    assert(
-                        s1.interp(c).vaddr_mapping_is_being_modified(c.interp(), vaddr)
-                        && s1.interp(c).vaddr_mapping_is_being_modified_choose(c.interp(), vaddr)
-                            == Some((tlb_va, pte)))
-                    by {
-                        assert(s1.core_states[prot_core].is_protecting());
-                        let prot_ult = s1.core_states[prot_core].ult_id();
-                        assert(c.valid_ult(prot_ult));
-                        assert(c.interp().valid_thread(prot_ult));
-                        assert(s1.interp(c).vaddr_mapping_is_being_modified(c.interp(), vaddr));
-                        assert(s1.interp(c).vaddr_mapping_is_being_modified_choose_thread(c.interp(), vaddr) == prot_ult) by {
-                            let prot_ult2 = s1.interp(c).vaddr_mapping_is_being_modified_choose_thread(d, vaddr);
-                            assert(prot_ult2 == prot_ult) by {
-                                let prot_core2 = c.ult2core[prot_ult2];
-                                // overlap: inv_inflight_map_no_overlap_inflight_vmem
-                                let mr1 = MemRegion {
-                                        base: s1.core_states[prot_core].vaddr(),
-                                        size: s1.core_states[prot_core].pte_size(s1.interp_pt_mem()),
-                                    };
-                                let mr2 = MemRegion {
-                                        base: s1.core_states[prot_core2].vaddr(),
-                                        size: s1.core_states[prot_core2].pte_size(s1.interp_pt_mem()),
-                                    };
-                                assert(between(vaddr, mr1.base, mr1.base + mr1.size));
-                                assert(between(vaddr, mr2.base, mr2.base + mr2.size));
-                                assert(overlap(mr1, mr2));
-                                assert(prot_core == prot_core2);
-                                assert(prot_ult == prot_ult2);
-                            }
+                    // TODO: These branches are nearly identical. Surely we can merge them somehow.
+                    if s1.is_inflight_critical_protect_vaddr(tlb_va) {
+                        let prot_core = choose|core: Core| s1.is_inflight_critical_protect_vaddr_core(tlb_va, core);
+                        assert(c.valid_core(prot_core));
+                        assert(s1.is_inflight_critical_protect_vaddr_core(tlb_va, prot_core));
+                        assert(s1.is_inflight_protect_vaddr_core(tlb_va, prot_core));
+                        assert(s1.is_inflight_protect_vaddr(tlb_va));
+                        assert(s1.inflight_protect_params().contains_key(tlb_va));
+                        assert(s1.choose_inflight_protect_vaddr_core(tlb_va) == prot_core);
+                        assert(pte == s1.core_states[prot_core].PTE());
+
+
+                        assert(
+                            s1.interp(c).vaddr_mapping_is_being_modified(c.interp(), vaddr)
+                            && s1.interp(c).vaddr_mapping_is_being_modified_choose(c.interp(), vaddr)
+                                == Some((tlb_va, pte)))
+                        by {
+                            assert(s1.core_states[prot_core].is_protecting());
+                            let prot_ult = s1.core_states[prot_core].ult_id();
+                            assert(c.valid_ult(prot_ult));
+                            assert(c.interp().valid_thread(prot_ult));
+                            assert(s1.interp(c).vaddr_mapping_is_being_modified(c.interp(), vaddr));
+                            assert(
+                                s1.interp(c).vaddr_mapping_is_being_modified_choose_thread(c.interp(), vaddr) == prot_ult
+                                && s1.interp(c).vaddr_mapping_is_being_modified_choose(c.interp(), vaddr) == Some((tlb_va, pte))
+                            ) by {
+                                let prot_ult2 = s1.interp(c).vaddr_mapping_is_being_modified_choose_thread(d, vaddr);
+                                assert(prot_ult2 == prot_ult) by {
+                                    let prot_core2 = c.ult2core[prot_ult2];
+                                    // overlap: inv_inflight_map_no_overlap_inflight_vmem
+                                    let mr1 = MemRegion {
+                                            base: s1.core_states[prot_core].vaddr(),
+                                            size: s1.core_states[prot_core].pte_size(s1.interp_pt_mem()),
+                                        };
+                                    let mr2 = MemRegion {
+                                            base: s1.core_states[prot_core2].vaddr(),
+                                            size: s1.core_states[prot_core2].pte_size(s1.interp_pt_mem()),
+                                        };
+                                    assert(between(vaddr, mr1.base, mr1.base + mr1.size));
+                                    assert(between(vaddr, mr2.base, mr2.base + mr2.size));
+                                    assert(overlap(mr1, mr2));
+                                    assert(prot_core == prot_core2);
+                                    assert(prot_ult == prot_ult2);
+                                }
+                            };
                         };
-                    };
 
-                    assert(hlspec::step_MemOpNA(c.interp(), s1.interp(c), s2.interp(c), lbl));
+                        assert(hlspec::step_MemOpNA(c.interp(), s1.interp(c), s2.interp(c), lbl));
+                    } else {
+                        assert(pte == s1.interp_pt_mem()[tlb_va]);
+                        assert(s1.inflight_protect_params().contains_key(tlb_va));
+                        let prot_core = choose|core: Core| s1.is_inflight_protect_vaddr_core(tlb_va, core);
+                        assert(c.valid_core(prot_core));
+                        assert(s1.is_inflight_protect_vaddr_core(tlb_va, prot_core));
+                        assert(s1.is_inflight_protect_vaddr(tlb_va));
+                        assert(s1.inflight_protect_params().contains_key(tlb_va));
+                        assert(s1.choose_inflight_protect_vaddr_core(tlb_va) == prot_core);
+
+                        assert(
+                            s1.interp(c).vaddr_mapping_is_being_modified(c.interp(), vaddr)
+                            && s1.interp(c).vaddr_mapping_is_being_modified_choose(c.interp(), vaddr)
+                                == Some((tlb_va, pte)))
+                        by {
+                            assert(s1.core_states[prot_core].is_protecting());
+                            let prot_ult = s1.core_states[prot_core].ult_id();
+                            assert(c.valid_ult(prot_ult));
+                            assert(c.interp().valid_thread(prot_ult));
+                            assert(s1.interp(c).vaddr_mapping_is_being_modified(c.interp(), vaddr));
+                            assert(
+                                s1.interp(c).vaddr_mapping_is_being_modified_choose_thread(c.interp(), vaddr) == prot_ult
+                                && s1.interp(c).vaddr_mapping_is_being_modified_choose(c.interp(), vaddr) == Some((tlb_va, pte))
+                            ) by {
+                                let prot_ult2 = s1.interp(c).vaddr_mapping_is_being_modified_choose_thread(d, vaddr);
+                                assert(prot_ult2 == prot_ult) by {
+                                    let prot_core2 = c.ult2core[prot_ult2];
+                                    // overlap: inv_inflight_map_no_overlap_inflight_vmem
+                                    let mr1 = MemRegion {
+                                            base: s1.core_states[prot_core].vaddr(),
+                                            size: s1.core_states[prot_core].pte_size(s1.interp_pt_mem()),
+                                        };
+                                    let mr2 = MemRegion {
+                                            base: s1.core_states[prot_core2].vaddr(),
+                                            size: s1.core_states[prot_core2].pte_size(s1.interp_pt_mem()),
+                                        };
+                                    assert(between(vaddr, mr1.base, mr1.base + mr1.size));
+                                    assert(between(vaddr, mr2.base, mr2.base + mr2.size));
+                                    assert(overlap(mr1, mr2));
+                                    assert(prot_core == prot_core2);
+                                    assert(prot_ult == prot_ult2);
+                                }
+                            };
+                        };
+
+                        assert(hlspec::step_MemOpNA(c.interp(), s1.interp(c), s2.interp(c), lbl));
+                    }
                 } else {
                     assert(s1.extra_mappings().contains_key(tlb_va)
                         || s1.inflight_mapunmap_vaddr().contains(tlb_va));

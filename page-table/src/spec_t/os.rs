@@ -1061,7 +1061,6 @@ impl State {
         })
     }
 
-    // MB: Why do we include ProtectWaiting here but for unmap, we do not include UnmapWaiting?
     pub open spec fn is_inflight_protect_vaddr_core(self, va: nat, core: Core) -> bool {
         &&& self.interp_pt_mem().contains_key(va)
         &&& self.core_states.contains_key(core)

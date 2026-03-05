@@ -88,7 +88,7 @@ impl State {
         }
     }
 
-    // TODO this always returns Some, so it doesn't need to return Option
+    // TODO: this always returns Some, so it doesn't need to return Option
     pub open spec fn vaddr_mapping_is_being_modified_choose(self, c: Constants, va: nat) -> Option<(nat, PTE)>
         recommends self.vaddr_mapping_is_being_modified(c, va)
     {
@@ -480,7 +480,6 @@ pub open spec fn step_Stutter(c: Constants, s1: State, s2: State, lbl: RLbl) -> 
     &&& s1 === s2
 }
 
-//if s1.sound then match else !s2.sound
 pub open spec fn next_step(c: Constants, s1: State, s2: State, step: Step, lbl: RLbl) -> bool {
     if s1.sound {
         match step {
