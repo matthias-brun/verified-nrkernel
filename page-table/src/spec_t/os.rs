@@ -588,11 +588,13 @@ pub open spec fn step_UnmapInitiateShootdown(c: Constants, s1: State, s2: State,
 // Acknowledge TLB eviction to other core (in response to shootdown IPI)
 // check if tlb shootdown/unmap has happend and send ACK
 pub open spec fn step_AckShootdownIPI(c: Constants, s1: State, s2: State, core: Core, lbl: RLbl) -> bool {
+    let va = s1.os_ext.shootdown_vec.vaddr as usize;
     &&& lbl matches RLbl::AckShootdownIPI { core: score } && score == core
     // enabling conditions
     &&& c.valid_core(core)
     &&& !s1.mmu@.writes.nonpos.contains(core)
-    &&& !s1.mmu@.tlbs[core].contains_key(s1.os_ext.shootdown_vec.vaddr as usize)
+    &&& s1.mmu@.tlbs[core].contains_key(va)
+        ==> s1.mmu@.pt_mem@.contains_key(va) && s1.mmu@.tlbs[core][va] == s1.mmu@.pt_mem@[va]
     // mmu statemachine steps
     &&& s2.mmu == s1.mmu
     &&& os_ext::next(s1.os_ext, s2.os_ext, c.common, os_ext::Lbl::AckShootdown { core })
@@ -605,7 +607,7 @@ pub open spec fn step_WaitShootdown(c: Constants, s1: State, s2: State, core: Co
     &&& lbl is Tau
     // enabling conditions
     &&& c.valid_core(core)
-    &&& s1.core_states[core] is UnmapShootdownWaiting || s1.core_states[core] is ProtectShootdownWaiting
+    &&& s1.core_states[core].is_in_shootdown()
     // mmu statemachine steps
     &&& s2.mmu == s1.mmu
     &&& os_ext::next(s1.os_ext, s2.os_ext, c.common, os_ext::Lbl::WaitShootdown { core })
@@ -1505,11 +1507,9 @@ impl State {
     }
 
     pub open spec fn inv_shootdown(self, c: Constants) -> bool {
-        &&&   !(self.os_ext.lock matches Some(core) 
-            && (self.core_states[core] is UnmapShootdownWaiting || self.core_states[core] is ProtectShootdownWaiting))
+        &&& !(self.os_ext.lock matches Some(core) && self.core_states[core].is_in_shootdown())
             ==> self.os_ext.shootdown_vec.open_requests.is_empty()
-        &&& (self.os_ext.lock matches Some(core) &&
-            (self.core_states[core] is UnmapShootdownWaiting || self.core_states[core] is ProtectShootdownWaiting))
+        &&& (self.os_ext.lock matches Some(core) && self.core_states[core].is_in_shootdown())
             ==> {
                 &&& self.mmu@.writes.tso === set![]
                 &&& self.mmu@.writes.nonpos.subset_of(self.os_ext.shootdown_vec.open_requests)

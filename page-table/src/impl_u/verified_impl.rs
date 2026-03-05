@@ -243,18 +243,15 @@ impl HandlerVC for PTImpl {
                 ..tok.st()
             };
             assert(os_ext::next(tok.st().os_ext, post.os_ext, tok.consts().common, osext_tok.lbl()));
-            assert(state2.core_states[state2.os_ext.lock->Some_0] is UnmapShootdownWaiting);
-            assert((state2.os_ext.lock matches Some(core) &&
-                state2.core_states[core] matches os::CoreState::UnmapShootdownWaiting { .. }));
+            assert(state2.core_states[state2.os_ext.lock->Some_0].is_in_shootdown());
             assert(state2.mmu@.writes.tso === set![]);
             assert(state3.mmu@.writes.nonpos === state2.mmu@.writes.nonpos.remove(core));
             assert(!state3.mmu@.writes.nonpos.contains(core));
             assert(!tok.st().mmu@.writes.nonpos.contains(core));
             assert(!state3.mmu@.tlbs[core].contains_key(vaddr));
             assert(tok.consts().valid_core(state2.os_ext.lock->Some_0));
-            assert(tok.consts().valid_core(core) );
-            assert(tok.st().core_states[state2.os_ext.lock->Some_0] is UnmapShootdownWaiting);
-            assert(!tok.st().mmu@.tlbs[core].contains_key(vaddr));
+            assert(tok.consts().valid_core(core));
+            assert(tok.st().core_states[state2.os_ext.lock->Some_0].is_in_shootdown());
             let lbl = RLbl::AckShootdownIPI { core };
             assert(os::step_AckShootdownIPI(tok.consts(), tok.st(), post, core, lbl));
             let step = os::Step::AckShootdownIPI { core };
