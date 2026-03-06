@@ -1523,6 +1523,9 @@ impl State {
         &&& (self.os_ext.lock matches Some(core) &&
             self.core_states[core] matches CoreState::UnmapExecuting { result: None, .. })
                 ==> self.mmu@.writes.tso === set![] && self.mmu@.writes.nonpos === set![]
+        &&& (self.os_ext.lock matches Some(core) &&
+            self.core_states[core] matches CoreState::ProtectExecuting { result: None, .. })
+                ==> self.mmu@.writes.tso === set![] && self.mmu@.writes.nonpos === set![]
         &&& self.os_ext.lock is None ==> {
             &&& self.mmu@.writes.tso === set![]
             &&& self.mmu@.writes.nonpos === set![]

@@ -1933,9 +1933,8 @@ impl WrappedProtectToken {
                     lemma_bits_prot();
                 };
             };
-            // TODO: Should follow from shootdown invariant once updated
-            assume(tok.tok.st().mmu@.writes.tso =~= set![]);
-            assume(tok.tok.st().mmu@.writes.nonpos =~= set![]);
+            assert(tok.tok.st().mmu@.writes.tso =~= set![]);
+            assert(tok.tok.st().mmu@.writes.nonpos =~= set![]);
             assert(tok.tok.st().mmu@.is_happy_writeprotect(core, addr, value));
 
 
@@ -2185,9 +2184,8 @@ impl WrappedProtectToken {
                 let ghost state2 = tok.tok.st();
                 let pidx = tok.tok.do_concurrent_trs();
                 lemma_concurrent_trs(state2, tok.tok.st(), tok.tok.consts(), tok.tok.core(), pidx);
-                // TODO: Should follow from shootdown invariant once updated
-                assume(tok.tok.st().mmu@.writes.tso === set![]);
-                assume(tok.tok.st().mmu@.writes.nonpos === set![]);
+                assert(tok.tok.st().mmu@.writes.tso === set![]);
+                assert(tok.tok.st().mmu@.writes.nonpos === set![]);
             }
         }
 
