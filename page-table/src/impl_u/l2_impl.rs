@@ -4,8 +4,8 @@ use vstd::{ assert_by_contradiction, assert_seqs_equal };
 
 use crate::spec_t::mmu::defs::{
     MemRegion, MemRegionExec, PTE, PageTableEntryExec, Flags, x86_arch_exec, WORD_SIZE, PAGE_SIZE,
-    MAX_PHYADDR, MAX_PHYADDR_WIDTH, L1_ENTRY_SIZE, L2_ENTRY_SIZE, L3_ENTRY_SIZE, X86_NUM_LAYERS,
-    X86_NUM_ENTRIES, bit, bitmask_inc
+    MAX_PHYADDR, MAX_PHYADDR_WIDTH, L0_ENTRY_SIZE, L1_ENTRY_SIZE, L2_ENTRY_SIZE, L3_ENTRY_SIZE,
+    X86_NUM_LAYERS, X86_NUM_ENTRIES, bit, bitmask_inc
 };
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::defs::{ between, aligned, new_seq, x86_arch_spec,
@@ -31,27 +31,42 @@ verus! {
 mod aux {
 use super::*;
 
-pub proof fn nonlinear_query1(entry_base: nat, vaddr: nat, layer: nat, base: nat, idx: nat) by (nonlinear_arith)
+pub proof fn nonlinear_query1(entry_base: nat, vaddr: nat, layer: nat, base: nat, idx: nat)
     requires
-        idx < 512,
         layer < 4,
         base <= vaddr,
-        idx == x86_arch_spec.index_for_vaddr(layer as nat, base as nat, vaddr as nat),
-        entry_base == x86_arch_spec.entry_base(layer as nat, base as nat, idx as nat),
-        aligned(vaddr as nat, x86_arch_spec.entry_size(layer as nat)),
-        aligned(base as nat, x86_arch_spec.entry_size(layer as nat))
+        idx == x86_arch_spec.index_for_vaddr(layer, base, vaddr),
+        entry_base == x86_arch_spec.entry_base(layer, base, idx),
+        aligned(vaddr, x86_arch_spec.entry_size(layer)),
+        aligned(base, x86_arch_spec.entry_size(layer))
     ensures
-          entry_base == vaddr
-{ admit(); }
+        entry_base == vaddr
+{
+    // The nonlinear solver seems to struggle with just extracting the entry_size constant from
+    // x86_arch_spec's sequence. Giving them explicitly solves the instability.
+    assert(entry_base == vaddr) by (nonlinear_arith)
+        requires
+            layer < 4,
+            (x86_arch_spec.entry_size(layer) ==
+                 if layer == 0 { L0_ENTRY_SIZE }
+                 else if layer == 1 { L1_ENTRY_SIZE }
+                 else if layer == 2 { L2_ENTRY_SIZE }
+                 else if layer == 3 { L3_ENTRY_SIZE }
+                 else { arbitrary() }
+            ),
+            base <= vaddr,
+            idx == x86_arch_spec.index_for_vaddr(layer, base, vaddr),
+            entry_base == x86_arch_spec.entry_base(layer, base, idx),
+            aligned(vaddr, x86_arch_spec.entry_size(layer)),
+            aligned(base, x86_arch_spec.entry_size(layer));
+}
 
-pub proof fn nonlinear_query2(i: nat, idx: nat, vaddr: nat, pte_size: nat, ppte_size: nat, layer: nat, base: nat, b: nat) by (nonlinear_arith)
+pub proof fn nonlinear_query2(i: nat, idx: nat, vaddr: nat, pte_size: nat, ppte_size: nat, layer: nat, base: nat, b: nat)
     requires
         overlap(
             MemRegion { base: vaddr, size: pte_size },
             MemRegion { base: b, size: ppte_size },
         ),
-        idx == x86_arch_spec.index_for_vaddr(layer, base, vaddr),
-        i == x86_arch_spec.index_for_vaddr(layer, base, b),
         x86_arch_spec.entry_base(layer, base, i) <= b < x86_arch_spec.next_entry_base(layer, base, i),
         x86_arch_spec.entry_base(layer, base, i) < b + ppte_size <= x86_arch_spec.next_entry_base(layer, base, i),
         x86_arch_spec.entry_base(layer, base, idx) <= vaddr < x86_arch_spec.next_entry_base(layer, base, idx),
@@ -60,7 +75,30 @@ pub proof fn nonlinear_query2(i: nat, idx: nat, vaddr: nat, pte_size: nat, ppte_
         x86_arch_spec.contains_entry_size_at_index_atleast(pte_size, layer),
     ensures
         i == idx
-{}
+{
+    // The nonlinear solver seems to struggle with just extracting the entry_size constant from
+    // x86_arch_spec's sequence. Giving them explicitly solves the instability.
+    assert(i == idx) by (nonlinear_arith)
+        requires
+            layer < 4,
+            (x86_arch_spec.entry_size(layer) ==
+                 if layer == 0 { L0_ENTRY_SIZE }
+                 else if layer == 1 { L1_ENTRY_SIZE }
+                 else if layer == 2 { L2_ENTRY_SIZE }
+                 else if layer == 3 { L3_ENTRY_SIZE }
+                 else { arbitrary() }
+            ),
+            overlap(
+                MemRegion { base: vaddr, size: pte_size },
+                MemRegion { base: b, size: ppte_size },
+            ),
+            x86_arch_spec.entry_base(layer, base, i) <= b < x86_arch_spec.next_entry_base(layer, base, i),
+            x86_arch_spec.entry_base(layer, base, i) < b + ppte_size <= x86_arch_spec.next_entry_base(layer, base, i),
+            x86_arch_spec.entry_base(layer, base, idx) <= vaddr < x86_arch_spec.next_entry_base(layer, base, idx),
+            aligned(base, x86_arch_spec.entry_size(layer)),
+            aligned(vaddr, pte_size),
+            x86_arch_spec.contains_entry_size_at_index_atleast(pte_size, layer);
+}
 
 }
 
