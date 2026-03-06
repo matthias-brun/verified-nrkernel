@@ -2233,13 +2233,17 @@ proof fn step_MapOpChange_refines(c: os::Constants, s1: os::State, s2: os::State
         assert(s1.inflight_protect_params() =~= s2.inflight_protect_params()) by {
             assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
                 ==> s2.is_inflight_protect_vaddr_core(va, core));
-            assert forall|va, core| s2.is_inflight_protect_vaddr_core(va, core)
-                implies s1.is_inflight_protect_vaddr_core(va, core)
+            assert forall|va, prot_core| s2.is_inflight_protect_vaddr_core(va, prot_core)
+                implies s1.is_inflight_protect_vaddr_core(va, prot_core)
             by {
-                // XXX: easy, inflight protect and map don't overlap, so this mapping can't
-                // have been created by the MapOpChange step
-                // (same proof also needed in os_invariant)
-                assume(s1.interp_pt_mem().contains_key(va));
+                assert_by_contradiction!(va != vaddr, {
+                    assert(core != prot_core);
+                    let mr1 = MemRegion { base: vaddr, size: s1.core_states[core].pte_size(s1.interp_pt_mem()) };
+                    let mr2 = MemRegion { base: va, size: s1.core_states[prot_core].pte_size(s1.interp_pt_mem()) };
+                    // contradicts inv_inflight_map_no_overlap_inflight_vmem
+                    assert(overlap(mr1, mr2));
+                    assert(core == prot_core);
+                });
             };
         };
         // ==> direction
