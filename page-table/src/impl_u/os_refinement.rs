@@ -669,8 +669,7 @@ proof fn step_MemOp_refines(c: os::Constants, s1: os::State, s2: os::State, step
 
                         assert(
                             s1.interp(c).vaddr_mapping_is_being_modified(c.interp(), vaddr)
-                            && s1.interp(c).vaddr_mapping_is_being_modified_choose(c.interp(), vaddr)
-                                == Some((tlb_va, pte)))
+                            && s1.interp(c).vaddr_mapping_is_being_modified_choose(c.interp(), vaddr) == (tlb_va, pte))
                         by {
                             assert(s1.core_states[prot_core].is_protecting());
                             let prot_ult = s1.core_states[prot_core].ult_id();
@@ -679,7 +678,7 @@ proof fn step_MemOp_refines(c: os::Constants, s1: os::State, s2: os::State, step
                             assert(s1.interp(c).vaddr_mapping_is_being_modified(c.interp(), vaddr));
                             assert(
                                 s1.interp(c).vaddr_mapping_is_being_modified_choose_thread(c.interp(), vaddr) == prot_ult
-                                && s1.interp(c).vaddr_mapping_is_being_modified_choose(c.interp(), vaddr) == Some((tlb_va, pte))
+                                && s1.interp(c).vaddr_mapping_is_being_modified_choose(c.interp(), vaddr) == (tlb_va, pte)
                             ) by {
                                 let prot_ult2 = s1.interp(c).vaddr_mapping_is_being_modified_choose_thread(d, vaddr);
                                 assert(prot_ult2 == prot_ult) by {
@@ -715,8 +714,7 @@ proof fn step_MemOp_refines(c: os::Constants, s1: os::State, s2: os::State, step
 
                         assert(
                             s1.interp(c).vaddr_mapping_is_being_modified(c.interp(), vaddr)
-                            && s1.interp(c).vaddr_mapping_is_being_modified_choose(c.interp(), vaddr)
-                                == Some((tlb_va, pte)))
+                            && s1.interp(c).vaddr_mapping_is_being_modified_choose(c.interp(), vaddr) == (tlb_va, pte))
                         by {
                             assert(s1.core_states[prot_core].is_protecting());
                             let prot_ult = s1.core_states[prot_core].ult_id();
@@ -725,7 +723,7 @@ proof fn step_MemOp_refines(c: os::Constants, s1: os::State, s2: os::State, step
                             assert(s1.interp(c).vaddr_mapping_is_being_modified(c.interp(), vaddr));
                             assert(
                                 s1.interp(c).vaddr_mapping_is_being_modified_choose_thread(c.interp(), vaddr) == prot_ult
-                                && s1.interp(c).vaddr_mapping_is_being_modified_choose(c.interp(), vaddr) == Some((tlb_va, pte))
+                                && s1.interp(c).vaddr_mapping_is_being_modified_choose(c.interp(), vaddr) == (tlb_va, pte)
                             ) by {
                                 let prot_ult2 = s1.interp(c).vaddr_mapping_is_being_modified_choose_thread(d, vaddr);
                                 assert(prot_ult2 == prot_ult) by {
@@ -758,7 +756,7 @@ proof fn step_MemOp_refines(c: os::Constants, s1: os::State, s2: os::State, step
                     assert(between(vaddr, tlb_va, tlb_va + s1.mmu@.tlbs[core][tlb_va as usize].frame.size));
                     vaddr_mapping_is_being_modified_from_vaddr_unmap(c, s1, core, tlb_va as usize, vaddr);
                     assert(s1.interp(c).vaddr_mapping_is_being_modified(d, vaddr));
-                    assert(Some((tlb_va, pte)) == s1.interp(c).vaddr_mapping_is_being_modified_choose(d, vaddr));
+                    assert((tlb_va, pte) == s1.interp(c).vaddr_mapping_is_being_modified_choose(d, vaddr));
                     assert(hlspec::step_MemOpNA(c.interp(), s1.interp(c), s2.interp(c), lbl));
                 }
             }
@@ -1596,7 +1594,7 @@ proof fn vaddr_mapping_is_being_modified_from_vaddr_unmap(
     ensures
         s.interp(c).vaddr_mapping_is_being_modified(c.interp(), vaddr),
         s.interp(c).vaddr_mapping_is_being_modified_choose(c.interp(), vaddr)
-            == Some((tlb_va as nat, s.mmu@.tlbs[core][tlb_va]))
+            == (tlb_va as nat, s.mmu@.tlbs[core][tlb_va])
 {
     assert(s.TLB_dom_subset_of_pt_and_inflight_unmap_vaddr(c));
 
@@ -1643,7 +1641,7 @@ proof fn vaddr_mapping_is_being_modified_from_vaddr_unmap(
         }
 
         assert(s.interp(c).vaddr_mapping_is_being_modified_choose(c.interp(), vaddr)
-            == Some((tlb_va as nat, s.mmu@.tlbs[core][tlb_va])));
+            == (tlb_va as nat, s.mmu@.tlbs[core][tlb_va]));
     } else {
         assert(s.mmu@.tlbs[core].dom().map(|v| v as nat).contains(tlb_va as nat));
         assert(s.interp_pt_mem().contains_key(tlb_va as nat));
@@ -1688,7 +1686,7 @@ proof fn vaddr_mapping_is_being_modified_from_vaddr_unmap(
         }
 
         assert(s.interp(c).vaddr_mapping_is_being_modified_choose(c.interp(), vaddr)
-            == Some((tlb_va as nat, s.mmu@.tlbs[core][tlb_va])));
+            == (tlb_va as nat, s.mmu@.tlbs[core][tlb_va]));
     }
 }
 
