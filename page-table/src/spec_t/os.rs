@@ -1072,8 +1072,8 @@ impl State {
             }
     }
 
-    // This is a core that has the lock (so is in the critical section) but also its actually a proper update
-    // During this sections tlb entries can have the old or new pte cached.
+    // This is a core that has the lock (so is in the critical section) and has already made the update.
+    // At this point, tlb entries can contain the old or new pte.
     pub open spec fn is_inflight_critical_protect_vaddr_core(self, va: nat, core: Core) -> bool {
         &&& self.interp_pt_mem().contains_key(va)
         &&& self.core_states.contains_key(core)

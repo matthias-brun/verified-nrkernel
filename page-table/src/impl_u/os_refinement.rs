@@ -2958,17 +2958,20 @@ proof fn step_UnmapOpChange_refines(
     assert(s1.interp_pt_mem().remove(vaddr) =~= s2.interp_pt_mem());
     assert(s1.interp_pt_mem().contains_key(vaddr));
     assert(s1.inflight_protect_params() =~= s2.inflight_protect_params()) by {
-        assert forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
-            implies s2.is_inflight_protect_vaddr_core(va, core)
+        assert forall|va, prot_core| s1.is_inflight_protect_vaddr_core(va, prot_core)
+            implies s2.is_inflight_protect_vaddr_core(va, prot_core)
         by {
-            // XXX: easy, inflight protect and unmap don't overlap, so this mapping can't
-            // have been removed by the UnmapOpChange step
-            // (do we know s2.sound here?)
-            assume(va != vaddr);
-            assert(s2.interp_pt_mem().contains_key(va));
+            assert_by_contradiction!(va != vaddr, {
+                assert(core != prot_core);
+                let mr1 = MemRegion { base: vaddr, size: s1.core_states[core].pte_size(s1.interp_pt_mem()) };
+                let mr2 = MemRegion { base: va, size: s1.core_states[prot_core].pte_size(s1.interp_pt_mem()) };
+                // contradicts inv_inflight_map_no_overlap_inflight_vmem
+                assert(overlap(mr1, mr2));
+                assert(core == prot_core);
+            });
         };
-        assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
-            <==> s2.is_inflight_protect_vaddr_core(va, core));
+        assert(forall|va, prot_core| s1.is_inflight_protect_vaddr_core(va, prot_core)
+            <==> s2.is_inflight_protect_vaddr_core(va, prot_core));
     };
     assert(s1.core_states.contains_key(core));
     assert(s1.inflight_mapunmap_vaddr().contains(vaddr));
