@@ -357,7 +357,7 @@ pub open spec fn step_MapOpStutter(
     // enabling conditions
     &&& c.valid_core(core)
     &&& s1.core_states[core] is MapExecuting
-    &&& value & 1 == 1
+    &&& s1.mmu@.pt_mem.is_nonneg_write(paddr, value)
     &&& s1.os_ext.is_in_allocated_region(paddr as nat)
 
     // mmu statemachine steps

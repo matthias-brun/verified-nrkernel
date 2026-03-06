@@ -9,6 +9,7 @@ use crate::spec_t::mmu::defs::{
     new_seq, aligned, MAX_BASE, x86_arch_spec_upper_bound, candidate_mapping_in_bounds_pmem,
     L1_ENTRY_SIZE, L2_ENTRY_SIZE, L3_ENTRY_SIZE, bit
 };
+use crate::spec_t::mmu::pt_mem::PTMem;
 #[cfg(verus_keep_ghost)]
 use crate::definitions_u::{ lemma_new_seq };
 use crate::spec_t::{hlspec, os};
@@ -638,7 +639,8 @@ pub proof fn next_step_preserves_inv_pending_maps(c: os::Constants, s1: os::Stat
                 }
             },
             os::Step::ProtectOpChange { core, .. } => {
-                assume(!rl1::step_WriteNonneg(s1.mmu@, s2.mmu@, c.common, step.mmu_lbl(s1, lbl)));
+                broadcast use PTMem::lemma_disj_nonneg_prot_write;
+                assert(!rl1::step_WriteNonneg(s1.mmu@, s2.mmu@, c.common, step.mmu_lbl(s1, lbl)));
             },
             os::Step::MMU
             | os::Step::MemOp { .. }
@@ -788,12 +790,12 @@ pub proof fn next_step_preserves_inv_writes(c: os::Constants, s1: os::State, s2:
     }
     match step {
         os::Step::MapOpStutter { core, .. } => {
-            // TODO: easy, follows from bit pattern requirements (is_prot_write, is_nonneg_write)
-            assume(!rl1::step_WriteProtect(s1.mmu@, s2.mmu@, c.common, step.mmu_lbl(s1, lbl)));
+            broadcast use PTMem::lemma_disj_nonneg_prot_write;
+            assert(!rl1::step_WriteProtect(s1.mmu@, s2.mmu@, c.common, step.mmu_lbl(s1, lbl)));
         },
         os::Step::MapOpChange { core, .. } => {
-            // TODO: same as above
-            assume(!rl1::step_WriteProtect(s1.mmu@, s2.mmu@, c.common, step.mmu_lbl(s1, lbl)));
+            broadcast use PTMem::lemma_disj_nonneg_prot_write;
+            assert(!rl1::step_WriteProtect(s1.mmu@, s2.mmu@, c.common, step.mmu_lbl(s1, lbl)));
         },
         os::Step::ProtectOpChange { core, .. } => {
             assert(forall|va, core| s2.is_unmap_vaddr_core(va, core) <==> s1.is_unmap_vaddr_core(va, core));
@@ -1031,7 +1033,8 @@ pub proof fn next_step_preserves_inv_tlb_1(
             assert(s2.inv_tlb(c));
         },
         os::Step::MapOpChange { core, .. } => {
-            assume(!rl1::step_WriteProtect(s1.mmu@, s2.mmu@, c.common, step.mmu_lbl(s1, lbl)));
+            broadcast use PTMem::lemma_disj_nonneg_prot_write;
+            assert(!rl1::step_WriteProtect(s1.mmu@, s2.mmu@, c.common, step.mmu_lbl(s1, lbl)));
             to_rl1::next_preserves_inv(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
             assert(forall|core, vaddr: nat| s2.is_unmap_vaddr_core(core, vaddr)
                 <==> s1.is_unmap_vaddr_core(core, vaddr));

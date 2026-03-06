@@ -291,6 +291,20 @@ impl PTMem {
             }
         }
     }
+
+    pub broadcast proof fn lemma_disj_nonneg_prot_write(self, addr: usize, value: usize)
+        ensures
+            !(#[trigger] self.is_nonneg_write(addr, value) && #[trigger] self.is_prot_write(addr, value))
+    {
+        if self.is_nonneg_write(addr, value) {
+            let old_value = self.read(addr);
+            assert((value & MASK_NEG_DIRTY_ACCESS) & MASK_NEG_PROT_FLAGS
+                    != (old_value & MASK_NEG_DIRTY_ACCESS) & MASK_NEG_PROT_FLAGS) by (bit_vector)
+                requires
+                    old_value & 1 == 0,
+                    value & 1 == 1;
+        }
+    }
 }
 
 proof fn lemma_fold_left_push<A,B>(s: Seq<A>, a: A, b: B, f: spec_fn(B, A) -> B)
