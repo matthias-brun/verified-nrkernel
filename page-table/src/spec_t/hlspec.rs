@@ -246,11 +246,8 @@ pub open spec fn step_MemOp(c: Constants, s1: State, s2: State, pte: Option<(nat
     &&& s2.sound == s1.sound
 }
 
-/// If there's an inflight map/unmap/protect for this virtual address, we might still see a stale result.
-/// TODO: This duplicates all of the step_MemOp transition. Ideally we could find a way to combine
-/// these. But we need to be precise enough to state that the only "unexpected" thing we can see is
-/// the old stale result. (Combining is also better for use to reason about implementations but
-/// generally we can easily show that this transition is irrelevant.)
+/// If there's an inflight map/unmap/protect for this virtual address, we might still see a stale
+/// result, based on the previous translation.
 pub open spec fn step_MemOpNA(c: Constants, s1: State, s2: State, lbl: RLbl) -> bool {
     &&& lbl matches RLbl::MemOp { thread_id, vaddr, op }
 
@@ -262,31 +259,28 @@ pub open spec fn step_MemOpNA(c: Constants, s1: State, s2: State, lbl: RLbl) -> 
     &&& s1.vaddr_mapping_is_being_modified(c, vaddr)
     &&& {
         let (base, pte) = s1.vaddr_mapping_is_being_modified_choose(c, vaddr);
-        ||| (s2.mem === s1.mem && op.is_pagefault())
-        ||| ({
-            let paddr = pte.frame.base + (vaddr - base);
-            // the result depends on the flags
-            &&& match op {
-                MemOp::Store { new_value, result } => {
-                    if paddr < c.phys_mem_size && !pte.flags.is_supervisor && pte.flags.is_writable {
-                        &&& result is Ok
-                        &&& s2.mem === update_range(s1.mem, vaddr as int, new_value)
-                    } else {
-                        &&& result is Pagefault
-                        &&& s2.mem === s1.mem
-                    }
-                },
-                MemOp::Load { is_exec, result, .. } => {
+        let paddr = pte.frame.base + (vaddr - base);
+        // the result depends on the flags
+        match op {
+            MemOp::Store { new_value, result } => {
+                if paddr < c.phys_mem_size && !pte.flags.is_supervisor && pte.flags.is_writable {
+                    &&& result is Ok
+                    &&& s2.mem === update_range(s1.mem, vaddr as int, new_value)
+                } else {
+                    &&& result is Pagefault
                     &&& s2.mem === s1.mem
-                    &&& if paddr < c.phys_mem_size && !pte.flags.is_supervisor && (is_exec ==> !pte.flags.disable_execute) {
-                        &&& result is Value
-                        &&& result->0 == s1.mem.subrange(vaddr as int, vaddr + op.op_size() as int)
-                    } else {
-                        &&& result is Pagefault
-                    }
-                },
-            }
-        })
+                }
+            },
+            MemOp::Load { is_exec, result, .. } => {
+                &&& s2.mem === s1.mem
+                &&& if paddr < c.phys_mem_size && !pte.flags.is_supervisor && (is_exec ==> !pte.flags.disable_execute) {
+                    &&& result is Value
+                    &&& result->0 == s1.mem.subrange(vaddr as int, vaddr + op.op_size() as int)
+                } else {
+                    &&& result is Pagefault
+                }
+            },
+        }
     }
     &&& s2.mappings === s1.mappings
     &&& s2.thread_state === s1.thread_state
@@ -338,9 +332,7 @@ pub open spec fn step_MapStart(c: Constants, s1: State, s2: State, lbl: RLbl) ->
             // From this point onwards, we may non-atomically see succesful translations, which
             // have normal memory semantics. That means the interpretation switches from mapping
             // the affected memory addresses to 0, to mapping them to actual memory contents.
-            // Because of that the memory may change here in unmapped regions.
-            // TODO(MB): Ideally, MapStart would directly apply the new mapping and then we just
-            // allow non-atomic translation failures.
+            // Because of that, the memory may change here in unmapped regions.
             forall|vaddr: nat| #[trigger] is_in_mapped_region(c.phys_mem_size, s1.mappings, vaddr)
                 ==> s2.mem[vaddr as int] === s1.mem[vaddr as int]
         })

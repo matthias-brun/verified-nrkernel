@@ -1461,7 +1461,7 @@ impl State {
 
     pub open spec fn is_pending_for_core(self, c: Constants, base: usize, core: Core) -> bool {
         self.core_states.contains_key(core) &&
-            (self.core_states[core] matches CoreState::MapDone { vaddr, pte, .. } &&
+            (self.core_states[core] matches CoreState::MapDone { vaddr, pte, result: Ok(()), .. } &&
                     vaddr == base && pte == self.mmu@.pending_maps[base])
     }
 
@@ -1862,7 +1862,7 @@ impl Step {
                 let mmu_step = choose|step| rl1::next_step(pre.mmu@, post.mmu@, c.common, step, lbl);
                 match mmu_step {
                     rl1::Step::MemOpNoTr => hlspec::Step::MemOp { pte: None },
-                    rl1::Step::MemOpNoTrNA { .. } => hlspec::Step::MemOpNA,
+                    rl1::Step::MemOpNoTrNA { .. } => hlspec::Step::MemOp { pte: None },
                     rl1::Step::MemOpTLB { tlb_va } => {
                         let pte = pre.mmu@.tlbs[core][tlb_va];
                         if pre.effective_mappings().contains_key(tlb_va as nat)

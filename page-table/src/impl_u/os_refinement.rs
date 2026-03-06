@@ -515,8 +515,7 @@ proof fn step_MemOp_refines(c: os::Constants, s1: os::State, s2: os::State, step
             let d = c.interp();
             let thread_id = lbl->MemOp_thread_id;
             let op = lbl->MemOp_op;
-
-            let pte = t1.vaddr_mapping_is_being_modified_choose(d, vaddr);
+            let vaddr = lbl->MemOp_vaddr;
 
             let core = choose|core| s1.is_pending_for_core(c, vbase, core);
             assert(s1.is_pending_for_core(c, vbase, core));
@@ -539,7 +538,40 @@ proof fn step_MemOp_refines(c: os::Constants, s1: os::State, s2: os::State, step
                 assert(overlap(mr1, mr2));
                 assert(core1 == core2);
             }
-            assert(hlspec::step_MemOpNA(c.interp(), s1.interp(c), s2.interp(c), lbl));
+            assert_by_contradiction!(!hlspec::is_in_mapped_region(c.common.phys_mem_size, t1.mappings, vaddr), {
+                assert(hlspec::is_in_mapped_region(c.common.phys_mem_size, t1.mappings, vaddr));
+                let (ov_base, ov_pte) = choose|base: nat, pte: PTE| {
+                    &&& #[trigger] t1.mappings.contains_pair(base, pte)
+                    &&& between(vaddr, base, base + pte.frame.size)
+                    &&& pte.frame.base + (vaddr - base) < c.common.phys_mem_size
+                };
+                assert(s1.effective_mappings().contains_pair(ov_base, ov_pte));
+                assert(ov_base != vbase);
+                assert(!s1.inflight_mapunmap_vaddr().contains(ov_base));
+                let ov_mr = MemRegion { base: ov_base, size: ov_pte.frame.size };
+                let mr = MemRegion { base: vbase as nat, size: s1.core_states[core].pte_size(s1.interp_pt_mem()) };
+                assert(s1.inflight_protect_params().contains_key(ov_base) ==> s1.inflight_protect_params()[ov_base].frame == s1.interp_pt_mem()[ov_base].frame);
+                assert(overlap(ov_mr, mr));
+                assert(s1.core_states[core] is MapDone);
+                assert(s1.core_states[core]->MapDone_result is Ok);
+                assert(s1.core_states[core]->MapDone_vaddr == vbase);
+                assert(s1.core_states[core]->MapDone_pte == s1.interp_pt_mem()[vbase as nat]);
+                assert(s1.inflight_mapunmap_vaddr().contains(vbase as nat));
+                assert(s1.interp_pt_mem().contains_key(vbase as nat));
+                assert(s1.interp_pt_mem()[vbase as nat].frame.size == mr.size);
+                let pte = s1.interp_pt_mem()[vbase as nat];
+                assert(!candidate_mapping_overlaps_existing_vmem(s1.interp_pt_mem().remove(vbase as nat), vbase as nat, pte));
+                assert(s1.interp_pt_mem().remove(vbase as nat).contains_pair(ov_base, ov_pte));
+                assert(!s1.effective_mappings().contains_key(vbase as nat));
+
+                assert(s1.interp_pt_mem().remove(vbase as nat).contains_key(ov_base));
+                assert(overlap(
+                    MemRegion { base: vbase as nat, size: pte.frame.size },
+                    MemRegion { base: ov_base, size: ov_pte.frame.size }
+                ));
+                // contradicts inv_overlap_of_mapped_maps
+            });
+            assert(hlspec::step_MemOp(c.interp(), s1.interp(c), s2.interp(c), None, lbl));
         },
         rl1::Step::MemOpTLB { tlb_va } => {
             let tlb_va = tlb_va as nat;
@@ -552,18 +584,6 @@ proof fn step_MemOp_refines(c: os::Constants, s1: os::State, s2: os::State, step
                     let prot_core = s1.choose_inflight_protect_vaddr_core(va as nat);
                     assert(s1.is_inflight_protect_vaddr_core(va as nat, prot_core));
                     assert(c.valid_core(prot_core));
-                    // match s1.core_states[prot_core] {
-                    //     CoreState::ProtectWaiting { flags, .. }
-                    //     | CoreState::ProtectExecuting { flags, result: None, .. } => {
-                    //     },
-                    //     CoreState::ProtectExecuting { flags, result: Some(Ok(pte)), .. }
-                    //     | CoreState::ProtectOpDone { flags, result: Ok(pte), .. }
-                    //     | CoreState::ProtectShootdownWaiting { flags, result: Ok(pte), .. } => {
-                    //         assert(s1.interp_pt_mem().contains_key(va as nat));
-                    //         assert(s1.interp_pt_mem()[va as nat] == PTE { flags, ..pte });
-                    //     },
-                    //     _ => {},
-                    // }
                 }
             };
 
@@ -593,9 +613,6 @@ proof fn step_MemOp_refines(c: os::Constants, s1: os::State, s2: os::State, step
             let d = c.interp();
             let pte = s1.mmu@.tlbs[core][tlb_va as usize];
             let hl_pte = Some((tlb_va, pte));
-
-            // assert(pte == s1.applied_mappings()[tlb_va]);
-            //assert(s1.mmu@.pt_mem.is_base_pt_walk(tlb_va));
 
             let paddr = pte.frame.base + (vaddr - tlb_va);
             no_overlaps_applied_mappings(c, s1);
