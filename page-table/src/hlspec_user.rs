@@ -162,7 +162,7 @@ mod util {
             Set::empty()
         }
     }
-    
+
     // pub open spec fn seq_update_range(s: Seq<u8>, i: int, v: Seq<u8>) -> (r: Seq<u8>)
     //     recommends
     //         0 <= i <= s.len() as int,
@@ -341,7 +341,7 @@ proof fn program_threads_4() {
     assert(next_step(c, s2, s3, Step::MapEnd, s2s3rlbl));
 
     // sync point
-    
+
     let mut threads = set![1nat, 2, 3, 4];
     let all_threads = threads;
     assert(threads <= all_threads);
@@ -351,7 +351,7 @@ proof fn program_threads_4() {
         let which_thread = threads.choose();
         assert(threads.contains(which_thread));
         assert(which_thread < 5);
-        
+
         assert(s3.mappings.contains_pair(pte1_vaddr, pte1));
 
         let s4 = State { mem: update_range(s3.mem, pte1_vaddr + ((which_thread - 1) * 4) as int, seq![which_thread as u8, 0, 0, 0]), ..s3 };
@@ -381,7 +381,7 @@ proof fn program_threads_4() {
         let which_thread = threads.choose();
         assert(threads.contains(which_thread));
         assert(which_thread < 5);
-        
+
         assert(s4.mappings.contains_pair(pte1_vaddr, pte1));
 
         let s5 = State { mem: update_range(s4.mem, pte1_vaddr + ((which_thread - 1) * 4) as int, seq![which_thread as u8, 0, 0, 0]), ..s4 };
@@ -408,7 +408,7 @@ proof fn program_threads_4() {
         let which_thread = threads.choose();
         assert(threads.contains(which_thread));
         assert(which_thread < 5);
-        
+
         assert(s4.mappings.contains_pair(pte1_vaddr, pte1));
 
         let s6 = State { mem: update_range(s5.mem, pte1_vaddr + ((which_thread - 1) * 4) as int, seq![which_thread as u8, 0, 0, 0]), ..s5 };
@@ -435,7 +435,7 @@ proof fn program_threads_4() {
         let which_thread = threads.choose();
         assert(threads.contains(which_thread));
         assert(which_thread < 5);
-        
+
         assert(s3.mappings.contains_pair(pte1_vaddr, pte1));
 
         let s7 = State { mem: update_range(s6.mem, pte1_vaddr + ((which_thread - 1) * 4) as int, seq![which_thread as u8, 0, 0, 0]), ..s6 };
@@ -460,14 +460,14 @@ proof fn program_threads_4() {
     assert(threads.len() == 0);
 
     // sync point
-    
+
     assert(s7.mem.subrange(pte1_vaddr + (0 * 4) as int, pte1_vaddr + (0 * 4) + 4 as int) == seq![1u8, 0, 0, 0]);
     assert(s7.mem.subrange(pte1_vaddr + (1 * 4) as int, pte1_vaddr + (1 * 4) + 4 as int) == seq![2u8, 0, 0, 0]);
     assert(s7.mem.subrange(pte1_vaddr + (2 * 4) as int, pte1_vaddr + (2 * 4) + 4 as int) == seq![3u8, 0, 0, 0]);
     assert(s7.mem.subrange(pte1_vaddr + (3 * 4) as int, pte1_vaddr + (3 * 4) + 4 as int) == seq![4u8, 0, 0, 0]);
-    
+
     let s_sync_2 = s7;
-    
+
     let v0 = {
         assert(s3.mappings.contains_pair(pte1_vaddr, pte1));
 
@@ -556,13 +556,13 @@ mod program_two {
         T2MapStart,
         T2MapEnd,
     }
-    
+
     spec fn pending_inv(pending: Set<MapTransition>) -> bool {
         &&& pending.contains(MapTransition::T1MapStart) ==> pending.contains(MapTransition::T1MapEnd)
         &&& pending.contains(MapTransition::T2MapStart) ==> pending.contains(MapTransition::T2MapEnd)
         &&& !pending.is_empty() ==> exists|t| pending_enabled(pending, t)
     }
-    
+
     spec(checked) fn pending_enabled(pending: Set<MapTransition>, t: MapTransition) -> bool
         // recommends pending_inv(pending),
     {
@@ -594,7 +594,7 @@ mod program_two {
     spec const t2_map_start_rlbl: RLbl = RLbl::MapStart { thread_id: 1, vaddr: pte2_vaddr, pte: pte2 };
     spec const t1_map_end_rlbl: RLbl = RLbl::MapEnd { thread_id: 0, vaddr: pte1_vaddr, result: Ok(()) };
     spec const t2_map_end_rlbl: RLbl = RLbl::MapEnd { thread_id: 1, vaddr: pte2_vaddr, result: Ok(()) };
-    
+
     spec fn transition_to_rlbl(t: MapTransition) -> RLbl {
         match t {
             MapTransition::T1MapStart => t1_map_start_rlbl,
@@ -603,13 +603,13 @@ mod program_two {
             MapTransition::T2MapEnd => t2_map_end_rlbl,
         }
     }
-    
+
     spec fn t1_map_start_step(c: Constants, s1: State) -> (s2: State) {
-        State { thread_state: s1.thread_state.insert(0, ThreadState::Map { vaddr: pte1_vaddr, pte: pte1 },), ..s1 }
+        State { thread_state: s1.thread_state.insert(0, ThreadState::Map { vaddr: pte1_vaddr, pte: pte1 }), ..s1 }
     }
 
     spec fn t2_map_start_step(c: Constants, s1: State) -> (s2: State) {
-        State { thread_state: s1.thread_state.insert(1, ThreadState::Map { vaddr: pte2_vaddr, pte: pte2},), ..s1 }
+        State { thread_state: s1.thread_state.insert(1, ThreadState::Map { vaddr: pte2_vaddr, pte: pte2}), ..s1 }
     }
 
     spec fn t1_map_end_step(c: Constants, s1: State) -> (s2: State) {
@@ -627,7 +627,7 @@ mod program_two {
             ..s1
         }
     }
-    
+
     spec fn map_next(
         c: Constants,
         s: State,
@@ -647,7 +647,7 @@ mod program_two {
         let pending = pending.remove(t);
         (t, s2, pending)
     }
-    
+
     spec fn map_inv(c: Constants, s: State, pending: Set<MapTransition>) -> bool {
         &&& s.sound
         &&& s.thread_state.dom() == set![0nat, 1]
@@ -666,7 +666,7 @@ mod program_two {
         )
         &&& s.mem.len() == crate::spec_t::mmu::defs::MAX_BASE
     }
-    
+
     proof fn map_next_ensures(
         c: Constants,
         s1: State,
@@ -738,7 +738,7 @@ mod program_two {
                 }
             }
         }
-        
+
         assert(s2.mappings =~= (
             if !pending2.contains(MapTransition::T1MapEnd) { map![pte1_vaddr => pte1] } else { Map::empty() }.union_prefer_right(
             if !pending2.contains(MapTransition::T2MapEnd) { map![pte2_vaddr => pte2] } else { Map::empty() })
@@ -778,14 +778,14 @@ mod program_two {
             }
         }
     }
-    
+
     #[verifier::rlimit(10000)]
     proof fn program_two_threads_map() {
         lemma_max_phyaddr_at_least();
         x86_arch_spec_upper_bound();
-    
+
         let c = Constants { thread_no: 2, phys_mem_size: 8_192_000 };
-    
+
         let s1 = State {
             mem: seq![arbitrary(); crate::spec_t::mmu::defs::MAX_BASE],
             thread_state:
@@ -796,10 +796,10 @@ mod program_two {
             mappings: Map::empty(),
             sound: true,
         };
-    
+
         assert(wf(c, s1));
         assert(init(c, s1));
-    
+
         let pending1 = set![MapTransition::T1MapStart, MapTransition::T1MapEnd, MapTransition::T2MapStart, MapTransition::T2MapEnd];
         assert(pending_enabled(pending1, MapTransition::T1MapStart));
         assert(pending_inv(pending1));
@@ -820,13 +820,13 @@ mod program_two {
         let (t4, s5, pending5) = map_next(c, s4, pending4);
         map_next_ensures(c, s4, s5, pending4, pending5, t4);
         assert(pending5.len() == 0);
-    
+
         assert(s5.thread_state == s1.thread_state);
         assert(s5.mappings == map![
             pte1_vaddr => pte1,
             pte2_vaddr => pte2,
         ]);
-        
+
         // sync point
 
         let mut threads = set![0nat, 1];
@@ -837,7 +837,7 @@ mod program_two {
             assert(threads.len() == 2);
             let which_thread = threads.choose();
             assert(threads.contains(which_thread));
-            
+
             assert(s5.mappings.contains_pair(pte1_vaddr, pte1));
             assert(s5.mappings.contains_pair(pte2_vaddr, pte2));
 
@@ -876,7 +876,7 @@ mod program_two {
             assert(threads.len() == 1);
             let which_thread = threads.choose();
             assert(threads.contains(which_thread));
-            
+
             assert(s6.mappings.contains_pair(pte1_vaddr, pte1));
             assert(s6.mappings.contains_pair(pte2_vaddr, pte2));
 
@@ -955,28 +955,28 @@ mod program_two {
 
 mod program_three {
     use super::*;
-    
+
     proof fn program_map_unmap_fault() {
         lemma_max_phyaddr_at_least();
         x86_arch_spec_upper_bound();
-    
-        let c = Constants { thread_no: 2, phys_mem_size: 8_192_000 };
-    
+
+        let c = Constants { thread_no: 1, phys_mem_size: 8_192_000 };
+
         let s1 = State {
             mem: seq![arbitrary(); crate::spec_t::mmu::defs::MAX_BASE],
-            thread_state: map![0 => ThreadState::Idle, 1 => ThreadState::Idle,],
+            thread_state: map![0 => ThreadState::Idle],
             mappings: Map::empty(),
             sound: true,
         };
-    
+
         assert(wf(c, s1));
         assert(init(c, s1));
 
         let pte1_memregion = get_frame(0, 4096);
-        let pte1 = PTE { frame: pte1_memregion, flags: Flags { is_writable: true, is_supervisor: false, disable_execute: true }, };
+        let pte1 = PTE { frame: pte1_memregion, flags: Flags { is_writable: true, is_supervisor: false, disable_execute: true } };
 
         let pte1_vaddr = 549_755_813_888;
-        let s2 = State { thread_state: s1.thread_state.insert(0, ThreadState::Map { vaddr: pte1_vaddr, pte: pte1 },), ..s1 };
+        let s2 = State { thread_state: s1.thread_state.insert(0, ThreadState::Map { vaddr: pte1_vaddr, pte: pte1 }), ..s1 };
 
         let s1s2rlbl = RLbl::MapStart { thread_id: 0, vaddr: pte1_vaddr, pte: pte1 };
         assert(next_step(c, s1, s2, Step::MapStart, s1s2rlbl));
@@ -991,20 +991,20 @@ mod program_three {
         assert(next_step(c, s2, s3, Step::MapEnd, s2s3rlbl));
 
         let s4 = State {
-            thread_state: s3.thread_state.insert(1, ThreadState::Unmap { vaddr: pte1_vaddr, pte: Some(pte1) }, ),
+            thread_state: s3.thread_state.insert(0, ThreadState::Unmap { vaddr: pte1_vaddr, pte: Some(pte1) } ),
             mappings: s3.mappings.remove(pte1_vaddr),
             ..s3
         };
 
-        assert(next_step(c, s3, s4, Step::UnmapStart, RLbl::UnmapStart { thread_id: 1, vaddr: pte1_vaddr }));
+        assert(next_step(c, s3, s4, Step::UnmapStart, RLbl::UnmapStart { thread_id: 0, vaddr: pte1_vaddr }));
 
         let s5 = State {
-            thread_state: s4.thread_state.insert(1, ThreadState::Idle, ),
+            thread_state: s4.thread_state.insert(0, ThreadState::Idle),
             ..s4
         };
 
-        assert(next_step(c, s4, s5, Step::UnmapEnd, RLbl::UnmapEnd { thread_id: 1, vaddr: pte1_vaddr, result: Ok(()) }));
-        
+        assert(next_step(c, s4, s5, Step::UnmapEnd, RLbl::UnmapEnd { thread_id: 0, vaddr: pte1_vaddr, result: Ok(()) }));
+
         let s6 = s5;
 
         let s5s6op = MemOp::Store { new_value: seq![10, 0, 0, 0], result: StoreResult::Pagefault };
@@ -1012,12 +1012,85 @@ mod program_three {
 
         assert(next_step(c, s5, s6, Step::MemOp { pte: None },
             RLbl::MemOp {
-                thread_id: 1,
+                thread_id: 0,
                 vaddr: pte1_vaddr,
                 op: s5s6op,
             },
         ));
-    } 
+    }
+}
+
+mod program_four {
+    use super::*;
+
+    proof fn program_map_ro_protect_rw_success() {
+        lemma_max_phyaddr_at_least();
+        x86_arch_spec_upper_bound();
+
+        let c = Constants { thread_no: 1, phys_mem_size: 8_192_000 };
+
+        let s1 = State {
+            mem: seq![arbitrary(); crate::spec_t::mmu::defs::MAX_BASE],
+            thread_state: map![0 => ThreadState::Idle],
+            mappings: Map::empty(),
+            sound: true,
+        };
+
+        assert(wf(c, s1));
+        assert(init(c, s1));
+
+        let pte1_memregion = get_frame(0, 4096);
+        let pte1 = PTE { frame: pte1_memregion, flags: Flags { is_writable: true, is_supervisor: false, disable_execute: true } };
+
+        let pte1_vaddr = 549_755_813_888;
+        let s2 = State { thread_state: s1.thread_state.insert(0, ThreadState::Map { vaddr: pte1_vaddr, pte: pte1 }), ..s1 };
+
+        let s1s2rlbl = RLbl::MapStart { thread_id: 0, vaddr: pte1_vaddr, pte: pte1 };
+        assert(next_step(c, s1, s2, Step::MapStart, s1s2rlbl));
+
+        let s3 = State {
+            thread_state: s2.thread_state.insert(0, ThreadState::Idle),
+            mappings: s2.mappings.insert(pte1_vaddr, pte1),
+            ..s2
+        };
+
+        let s2s3rlbl = RLbl::MapEnd { thread_id: 0, vaddr: pte1_vaddr, result: Ok(()) };
+        assert(next_step(c, s2, s3, Step::MapEnd, s2s3rlbl));
+
+
+        let new_flags = Flags { is_writable: true, is_supervisor: false, disable_execute: true };
+        let s4 = State {
+            thread_state: s3.thread_state.insert(0, ThreadState::Protect { vaddr: pte1_vaddr, flags: new_flags, pte: Some(pte1) }),
+            mappings: s3.mappings.insert(pte1_vaddr, PTE { frame: pte1.frame, flags: new_flags }),
+            ..s3
+        };
+
+        let s3s4rlbl = RLbl::ProtectStart { thread_id: 0, vaddr: pte1_vaddr, flags: new_flags };
+        assert(next_step(c, s3, s4, Step::ProtectStart, s3s4rlbl));
+
+
+        let s5 = State {
+            thread_state: s4.thread_state.insert(0, ThreadState::Idle),
+            ..s4
+        };
+
+        let s4s5rlbl = RLbl::ProtectEnd { thread_id: 0, vaddr: pte1_vaddr, result: Ok(()) };
+        assert(next_step(c, s4, s5, Step::ProtectEnd, s4s5rlbl));
+
+
+        let s6 = State { mem: update_range(s5.mem, pte1_vaddr as int, seq![42, 0, 0, 0]), ..s5 };
+
+        let s5s6op = MemOp::Store { new_value: seq![42, 0, 0, 0], result: StoreResult::Ok };
+        assert(s5s6op.op_size() == 4);
+
+        assert(next_step(
+            c,
+            s5,
+            s6,
+            Step::MemOp { pte: Some((pte1_vaddr, pte1)) },
+            RLbl::MemOp { thread_id: 0, vaddr: pte1_vaddr, op: s5s6op },
+        ));
+    }
 }
 
 } // verus!
