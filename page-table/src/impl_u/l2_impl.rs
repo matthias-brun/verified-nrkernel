@@ -1109,7 +1109,6 @@ pub broadcast proof fn lemma_inv_implies_interp_inv(tok: WrappedTokenView, pt: P
         let dir_pt = pt.entries[i as int]->Some_0;
         lemma_inv_implies_interp_inv(tok, dir_pt, layer + 1, dir_addr, dir_base);
     };
-    assert(interp.well_formed());
     assert(interp.directories_are_in_next_layer());
     assert(interp.directories_match_arch());
     assert(interp.directories_obey_invariant());
