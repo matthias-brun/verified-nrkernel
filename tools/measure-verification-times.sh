@@ -10,7 +10,7 @@ GIT_HASH=$(git rev-parse --short HEAD)
 
 # run verus
 verus --crate-type=lib  \
-      --rlimit 50 \
+      --rlimit 100 \
       --cfg feature=\"impl\" \
       --no-auto-recommends-check \
       --time-expanded \
