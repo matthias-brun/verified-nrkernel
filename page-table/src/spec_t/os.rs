@@ -208,7 +208,7 @@ pub open spec fn candidate_mapping_overlaps_inflight_pmem_corestate(
 }
 
 pub open spec fn inflight_vmem_region(pt: Map<nat, PTE>, cs: CoreState) -> MemRegion
-    recommends cs !is Idle
+    recommends !(cs is Idle)
 {
     MemRegion { base: cs.vaddr(), size: cs.pte_size(pt) }
 }
@@ -221,7 +221,7 @@ pub open spec fn candidate_mapping_overlaps_inflight_vmem(
 ) -> bool {
     exists|cs: CoreState| {
         &&& #[trigger] inflightargs.contains(cs)
-        &&& cs !is Idle
+        &&& !(cs is Idle)
         &&& overlap(inflight_vmem_region(pt, cs), MemRegion { base, size: candidate_size })
     }
 }
@@ -853,7 +853,7 @@ impl Constants {
 
 impl CoreState {
     pub open spec fn pte_size(self, pt: Map<nat, PTE>) -> nat
-        recommends self !is Idle
+        recommends !(self is Idle)
     {
         match self {
             CoreState::MapWaiting { pte, .. }
@@ -884,7 +884,7 @@ impl CoreState {
     }
 
     pub open spec fn vaddr(self) -> nat
-        recommends self !is Idle
+        recommends !(self is Idle)
     {
         match self {
             CoreState::MapWaiting { vaddr, .. }
@@ -968,7 +968,7 @@ impl CoreState {
     }
 
     pub open spec fn ult_id(self) -> nat
-        recommends self !is Idle
+        recommends !(self is Idle)
     {
         match self {
             CoreState::MapWaiting { ult_id, .. }
@@ -1362,9 +1362,9 @@ impl State {
     pub open spec fn inv_inflight_pte_wf(self, c: Constants) -> bool {
         forall|core: Core| #![auto] c.valid_core(core) && self.core_states[core].has_pte(self.interp_pt_mem())
         && !(self.core_states[core] matches CoreState::UnmapExecuting { result: None, .. })
-        && self.core_states[core] !is UnmapWaiting
+        && !(self.core_states[core] is UnmapWaiting)
         && !(self.core_states[core] matches CoreState::ProtectExecuting { result: None, .. })
-        && self.core_states[core] !is ProtectWaiting ==> {
+        && !(self.core_states[core] is ProtectWaiting) ==> {
             let pte = self.core_states[core].PTE();
             let vaddr = self.core_states[core].vaddr();
             &&& aligned(vaddr, pte.frame.size)
@@ -1602,7 +1602,7 @@ impl State {
     // Invariants about the TLB
     ///////////////////////////////////////////////////////////////////////////////////////////////
     pub open spec fn inv_tlb_wf(self, c: Constants) -> bool {
-        forall|core| #![auto] c.valid_core(core) && self.core_states[core] !is Idle
+        forall|core| #![auto] c.valid_core(core) && !(self.core_states[core] is Idle)
             ==> self.core_states[core].vaddr() < MAX_BASE
     }
 
@@ -1738,7 +1738,7 @@ impl State {
     pub open spec fn inv_inflight_map_no_overlap_inflight_vmem(self, c: Constants) -> bool {
         forall|core1: Core, core2: Core|
             (c.valid_core(core1) && c.valid_core(core2)
-                && self.core_states[core1] !is Idle && self.core_states[core2] !is Idle
+                && !(self.core_states[core1] is Idle) && !(self.core_states[core2] is Idle)
                 && overlap(
                     MemRegion {
                         base: self.core_states[core1].vaddr(),
@@ -1794,7 +1794,7 @@ impl State {
         forall|core| c.valid_core(core) && self.core_states[core].has_pte(self.interp_pt_mem())
                     && !(self.core_states[core] matches CoreState::MapDone { result: Ok(_), ..})
                     && !(self.core_states[core] matches CoreState::UnmapExecuting { result: None, .. })
-                    && #[trigger] self.core_states[core] !is UnmapWaiting
+                    && !(#[trigger] self.core_states[core] is UnmapWaiting)
                     // inflight protects always overlap the existing memory
                     && !self.core_states[core].is_protecting()
             ==> !candidate_mapping_overlaps_existing_pmem(self.interp_pt_mem(), self.core_states[core].PTE())

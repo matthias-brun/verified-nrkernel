@@ -116,18 +116,18 @@ impl State {
 
     pub closed spec fn is_happy_writenonneg(self, core: Core, addr: usize, value: usize) -> bool {
         &&& !self.hist.writes.tso.is_empty() ==> core == self.hist.writes.core
-        &&& self.hist.polarity !is Mapping ==> self.can_flip_polarity()
+        &&& !(self.hist.polarity is Mapping) ==> self.can_flip_polarity()
         &&& self.writer_mem().is_nonneg_write(addr, value)
     }
 
     pub closed spec fn is_happy_writenonpos(self, core: Core, addr: usize, value: usize) -> bool {
         &&& !self.hist.writes.tso.is_empty() ==> core == self.hist.writes.core
-        &&& self.hist.polarity !is Unmapping ==> self.can_flip_polarity()
+        &&& !(self.hist.polarity is Unmapping) ==> self.can_flip_polarity()
         &&& self.writer_mem().is_nonpos_write(addr, value)
     }
 
     pub closed spec fn is_happy_writeprotect(self, core: Core, addr: usize, value: usize) -> bool {
-        &&& self.hist.polarity !is Protect ==> self.can_flip_polarity()
+        &&& !(self.hist.polarity is Protect) ==> self.can_flip_polarity()
         &&& self.writer_mem().is_prot_write(addr, value)
         &&& self.hist.writes.tso === set![]
         &&& self.hist.writes.nonpos === set![]

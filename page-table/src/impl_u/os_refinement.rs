@@ -793,12 +793,12 @@ proof fn vaddr_distinct(c: os::Constants, s: os::State)
     ensures 
         forall |core1, core2| #![all_triggers]
             s.core_states.contains_key(core1) && s.core_states.contains_key(core2)
-            && s.core_states[core1] !is Idle && s.core_states[core2] !is Idle
+            && !(s.core_states[core1] is Idle) && !(s.core_states[core2] is Idle)
             && s.core_states[core1].vaddr() == s.core_states[core2].vaddr() ==> core1 == core2
 {
     assert forall |core1, core2| #![all_triggers]
         s.core_states.contains_key(core1) && s.core_states.contains_key(core2)
-        && s.core_states[core1] !is Idle && s.core_states[core2] !is Idle
+        && !(s.core_states[core1] is Idle) && !(s.core_states[core2] is Idle)
         && s.core_states[core1].vaddr() == s.core_states[core2].vaddr() implies core1 == core2
     by {
         let mr1 = MemRegion {
@@ -1396,7 +1396,7 @@ proof fn extra_mappings_preserved_for_overlap_map(c: os::Constants, s1: os::Stat
 
                     let ov_core = choose|ov_core: Core|
                         #[trigger] s1.core_states.contains_key(ov_core) &&
-                        s1.core_states[ov_core] !is Idle &&
+                        !(s1.core_states[ov_core] is Idle) &&
                         s1.core_states[ov_core].vaddr() == ov_vaddr;
                     assert(s1.core_states.contains_key(ov_core));
                     assert(s1.core_states[ov_core].vaddr() == ov_vaddr);
@@ -1623,7 +1623,7 @@ proof fn vaddr_mapping_is_being_modified_from_vaddr_unmap(
     if s.unmap_vaddr_set().contains(tlb_va as nat) {
         let core1 = choose|core1: Core|
             #[trigger] s.core_states.contains_key(core1) &&
-            s.core_states[core1] !is Idle &&
+            !(s.core_states[core1] is Idle) &&
             s.core_states[core1].vaddr() == tlb_va;
         assert(s.core_states.contains_key(core1));
         // assert(!s.core_states[core1].is_idle());
@@ -1667,14 +1667,14 @@ proof fn vaddr_mapping_is_being_modified_from_vaddr_unmap(
 
         let core1 = choose|core1: Core|
             #[trigger] s.core_states.contains_key(core1) &&
-            s.core_states[core1] !is Idle &&
+            !(s.core_states[core1] is Idle) &&
             s.core_states[core1].vaddr() == tlb_va;
         assert(s.core_states.contains_key(core1));
         assert(c.valid_core(core1));
 
         let thread1 = s.core_states[core1].ult_id();
         assert(c.interp().valid_thread(thread1));
-        
+
 
         // Trigger in candidate_mapping_overlaps_existing_vmem
         let _ = s.effective_mappings().contains_key(tlb_va as nat);
@@ -1815,7 +1815,7 @@ proof fn no_overlaps_applied_mappings(c: os::Constants, s: os::State)
             let core1 = s.get_extra_vaddr_core(i);
             let core2 = choose|core2: Core|
                 #[trigger] s.core_states.contains_key(core2) &&
-                s.core_states[core2] !is Idle &&
+                !(s.core_states[core2] is Idle) &&
                 s.core_states[core2].vaddr() == j;
             let mr1 = MemRegion {
                 base: s.core_states[core1].vaddr(),
@@ -2366,8 +2366,8 @@ proof fn step_MapEnd_refines(c: os::Constants, s1: os::State, s2: os::State, cor
                 assert(s1.interp_pt_mem()[vaddr].frame.size > 0);
                 assert(c.valid_core(core));
                 assert(c.valid_core(unmap_core));
-                assert(s1.core_states[core] !is Idle);
-                assert(s1.core_states[unmap_core] !is Idle);
+                assert(!(s1.core_states[core] is Idle));
+                assert(!(s1.core_states[unmap_core] is Idle));
                 assert(overlap(
                     MemRegion {
                         base: s1.core_states[core].vaddr(),
@@ -2433,8 +2433,8 @@ proof fn step_MapEnd_refines(c: os::Constants, s1: os::State, s2: os::State, cor
                         assert(s1.core_states[unmap_core] === s2.core_states[unmap_core]);
                     }
                 } else {
-                    assert(s1.core_states[core] !is Idle
-                        && s1.core_states[unmap_core] !is Idle && overlap(
+                    assert(!(s1.core_states[core] is Idle)
+                        && !(s1.core_states[unmap_core] is Idle) && overlap(
                         MemRegion {
                             base: s1.core_states[core].vaddr(),
                             size: s1.core_states[core].pte_size(s1.interp_pt_mem()),
@@ -2500,8 +2500,8 @@ proof fn step_MapEnd_refines(c: os::Constants, s1: os::State, s2: os::State, cor
                 };
                 assert(c.valid_core(core));
                 assert(c.valid_core(os_overlap_core));
-                assert(s1.core_states[core] !is Idle);
-                assert(s1.core_states[os_overlap_core] !is Idle);
+                assert(!(s1.core_states[core] is Idle));
+                assert(!(s1.core_states[os_overlap_core] is Idle));
                 assert(overlap(
                     MemRegion {
                         base: s1.core_states[core].vaddr(),

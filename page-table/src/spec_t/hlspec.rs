@@ -154,7 +154,7 @@ pub open spec fn unsound_state(s1: State, s2: State) -> bool {
 ///////////////////////////////////////////////////////////////////////////////////////////////
 impl ThreadState {
     pub open spec fn inflight_vmem_region(self) -> MemRegion
-        recommends self !is Idle
+        recommends !(self is Idle)
     {
         match self {
             ThreadState::Map { vaddr, pte }                    => MemRegion { base: vaddr, size: pte.frame.size },
@@ -174,7 +174,7 @@ pub open spec fn candidate_mapping_overlaps_inflight_vmem(
 ) -> bool {
     exists|ts: ThreadState| {
         &&& #[trigger] inflightargs.contains(ts)
-        &&& ts !is Idle
+        &&& !(ts is Idle)
         &&& overlap(ts.inflight_vmem_region(), MemRegion { base, size: candidate_size })
     }
 }

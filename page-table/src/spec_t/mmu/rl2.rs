@@ -2057,7 +2057,7 @@ proof fn next_step_preserves_inv_sbuf_facts(pre: State, post: State, c: Constant
 broadcast proof fn lemma_writer_read_from_sbuf(state: State, c: Constants, i: int)
     requires
         state.wf(c),
-        state.polarity !is Protect,
+        !(state.polarity is Protect),
         #[trigger] state.inv_sbuf_facts(c),
         0 <= i < state.writer_sbuf().len(),
     ensures
