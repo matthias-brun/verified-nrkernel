@@ -8,6 +8,7 @@
 
 use vstd::prelude::*;
 
+#[cfg(verus_keep_ghost)]
 use crate::extra::lemma_bits_misc;
 use crate::spec_t::mmu::*;
 use crate::spec_t::mmu::pt_mem::*;
@@ -656,6 +657,7 @@ pub proof fn next_preserves_inv(pre: State, post: State, c: Constants, lbl: Lbl)
 
 
 pub mod refinement {
+    #[cfg(verus_keep_ghost)]
     use crate::extra::lemma_bits_misc;
     use crate::spec_t::mmu::*;
     use crate::spec_t::mmu::rl2;

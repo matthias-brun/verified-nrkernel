@@ -1,10 +1,12 @@
 use vstd::prelude::*;
 use vstd::{ assert_by_contradiction, assert_seqs_equal };
-
+#[cfg(verus_keep_ghost)]
 use crate::extra::{ lemma_bits_misc, lemma_bits_prot };
 use crate::spec_t::os;
 use crate::spec_t::os_invariant;
-use crate::spec_t::mmu::{ self, WalkResult };
+use crate::spec_t::mmu;
+#[cfg(verus_keep_ghost)]
+use crate::spec_t::mmu::WalkResult;
 use crate::spec_t::os_ext;
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::defs::{
@@ -20,6 +22,7 @@ use crate::spec_t::mmu::translation::{
     GPDE, PDE, MASK_NEG_PROT_FLAGS,
 };
 use crate::theorem::RLbl;
+#[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::rl3::refinement::to_rl1;
 use crate::spec_t::os_code_vc::Token;
 #[cfg(verus_keep_ghost)]

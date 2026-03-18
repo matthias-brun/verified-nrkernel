@@ -16,6 +16,7 @@ use crate::spec_t::mmu::defs::{
     L1_ENTRY_SIZE, L2_ENTRY_SIZE, L3_ENTRY_SIZE,
     aligned,
 };
+#[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::rl3::refinement::to_rl1;
 use crate::spec_t::mmu::{ self, rl1 };
 #[cfg(verus_keep_ghost)]
@@ -33,6 +34,7 @@ use crate::spec_t::mmu::defs::MemOp;
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::defs::{between, update_range};
 use crate::spec_t::mmu::pt_mem::PTMem;
+#[cfg(verus_keep_ghost)]
 use crate::spec_t::os::CoreState;
 
 verus! {

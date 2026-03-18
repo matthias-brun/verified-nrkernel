@@ -1,6 +1,7 @@
 use vstd::prelude::*;
 use vstd::{ assert_by_contradiction, assert_maps_equal };
 
+#[cfg(verus_keep_ghost)]
 use crate::extra::lemma_bits_misc;
 //use crate::impl_u::spec_pt;
 #[cfg(verus_keep_ghost)]
@@ -13,6 +14,7 @@ use crate::spec_t::mmu::pt_mem::PTMem;
 #[cfg(verus_keep_ghost)]
 use crate::definitions_u::{ lemma_new_seq };
 use crate::spec_t::{hlspec, os};
+#[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::rl3::refinement::to_rl1;
 use crate::spec_t::mmu;
 use crate::theorem::RLbl;

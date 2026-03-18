@@ -6,6 +6,7 @@ use crate::spec_t::mmu::defs::{ PageTableEntryExec, MemRegionExec, Flags, MemReg
 use crate::spec_t::mmu::defs::{ candidate_mapping_overlaps_existing_vmem, MAX_BASE, x86_arch_spec, x86_arch_spec_upper_bound };
 use crate::spec_t::os_ext;
 use crate::spec_t::mmu;
+#[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::rl3::refinement::to_rl1;
 use crate::spec_t::os_code_vc::{ Token, CodeVC, HandlerVC };
 #[cfg(verus_keep_ghost)]

@@ -8,6 +8,7 @@ use crate::spec_t::mmu;
 use crate::spec_t::os_ext;
 use crate::spec_t::mmu::defs::{ PageTableEntryExec, Core, MemRegionExec, Flags, MemRegion };
 use crate::theorem::RLbl;
+#[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::rl3::refinement::to_rl1;
 
 verus! {
