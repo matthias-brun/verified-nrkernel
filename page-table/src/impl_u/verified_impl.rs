@@ -145,12 +145,12 @@ impl CodeVC for PTImpl {
         Tracked(tok): Tracked<Token>,
         pml4: usize,
         vaddr: usize,
-        flags: Flags,
+        flags: &Flags,
     ) -> (res: (Result<(),()>, Tracked<Token>))
     {
         let tracked mut tok = tok;
 
-        wrapped_token::start_protect_and_acquire_lock(Tracked(&mut tok), Ghost(vaddr as nat), Ghost(flags));
+        wrapped_token::start_protect_and_acquire_lock(Tracked(&mut tok), Ghost(vaddr as nat), Ghost(*flags));
         let tracked wtok = WrappedProtectToken::new(tok);
         proof {
             wtok.lemma_regions_derived_from_view();

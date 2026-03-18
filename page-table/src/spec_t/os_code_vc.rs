@@ -548,7 +548,7 @@ pub trait CodeVC {
         Tracked(tok): Tracked<Token>,
         pml4: usize,
         vaddr: usize,
-        flags: Flags,
+        flags: &Flags,
         // Ghost(frame): Ghost<MemRegion>,
     ) -> (res: (Result<(),()>, Tracked<Token>))
         requires
@@ -558,7 +558,7 @@ pub trait CodeVC {
             tok.consts().valid_ult(tok.thread()),
             tok.st().core_states[tok.core()] is Idle,
             tok.steps() === seq![
-                RLbl::ProtectStart { thread_id: tok.thread(), vaddr: vaddr as nat, flags},
+                RLbl::ProtectStart { thread_id: tok.thread(), vaddr: vaddr as nat, flags: *flags},
                 RLbl::ProtectEnd { thread_id: tok.thread(), vaddr: vaddr as nat, result: arbitrary() }
             ],
             tok.steps_taken() === seq![],

@@ -106,7 +106,7 @@ pub extern "C" fn veros_unmap_frame(
 pub extern "C" fn veros_mprotect_frame(
     pt_ptr: u64,
     vaddr: u64,
-    flags: Flags) -> i64
+    flags: &Flags) -> i64
 {
     let pml4 = pt_ptr as usize;
     let token: Tracked<Token> = Tracked::assume_new();

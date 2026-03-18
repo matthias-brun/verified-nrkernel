@@ -478,7 +478,7 @@ impl PDE {
         Self::new_entry(layer, pte.frame.base, true, pte.flags.is_writable, pte.flags.is_supervisor, false, false, pte.flags.disable_execute)
     }
 
-    pub fn change_page_permissions(&self, flags: Flags) -> (r: Self)
+    pub fn change_page_permissions(&self, flags: &Flags) -> (r: Self)
         requires
             self.layer@ <= 3,
             self@ is Page,
@@ -3395,12 +3395,12 @@ fn protect_aux(
     ptr: usize,
     base: usize,
     vaddr: usize,
-    permissions: Flags,
+    permissions: &Flags,
 ) -> (res: Result<(),()>)
     requires
         old(tok).inv(),
         !old(tok)@.change_made,
-        old(tok)@.args == (OpArgs::Protect { base: vaddr, flags: permissions }),
+        old(tok)@.args == (OpArgs::Protect { base: vaddr, flags: *permissions }),
         inv_at(old(tok)@, pt, layer as nat, ptr),
         no_empty_directories(old(tok)@, pt, layer as nat, ptr),
         accepted_protect(vaddr as nat, layer as nat, base as nat),
@@ -3664,7 +3664,7 @@ fn protect_aux(
                     assert(PT::inv(tok_after_write, root_pt));
 
                     let old_pte = interp_at_entry(tok@, pt, layer as nat, ptr, base as nat, idx as nat)->Page_0;
-                    let new_pte = PTE { frame: old_pte.frame, flags: permissions };
+                    let new_pte = PTE { frame: old_pte.frame, flags: *permissions };
 
                     assert(interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp().contains_pair(vaddr as nat, old_pte));
                     assert(interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp()[vaddr as nat] == old_pte);
@@ -3723,7 +3723,7 @@ fn protect_aux(
 }
 
 
-pub fn protect(Tracked(tok): Tracked<&mut WrappedProtectToken>, pt: &mut Ghost<PTDir>, pml4: usize, vaddr: usize, permissions: Flags) -> (res: Result<(),()>)
+pub fn protect(Tracked(tok): Tracked<&mut WrappedProtectToken>, pt: &mut Ghost<PTDir>, pml4: usize, vaddr: usize, permissions: &Flags) -> (res: Result<(),()>)
     requires
         !old(tok)@.change_made,
         inv_and_nonempty(old(tok)@, old(pt)@),
@@ -3731,7 +3731,7 @@ pub fn protect(Tracked(tok): Tracked<&mut WrappedProtectToken>, pt: &mut Ghost<P
         accepted_protect(vaddr as nat, 0, 0),
         vaddr < MAX_BASE,
         pml4 == old(tok)@.pt_mem.pml4,
-        old(tok)@.args == (OpArgs::Protect { base: vaddr, flags: permissions }),
+        old(tok)@.args == (OpArgs::Protect { base: vaddr, flags: *permissions }),
     ensures
         inv_and_nonempty(tok@, pt@),
         match res {
