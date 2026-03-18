@@ -18,7 +18,7 @@ use vstd::prelude::verus;
 // #[cfg(feature="linuxmodule")]
 use vstd::prelude::Tracked;
 // #[cfg(feature="linuxmodule")]
-use crate::spec_t::mmu::defs::{ PageTableEntryExec, MemRegionExec };
+use crate::spec_t::mmu::defs::{ PageTableEntryExec, MemRegionExec, Flags };
 // #[cfg(feature="linuxmodule")]
 use crate::spec_t::os_code_vc::{ Token, CodeVC };
 
@@ -88,6 +88,30 @@ pub extern "C" fn veros_unmap_frame(
     let token: Tracked<Token> = Tracked::assume_new();
 
     let (res, _tok) = impl_u::verified_impl::PTImpl::sys_do_unmap(token, pml4, vaddr as usize, ret_frame);
+    match res {
+        Ok(frame) => {
+            return 0;
+        }
+        Err(_) => {
+            return -1;
+        }
+    }
+    //0 // return 0 to indicate success
+}
+
+// #[cfg(feature="linuxmodule")]
+// #[used(linker)]
+#[verifier(external_body)]
+#[no_mangle]
+pub extern "C" fn veros_mprotect_frame(
+    pt_ptr: u64,
+    vaddr: u64,
+    flags: Flags) -> i64
+{
+    let pml4 = pt_ptr as usize;
+    let token: Tracked<Token> = Tracked::assume_new();
+
+    let (res, _tok) = impl_u::verified_impl::PTImpl::sys_do_protect(token, pml4, vaddr as usize, flags);
     match res {
         Ok(frame) => {
             return 0;
