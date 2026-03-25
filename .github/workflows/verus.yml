@@ -1,0 +1,34 @@
+name: verus
+
+on:             
+  push:
+    branches:                                                                                                                                                   
+      - main                                                                                                                                                    
+  pull_request:                                                                                                                                                 
+  workflow_dispatch:
+
+jobs:
+  verus:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: |
+          rustup install 1.94.0-x86_64-unknown-linux-gnu
+
+      - name: Get the URL for the latest Verus release
+        id: verus-release-info
+        run: |
+          jq --version
+          echo "VERUS_URL=$(curl -s https://api.github.com/repos/verus-lang/verus/releases/latest | jq -r '.assets[].browser_download_url' | grep x86-linux -)" >> $GITHUB_OUTPUT
+
+      - name: Download the latest Verus release
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf ${{ steps.verus-release-info.outputs.VERUS_URL }} -o verus.zip; unzip verus.zip
+
+      - name: run Verus
+        working-directory:
+        run: |
+          verus-x86-linux/verus  --crate-type=lib --rlimit 100 --cfg feature=\"impl\" --cfg feature=\"hlspec_user\" page-table/src/lib.rs
