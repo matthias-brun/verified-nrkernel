@@ -13,7 +13,7 @@ verus! {
 // and defines an atomic semantics to page table walks. This is the most abstract version of the
 // MMU model.
 
-pub struct State {
+pub ghost struct State {
     pub happy: bool,
     /// Byte-indexed physical (non-page-table) memory
     pub phys_mem: Seq<u8>,
@@ -32,7 +32,7 @@ pub struct State {
     pub polarity: Polarity,
 }
 
-pub enum Step {
+pub ghost enum Step {
     // Mixed
     Invlpg,
     // Faulting memory op due to failed translation

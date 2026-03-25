@@ -20,7 +20,7 @@ verus! {
 // caching and non-atomic walks as a single concept, and replaces the explicit havoc-ing of
 // dirty/accessed bits with underspecified reads.
 
-pub struct State {
+pub ghost struct State {
     pub happy: bool,
     /// Byte-indexed physical (non-page-table) memory
     pub phys_mem: Seq<u8>,
@@ -43,7 +43,7 @@ pub struct History {
     pub pending_protects: Map<usize, PTE>,
 }
 
-pub enum Step {
+pub ghost enum Step {
     Invlpg,
     // Faulting memory op due to failed translation
     MemOpNoTr { walk: Walk },

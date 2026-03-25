@@ -60,6 +60,9 @@ pub ghost enum GPDE {
     Invalid,
 }
 
+// Following definitions are both exec and part of the trusted spec.
+// $line_count$Exec,Trusted${$
+
 // layer:
 // 0 -> PML4
 // 1 -> PDPT, Page Directory Pointer Table
@@ -99,6 +102,7 @@ pub const MASK_NEG_DIRTY_ACCESS: usize = !MASK_DIRTY_ACCESS;
 
 pub const MASK_PROT_FLAGS: usize = bit!(63usize) | bit!(2usize) | bit!(1usize);
 pub const MASK_NEG_PROT_FLAGS: usize = !MASK_PROT_FLAGS;
+// $line_count$}$
 
 // In the implementation we can always use the 12:52 mask as the invariant guarantees that in the
 // other cases, the lower bits are already zero anyway.
@@ -107,57 +111,28 @@ pub const MASK_NEG_PROT_FLAGS: usize = !MASK_PROT_FLAGS;
 pub spec const MASK_ADDR_SPEC: usize = bitmask_inc!(12usize, MAX_PHYADDR_WIDTH - 1);
 
 #[verifier::when_used_as_spec(MASK_ADDR_SPEC)]
-pub exec const MASK_ADDR: usize ensures MASK_ADDR == MASK_ADDR_SPEC {
+pub exec const MASK_ADDR: usize ensures MASK_ADDR == MASK_ADDR_SPEC { // $line_count$Exec,Trusted$
     proof {
         axiom_max_phyaddr_width_facts();
     }
-    bitmask_inc!(12usize, MAX_PHYADDR_WIDTH - 1)
+    bitmask_inc!(12usize, MAX_PHYADDR_WIDTH - 1) // $line_count$Exec,Trusted$
 }
 
-pub spec const MASK_L1_PG_ADDR_SPEC: usize = bitmask_inc!(30usize, MAX_PHYADDR_WIDTH - 1);
-
-#[verifier::when_used_as_spec(MASK_L1_PG_ADDR_SPEC)]
-pub exec const MASK_L1_PG_ADDR: usize ensures MASK_L1_PG_ADDR == MASK_L1_PG_ADDR_SPEC {
-    proof {
-        axiom_max_phyaddr_width_facts();
-    }
-    bitmask_inc!(30usize, MAX_PHYADDR_WIDTH - 1)
-}
-
-pub spec const MASK_L2_PG_ADDR_SPEC: usize = bitmask_inc!(21usize, MAX_PHYADDR_WIDTH - 1);
-
-#[verifier::when_used_as_spec(MASK_L2_PG_ADDR_SPEC)]
-pub exec const MASK_L2_PG_ADDR: usize ensures MASK_L2_PG_ADDR == MASK_L2_PG_ADDR_SPEC {
-    proof {
-        axiom_max_phyaddr_width_facts();
-    }
-    bitmask_inc!(21usize, MAX_PHYADDR_WIDTH - 1)
-}
-
-pub spec const MASK_L3_PG_ADDR_SPEC: usize = bitmask_inc!(12usize, MAX_PHYADDR_WIDTH - 1);
-
-#[verifier::when_used_as_spec(MASK_L3_PG_ADDR_SPEC)]
-pub exec const MASK_L3_PG_ADDR: usize ensures MASK_L3_PG_ADDR == MASK_L3_PG_ADDR_SPEC {
-    proof {
-        axiom_max_phyaddr_width_facts();
-    }
-    bitmask_inc!(12usize, MAX_PHYADDR_WIDTH - 1)
-}
-
-pub spec const MASK_DIR_ADDR_SPEC: usize = MASK_ADDR;
-
-#[verifier::when_used_as_spec(MASK_DIR_ADDR_SPEC)]
-pub exec const MASK_DIR_ADDR: usize ensures MASK_DIR_ADDR == MASK_DIR_ADDR_SPEC {
-    MASK_ADDR
-}
+pub spec const MASK_L1_PG_ADDR: usize = bitmask_inc!(30usize, MAX_PHYADDR_WIDTH - 1);
+pub spec const MASK_L2_PG_ADDR: usize = bitmask_inc!(21usize, MAX_PHYADDR_WIDTH - 1);
+pub spec const MASK_L3_PG_ADDR: usize = bitmask_inc!(12usize, MAX_PHYADDR_WIDTH - 1);
+pub spec const MASK_DIR_ADDR: usize = MASK_ADDR;
 
 #[allow(repr_transparent_non_zst_fields)]
 // An entry in any page directory (i.e. in PML4, PDPT, PD or PT)
 #[repr(transparent)]
+// Exec and trusted spec:
+// $line_count$Exec,Trusted${$
 pub struct PDE {
     pub entry: usize,
     pub layer: Ghost<nat>,
 }
+// $line_count$}$
 
 // This impl defines everything necessary for the page table walk semantics.
 // PDE is reused in the implementation, which has an additional impl block for it in

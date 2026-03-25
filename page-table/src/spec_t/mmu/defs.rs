@@ -383,6 +383,8 @@ impl Arch {
     }
 }
 
+// These are just exec, the spec is x86_arch_spec
+// $line_count$Exec${$
 pub struct ArchLayerExec {
     /// Address space size mapped by a single entry at this layer
     pub entry_size: usize,
@@ -404,6 +406,7 @@ pub exec const x86_arch_exec: ArchExec ensures x86_arch_exec@ == x86_arch_spec {
     assert(x86_arch_spec.layers =~= layers@.map(|n,e:ArchLayerExec| e@));
     ArchExec { layers }
 }
+// $line_count$}$
 
 pub spec const x86_arch_spec: Arch = Arch {
     layers: seq![

@@ -40,7 +40,7 @@ pub struct State {
 }
 
 #[allow(inconsistent_fields)]
-pub enum CoreState {
+pub ghost enum CoreState {
     Idle,
     MapWaiting              { ult_id: nat, vaddr: nat, pte: PTE },
     MapExecuting            { ult_id: nat, vaddr: nat, pte: PTE },
@@ -56,7 +56,7 @@ pub enum CoreState {
 }
 
 #[allow(inconsistent_fields)]
-pub enum Step {
+pub ghost enum Step {
     MMU,
     MemOp { core: Core },
     ReadPTMem { core: Core, paddr: usize, value: usize },
