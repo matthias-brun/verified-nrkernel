@@ -28,6 +28,13 @@ jobs:
         run: |
           curl --proto '=https' --tlsv1.2 -LsSf ${{ steps.verus-release-info.outputs.VERUS_URL }} -o verus.zip; unzip verus.zip
 
+      # - name: Cargo build
+      #   run: |
+      #     sed -i 's/\.\.\/\.verus\/source/..\/verus-x86-linux/' page-table/Cargo.toml
+      #     cd page-table
+      #     cargo build
+
+
       - name: run Verus
         working-directory:
         run: |
