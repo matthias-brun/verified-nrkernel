@@ -1005,18 +1005,33 @@ mod program_three {
 
         assert(next_step(c, s4, s5, Step::UnmapEnd, RLbl::UnmapEnd { thread_id: 0, vaddr: pte1_vaddr, result: Ok(()) }));
 
-        let s6 = s5;
 
-        let s5s6op = MemOp::Store { new_value: seq![10, 0, 0, 0], result: StoreResult::Pagefault };
-        assert(s5s6op.op_size() == 4);
+        { // Proof 1: A pagefault is a possible result of a store in this state
+            let s6 = s5;
+            let s5s6op = MemOp::Store { new_value: seq![10, 0, 0, 0], result: StoreResult::Pagefault };
+            assert(s5s6op.op_size() == 4);
 
-        assert(next_step(c, s5, s6, Step::MemOp { pte: None },
-            RLbl::MemOp {
-                thread_id: 0,
-                vaddr: pte1_vaddr,
-                op: s5s6op,
-            },
-        ));
+            assert(next_step(c, s5, s6, Step::MemOp { pte: None },
+                RLbl::MemOp {
+                    thread_id: 0,
+                    vaddr: pte1_vaddr,
+                    op: s5s6op,
+                },
+            ));
+        }
+
+        { // Proof 2: If thread 0 does a store to address pte1_vaddr, it must result in a pagefault
+            assume(exists|s6, step, rlbl| // Assuming we do a store ...
+                next_step(c, s5, s6, step, rlbl) &&
+                (rlbl matches RLbl::MemOp { thread_id, vaddr, op: MemOp::Store { new_value, result } }
+                && thread_id == 0 && vaddr == pte1_vaddr));
+            let (s6, step, rlbl) = choose|s6: State, step: Step, rlbl: RLbl|
+                next_step(c, s5, s6, step, rlbl) &&
+                (rlbl matches RLbl::MemOp { thread_id, vaddr, op: MemOp::Store { new_value, result } }
+                && thread_id == 0 && vaddr == pte1_vaddr);
+            assert(rlbl is MemOp);
+            assert(rlbl->op->Store_result is Pagefault); // ... then it must cause a page fault
+        }
     }
 }
 
@@ -1078,18 +1093,33 @@ mod program_four {
         assert(next_step(c, s4, s5, Step::ProtectEnd, s4s5rlbl));
 
 
-        let s6 = State { mem: update_range(s5.mem, pte1_vaddr as int, seq![42, 0, 0, 0]), ..s5 };
+        { // Proof 1: We *can* successfully write to pte1_vaddr
+            let s6 = State { mem: update_range(s5.mem, pte1_vaddr as int, seq![42, 0, 0, 0]), ..s5 };
 
-        let s5s6op = MemOp::Store { new_value: seq![42, 0, 0, 0], result: StoreResult::Ok };
-        assert(s5s6op.op_size() == 4);
+            let s5s6op = MemOp::Store { new_value: seq![42, 0, 0, 0], result: StoreResult::Ok };
+            assert(s5s6op.op_size() == 4);
 
-        assert(next_step(
-            c,
-            s5,
-            s6,
-            Step::MemOp { pte: Some((pte1_vaddr, pte1)) },
-            RLbl::MemOp { thread_id: 0, vaddr: pte1_vaddr, op: s5s6op },
-        ));
+            assert(next_step(
+                c,
+                s5,
+                s6,
+                Step::MemOp { pte: Some((pte1_vaddr, pte1)) },
+                RLbl::MemOp { thread_id: 0, vaddr: pte1_vaddr, op: s5s6op },
+            ));
+        }
+
+        { // Proof 2: Any write to pte1_vaddr is successful
+            assume(exists|s6, step, rlbl| // Assuming we do a store ...
+                next_step(c, s5, s6, step, rlbl) &&
+                (rlbl matches RLbl::MemOp { thread_id, vaddr, op: MemOp::Store { new_value, result } }
+                && thread_id == 0 && vaddr == pte1_vaddr));
+            let (s6, step, rlbl) = choose|s6: State, step: Step, rlbl: RLbl|
+                next_step(c, s5, s6, step, rlbl) &&
+                (rlbl matches RLbl::MemOp { thread_id, vaddr, op: MemOp::Store { new_value, result } }
+                && thread_id == 0 && vaddr == pte1_vaddr);
+            assert(rlbl is MemOp);
+            assert(rlbl->op->Store_result is Ok); // ... then its result must be Ok
+        }
     }
 }
 
