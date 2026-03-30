@@ -19,9 +19,18 @@ def main():
     print(str(data["times-ms"]["num-threads"]) + " threads")
     print(str(data["times-ms"]["total"] / 1000) + " seconds (real time)")
     print("for an estimated " + str(data["times-ms"]["estimated-cpu-time"] / 1000) + " seconds of cpu time")
+
     mm = [m["function-breakdown"] for m in data["times-ms"]["smt"]["smt-run-module-times"]]
-    mm = [item['time'] / 1000 for sublist in mm for item in sublist if item['time'] > 0]
-    print(mm)
+    mm = [{"name":item["function"], "time": item['time'] / 1000} for sublist in mm for item in sublist if item['time'] > 0]
+
+    mm.sort(key=lambda x: x['time'])
+
+    for item in mm:
+        print(f"{item['name']}: {item['time']} seconds")
+
+
+    mm = [item['time'] for item in mm]
+
     # plot a ccdf of mm
     plt.figure()
     sorted_mm = np.sort(mm)
@@ -49,3 +58,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
