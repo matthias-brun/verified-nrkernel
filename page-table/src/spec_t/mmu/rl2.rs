@@ -1061,6 +1061,7 @@ proof fn next_step_preserves_inv_notin_nonpos_Unmapping(pre: State, post: State,
     }
 }
 
+#[verifier(spinoff_prover)]
 proof fn next_step_preserves_inv_protect__core_walks(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
     requires
         pre.wf(c),
@@ -1148,6 +1149,7 @@ proof fn next_step_preserves_inv_protect__core_walks(pre: State, post: State, c:
     }
 }
 
+#[verifier(spinoff_prover)]
 proof fn next_step_preserves_inv_protect__core_walks_invalid(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
     requires
         pre.wf(c),
@@ -1910,6 +1912,7 @@ proof fn next_step_preserves_inv_inflight_walks_are_prefixes(pre: State, post: S
     }
 }
 
+#[verifier(spinoff_prover)]
 proof fn next_step_preserves_inv_inflight_walks_are_prefixes_during_prot(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
     requires
         pre.wf(c),
@@ -2284,6 +2287,7 @@ proof fn lemma_step_writenonneg_new_walk_has_pending_map(pre: State, post: State
     assert(vbase <= va < vbase + post.hist.pending_maps[vbase].frame.size);
 }
 
+#[verifier(spinoff_prover)]
 proof fn next_step_preserves_inv_mapping__valid_not_pending_is_not_in_sbuf(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
     requires
         pre.happy,

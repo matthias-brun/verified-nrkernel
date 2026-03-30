@@ -148,6 +148,7 @@ pub proof fn next_step_preserves_inv_basic(c: os::Constants, s1: os::State, s2: 
     next_step_preserves_inv_basic_protect(c, s1, s2, step, lbl);
 }
 
+#[verifier(spinoff_prover)]
 pub proof fn next_step_preserves_inv_lock(c: os::Constants, s1: os::State, s2: os::State, step: os::Step, lbl: RLbl)
     requires
         s1.inv(c),
@@ -168,6 +169,7 @@ pub proof fn next_step_preserves_inv_lock(c: os::Constants, s1: os::State, s2: o
     assert(forall|core: Core| #[trigger] c.valid_core(core) && s2.core_states[core].is_in_crit_sect() ==> s2.os_ext.lock === Some(core));
 }
 
+#[verifier(spinoff_prover)]
 pub proof fn next_step_preserves_inv_basic_protect(c: os::Constants, s1: os::State, s2: os::State, step: os::Step, lbl: RLbl)
     requires
         s1.inv(c),
@@ -211,6 +213,7 @@ pub proof fn next_step_preserves_inv(c: os::Constants, s1: os::State, s2: os::St
     }
 }
 
+#[verifier(spinoff_prover)]
 pub proof fn next_step_preserves_inv_protect_vaddr_same_core(c: os::Constants, s1: os::State, s2: os::State, step: os::Step, lbl: RLbl)
     requires
         s1.inv(c), s1.sound, s2.sound,
@@ -824,6 +827,7 @@ pub proof fn init_implies_inv_tlb(c: os::Constants, s: os::State)
     assert(s.TLB_dom_subset_of_pt_and_inflight_unmap_vaddr(c));
 }
 
+#[verifier(spinoff_prover)]
 pub proof fn next_step_mmu_preserves_inv_tlb(
     c: os::Constants,
     s1: os::State,

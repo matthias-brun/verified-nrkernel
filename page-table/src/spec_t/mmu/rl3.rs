@@ -764,6 +764,7 @@ pub mod refinement {
             PDE::lemma_view_unchanged_dirty_access;
     }
 
+    #[verifier(spinoff_prover)]
     proof fn next_step_refines(pre: rl3::State, post: rl3::State, c: Constants, step: rl3::Step, lbl: Lbl)
         requires
             pre.inv(c),

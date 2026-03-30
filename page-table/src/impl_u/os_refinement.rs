@@ -154,6 +154,7 @@ proof fn lemma_inflight_mapunmap_vaddr_implies_hl_unmap_or_map(c: os::Constants,
     }
 }
 
+#[verifier(spinoff_prover)]
 proof fn lemma_effective_mappings_unaffected_if_thread_state_constant(
     c: os::Constants,
     s1: os::State,
@@ -992,6 +993,7 @@ proof fn extra_mappings_preserved_effective_mapping_inserted(
     });
 }
 
+#[verifier(spinoff_prover)]
 proof fn extra_mappings_preserved_effective_mapping_inserted_protect(
     c: os::Constants,
     s1: os::State,
@@ -2621,6 +2623,7 @@ proof fn step_UnmapStart_refines(c: os::Constants, s1: os::State, s2: os::State,
     }
 }
 
+#[verifier(spinoff_prover)]
 proof fn step_ProtectStart_refines(c: os::Constants, s1: os::State, s2: os::State, core: Core, lbl: RLbl)
     requires
         s1.inv(c),
