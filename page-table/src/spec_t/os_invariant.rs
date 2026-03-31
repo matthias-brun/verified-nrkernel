@@ -1466,6 +1466,7 @@ pub proof fn next_step_preserves_inv_tlb(
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #[verifier(spinoff_prover)]
+#[verifier::rlimit(300)]
 pub proof fn next_step_preserves_overlap_mem_inv(
     c: os::Constants,
     s1: os::State,

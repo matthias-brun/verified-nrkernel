@@ -1090,7 +1090,7 @@ proof fn lemma_directories_obey_invariant_at_framing(tok1: WrappedTokenView, pt1
     };
 }
 
-#[verifier(spinoff_prover)]
+//#[verifier(spinoff_prover)]
 pub broadcast proof fn lemma_inv_implies_interp_inv(tok: WrappedTokenView, pt: PTDir, layer: nat, ptr: usize, base: nat)
     requires
         inv_at(tok, pt, layer, ptr),
