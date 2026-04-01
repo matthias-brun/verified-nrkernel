@@ -1020,18 +1020,14 @@ mod program_three {
             ));
         }
 
-        { // Proof 2: If thread 0 does a store to address pte1_vaddr, it must result in a pagefault
-            assume(exists|s6, step, rlbl| // Assuming we do a store ...
-                next_step(c, s5, s6, step, rlbl) &&
-                (rlbl matches RLbl::MemOp { thread_id, vaddr, op: MemOp::Store { new_value, result } }
-                && thread_id == 0 && vaddr == pte1_vaddr));
-            let (s6, step, rlbl) = choose|s6: State, step: Step, rlbl: RLbl|
-                next_step(c, s5, s6, step, rlbl) &&
-                (rlbl matches RLbl::MemOp { thread_id, vaddr, op: MemOp::Store { new_value, result } }
-                && thread_id == 0 && vaddr == pte1_vaddr);
-            assert(rlbl is MemOp);
-            assert(rlbl->op->Store_result is Pagefault); // ... then it must cause a page fault
-        }
+        // Proof 2: If thread 0 does a store to address pte1_vaddr, it must result in a pagefault
+        assert(forall|s6, step, rlbl|
+            // If we do a store ...
+            next_step(c, s5, s6, step, rlbl) &&
+            (rlbl matches RLbl::MemOp { thread_id, vaddr, op: MemOp::Store { new_value, result } }
+             && thread_id == 0 && vaddr == pte1_vaddr)
+            // ... then it must cause a page fault
+            ==> rlbl->op->Store_result is Pagefault);
     }
 }
 
@@ -1108,18 +1104,14 @@ mod program_four {
             ));
         }
 
-        { // Proof 2: Any write to pte1_vaddr is successful
-            assume(exists|s6, step, rlbl| // Assuming we do a store ...
-                next_step(c, s5, s6, step, rlbl) &&
-                (rlbl matches RLbl::MemOp { thread_id, vaddr, op: MemOp::Store { new_value, result } }
-                && thread_id == 0 && vaddr == pte1_vaddr));
-            let (s6, step, rlbl) = choose|s6: State, step: Step, rlbl: RLbl|
-                next_step(c, s5, s6, step, rlbl) &&
-                (rlbl matches RLbl::MemOp { thread_id, vaddr, op: MemOp::Store { new_value, result } }
-                && thread_id == 0 && vaddr == pte1_vaddr);
-            assert(rlbl is MemOp);
-            assert(rlbl->op->Store_result is Ok); // ... then its result must be Ok
-        }
+        // Proof 2: Any write to pte1_vaddr is successful.
+        assert(forall|s6, step, rlbl|
+            // If we do a store ...
+            next_step(c, s5, s6, step, rlbl) &&
+            (rlbl matches RLbl::MemOp { thread_id, vaddr, op: MemOp::Store { new_value, result } }
+             && thread_id == 0 && vaddr == pte1_vaddr)
+            // ... then it must be successful
+            ==> rlbl->op->Store_result is Ok);
     }
 }
 
