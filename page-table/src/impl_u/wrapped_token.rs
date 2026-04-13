@@ -647,9 +647,9 @@ impl WrappedMapToken {
             idx < 512,
             old(tok).inv(),
         ensures
-            res == tok@.read(idx, r@),
-            tok@ == old(tok)@,
-            tok.inv(),
+            res == final(tok)@.read(idx, r@),
+            final(tok)@ == old(tok)@,
+            final(tok).inv(),
     {
         let addr = pbase + idx * 8;
         let ghost state1 = tok.tok.st();
@@ -709,8 +709,8 @@ impl WrappedMapToken {
             PT::inv(old(tok)@.write(idx, value, r, false), root_pt2),
             PT::interp_to_l0(old(tok)@.write(idx, value, r, false), root_pt2) == PT::interp_to_l0(old(tok)@, root_pt1),
         ensures
-            tok@ == old(tok)@.write(idx, value, r, false),
-            tok.inv(),
+            final(tok)@ == old(tok)@.write(idx, value, r, false),
+            final(tok).inv(),
     {
         proof { lemma_bits_misc(); }
 
@@ -783,8 +783,8 @@ impl WrappedMapToken {
                 == PT::interp_to_l0(old(tok)@, root_pt).insert(old(tok)@.args->Map_base as nat, old(tok)@.args->Map_pte),
             //old(tok)@.write(idx, value, r).interp() == old(tok)@.interp().insert(old(tok)@.args->Map_base, old(tok)@.args->Map_pte),
         ensures
-            tok@ == old(tok)@.write(idx, value, r, true),
-            tok.inv(),
+            final(tok)@ == old(tok)@.write(idx, value, r, true),
+            final(tok).inv(),
     {
         proof { lemma_bits_misc(); }
 
@@ -848,13 +848,13 @@ impl WrappedMapToken {
             res.size == 4096,
             res.base + 4096 <= MAX_PHYADDR,
             !old(tok)@.regions.contains_key(res@),
-            tok@.regions === old(tok)@.regions.insert(res@, seq![0; 512]),
-            tok@.pt_mem == old(tok)@.pt_mem,
-            tok@.args == old(tok)@.args,
-            tok@.orig_st == old(tok)@.orig_st,
-            tok@.result == old(tok)@.result,
-            !tok@.change_made,
-            tok.inv(),
+            final(tok)@.regions === old(tok)@.regions.insert(res@, seq![0; 512]),
+            final(tok)@.pt_mem == old(tok)@.pt_mem,
+            final(tok)@.args == old(tok)@.args,
+            final(tok)@.orig_st == old(tok)@.orig_st,
+            final(tok)@.result == old(tok)@.result,
+            !final(tok)@.change_made,
+            final(tok).inv(),
     {
         let ghost state1 = tok.tok.st();
         let ghost core = tok.tok.core();
@@ -904,8 +904,8 @@ impl WrappedMapToken {
             ),
             PT::inv(old(tok)@, root_pt),
         ensures
-            tok@ == (WrappedTokenView { change_made: true, result: Err(()), ..old(tok)@ }),
-            tok.inv(),
+            final(tok)@ == (WrappedTokenView { change_made: true, result: Err(()), ..old(tok)@ }),
+            final(tok).inv(),
     {
         tok@.lemma_interps_match(root_pt);
         tok.change_made = true; // We didn't actually make a change but for mapping, this just
@@ -1042,21 +1042,21 @@ pub exec fn start_map_and_acquire_lock(Tracked(tok): Tracked<&mut Token>, Ghost(
         old(tok).progress() is Unready,
         old(tok).st().inv(old(tok).consts()),
     ensures
-        tok.core() == old(tok).core(),
-        tok.thread() == old(tok).thread(),
-        tok.st().core_states[tok.core()] == (os::CoreState::MapExecuting { ult_id: tok.thread(), vaddr, pte }),
-        tok.progress() is Ready,
-        tok.st().os_ext.lock == Some(tok.core()),
-        tok.st().inv(tok.consts()),
-        tok.st().mmu@.pt_mem.pml4 == old(tok).st().mmu@.pt_mem.pml4,
-        tok.consts() == old(tok).consts(),
-        tok.steps() == old(tok).steps().drop_first(),
-        tok.steps_taken() == seq![old(tok).steps().first()],
-        !tok.on_first_step(),
+        final(tok).core() == old(tok).core(),
+        final(tok).thread() == old(tok).thread(),
+        final(tok).st().core_states[final(tok).core()] == (os::CoreState::MapExecuting { ult_id: final(tok).thread(), vaddr, pte }),
+        final(tok).progress() is Ready,
+        final(tok).st().os_ext.lock == Some(final(tok).core()),
+        final(tok).st().inv(final(tok).consts()),
+        final(tok).st().mmu@.pt_mem.pml4 == old(tok).st().mmu@.pt_mem.pml4,
+        final(tok).consts() == old(tok).consts(),
+        final(tok).steps() == old(tok).steps().drop_first(),
+        final(tok).steps_taken() == seq![old(tok).steps().first()],
+        !final(tok).on_first_step(),
         // From `inv_impl`:
         forall|wtok: WrappedTokenView| ({
-            &&& wtok.pt_mem == tok.st().mmu@.pt_mem
-            &&& wtok.regions.dom() == tok.st().os_ext.allocated
+            &&& wtok.pt_mem == final(tok).st().mmu@.pt_mem
+            &&& wtok.regions.dom() == final(tok).st().os_ext.allocated
             &&& #[trigger] wtok.regions_derived_from_view()
         }) ==> exists|pt| PT::inv_and_nonempty(wtok, pt),
 {
@@ -1224,9 +1224,9 @@ impl WrappedUnmapToken {
             idx < 512,
             old(tok).inv(),
         ensures
-            res == tok@.read(idx, r@),
-            tok@ == old(tok)@,
-            tok.inv(),
+            res == final(tok)@.read(idx, r@),
+            final(tok)@ == old(tok)@,
+            final(tok).inv(),
     {
         let addr = pbase + idx * 8;
         let ghost state1 = tok.tok.st();
@@ -1288,8 +1288,8 @@ impl WrappedUnmapToken {
             PT::inv(old(tok)@.write(idx, value, r, false), root_pt2),
             PT::interp_to_l0(old(tok)@.write(idx, value, r, false), root_pt2) == PT::interp_to_l0(old(tok)@, root_pt1),
         ensures
-            tok@ == old(tok)@.write(idx, value, r, false),
-            tok.inv(),
+            final(tok)@ == old(tok)@.write(idx, value, r, false),
+            final(tok).inv(),
     {
         proof { lemma_bits_misc(); }
 
@@ -1357,8 +1357,8 @@ impl WrappedUnmapToken {
             PT::interp_to_l0(old(tok)@.write(idx, value, r, true), root_pt)
                 == PT::interp_to_l0(old(tok)@, root_pt).remove(old(tok)@.args->Unmap_base as nat),
         ensures
-            tok@ == old(tok)@.write(idx, value, r, true),
-            tok.inv(),
+            final(tok)@ == old(tok)@.write(idx, value, r, true),
+            final(tok).inv(),
     {
         proof { lemma_bits_misc(); }
 
@@ -1421,12 +1421,12 @@ impl WrappedUnmapToken {
             old(tok)@.regions[region@] === seq![0; 512],
             old(tok).inv(),
         ensures
-            tok@.regions === old(tok)@.regions.remove(region@),
-            tok@.pt_mem == old(tok)@.pt_mem,
-            tok@.args == old(tok)@.args,
-            tok@.orig_st == old(tok)@.orig_st,
-            tok@.change_made == old(tok)@.change_made,
-            tok.inv(),
+            final(tok)@.regions === old(tok)@.regions.remove(region@),
+            final(tok)@.pt_mem == old(tok)@.pt_mem,
+            final(tok)@.args == old(tok)@.args,
+            final(tok)@.orig_st == old(tok)@.orig_st,
+            final(tok)@.change_made == old(tok)@.change_made,
+            final(tok).inv(),
     {
         let ghost state1 = tok.tok.st();
         let ghost core = tok.tok.core();
@@ -1834,9 +1834,9 @@ impl WrappedProtectToken {
             idx < 512,
             old(tok).inv(),
         ensures
-            res == tok@.read(idx, r@),
-            tok@ == old(tok)@,
-            tok.inv(),
+            res == final(tok)@.read(idx, r@),
+            final(tok)@ == old(tok)@,
+            final(tok).inv(),
     {
         let addr = pbase + idx * 8;
         let ghost state1 = tok.tok.st();
@@ -1905,8 +1905,8 @@ impl WrappedProtectToken {
                                 flags: old(tok)@.args->Protect_flags,
                             }),
         ensures
-            tok@ == old(tok)@.write(idx, value, r, true),
-            tok.inv(),
+            final(tok)@ == old(tok)@.write(idx, value, r, true),
+            final(tok).inv(),
     {
 
         proof { lemma_bits_misc(); }
@@ -2252,21 +2252,21 @@ pub exec fn start_unmap_and_acquire_lock(Tracked(tok): Tracked<&mut Token>, Ghos
         old(tok).progress() is Unready,
         old(tok).st().inv(old(tok).consts()),
     ensures
-        tok.core() == old(tok).core(),
-        tok.thread() == old(tok).thread(),
-        tok.st().core_states[tok.core()] == (os::CoreState::UnmapExecuting { ult_id: tok.thread(), vaddr, result: None }),
-        tok.progress() is Ready,
-        tok.st().os_ext.lock == Some(tok.core()),
-        tok.st().inv(tok.consts()),
-        tok.st().mmu@.pt_mem.pml4 == old(tok).st().mmu@.pt_mem.pml4,
-        tok.consts() == old(tok).consts(),
-        tok.steps() == old(tok).steps().drop_first(),
-        tok.steps_taken() == seq![old(tok).steps().first()],
-        !tok.on_first_step(),
+        final(tok).core() == old(tok).core(),
+        final(tok).thread() == old(tok).thread(),
+        final(tok).st().core_states[final(tok).core()] == (os::CoreState::UnmapExecuting { ult_id: final(tok).thread(), vaddr, result: None }),
+        final(tok).progress() is Ready,
+        final(tok).st().os_ext.lock == Some(final(tok).core()),
+        final(tok).st().inv(final(tok).consts()),
+        final(tok).st().mmu@.pt_mem.pml4 == old(tok).st().mmu@.pt_mem.pml4,
+        final(tok).consts() == old(tok).consts(),
+        final(tok).steps() == old(tok).steps().drop_first(),
+        final(tok).steps_taken() == seq![old(tok).steps().first()],
+        !final(tok).on_first_step(),
         // From `inv_impl`:
         forall|wtok: WrappedTokenView| ({
-            &&& wtok.pt_mem == tok.st().mmu@.pt_mem
-            &&& wtok.regions.dom() == tok.st().os_ext.allocated
+            &&& wtok.pt_mem == final(tok).st().mmu@.pt_mem
+            &&& wtok.regions.dom() == final(tok).st().os_ext.allocated
             &&& #[trigger] wtok.regions_derived_from_view()
         }) ==> exists|pt| PT::inv_and_nonempty(wtok, pt),
 {
@@ -2340,21 +2340,21 @@ pub exec fn start_protect_and_acquire_lock(Tracked(tok): Tracked<&mut Token>, Gh
         old(tok).progress() is Unready,
         old(tok).st().inv(old(tok).consts()),
     ensures
-        tok.core() == old(tok).core(),
-        tok.thread() == old(tok).thread(),
-        tok.st().core_states[tok.core()] == (os::CoreState::ProtectExecuting { ult_id: tok.thread(), vaddr, flags, result: None }),
-        tok.progress() is Ready,
-        tok.st().os_ext.lock == Some(tok.core()),
-        tok.st().inv(tok.consts()),
-        tok.st().mmu@.pt_mem.pml4 == old(tok).st().mmu@.pt_mem.pml4,
-        tok.consts() == old(tok).consts(),
-        tok.steps() == old(tok).steps().drop_first(),
-        tok.steps_taken() == seq![old(tok).steps().first()],
-        !tok.on_first_step(),
+        final(tok).core() == old(tok).core(),
+        final(tok).thread() == old(tok).thread(),
+        final(tok).st().core_states[final(tok).core()] == (os::CoreState::ProtectExecuting { ult_id: final(tok).thread(), vaddr, flags, result: None }),
+        final(tok).progress() is Ready,
+        final(tok).st().os_ext.lock == Some(final(tok).core()),
+        final(tok).st().inv(final(tok).consts()),
+        final(tok).st().mmu@.pt_mem.pml4 == old(tok).st().mmu@.pt_mem.pml4,
+        final(tok).consts() == old(tok).consts(),
+        final(tok).steps() == old(tok).steps().drop_first(),
+        final(tok).steps_taken() == seq![old(tok).steps().first()],
+        !final(tok).on_first_step(),
         // From `inv_impl`:
         forall|wtok: WrappedTokenView| ({
-            &&& wtok.pt_mem == tok.st().mmu@.pt_mem
-            &&& wtok.regions.dom() == tok.st().os_ext.allocated
+            &&& wtok.pt_mem == final(tok).st().mmu@.pt_mem
+            &&& wtok.regions.dom() == final(tok).st().os_ext.allocated
             &&& #[trigger] wtok.regions_derived_from_view()
         }) ==> exists|pt| PT::inv_and_nonempty(wtok, pt),
 {

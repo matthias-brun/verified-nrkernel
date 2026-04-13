@@ -292,13 +292,13 @@ impl Token {
         requires
             old(self).progress() is Unready,
         ensures
-            self.progress() is Ready,
-            self.consts() == old(self).consts(),
-            self.thread() == old(self).thread(),
-            self.steps() == old(self).steps(),
-            self.steps_taken() == old(self).steps_taken(),
-            self.on_first_step() == old(self).on_first_step(),
-            concurrent_trs(old(self).st(), self.st(), old(self).consts(), old(self).core(), pidx);
+            final(self).progress() is Ready,
+            final(self).consts() == old(self).consts(),
+            final(self).thread() == old(self).thread(),
+            final(self).steps() == old(self).steps(),
+            final(self).steps_taken() == old(self).steps_taken(),
+            final(self).on_first_step() == old(self).on_first_step(),
+            concurrent_trs(old(self).st(), final(self).st(), old(self).consts(), old(self).core(), pidx);
 
 
     // Take MMU steps
@@ -309,7 +309,7 @@ impl Token {
             old(self).steps().len() > 0,
             old(self).progress() is Ready,
         ensures
-            old(self).withdraw_token(*self),
+            old(self).withdraw_token(*final(self)),
             tok.pre() == old(self).st().mmu,
             tok.consts() == old(self).consts().common,
             tok.core() == old(self).core(),
@@ -328,14 +328,14 @@ impl Token {
             post.os_ext == old(self).st().os_ext,
             post.mmu == old(tok).post(),
         ensures
-            self.on_first_step() == old(self).on_first_step(),
-            self.consts() == old(self).consts(),
-            self.thread() == old(self).thread(),
-            self.st() == post,
-            self.steps() == old(self).steps(),
-            self.steps_taken() == old(self).steps_taken(),
-            self.progress() == old(self).progress(),
-            old(tok).set_validated(*tok);
+            final(self).on_first_step() == old(self).on_first_step(),
+            final(self).consts() == old(self).consts(),
+            final(self).thread() == old(self).thread(),
+            final(self).st() == post,
+            final(self).steps() == old(self).steps(),
+            final(self).steps_taken() == old(self).steps_taken(),
+            final(self).progress() == old(self).progress(),
+            old(tok).set_validated(*final(tok));
 
     // Not needed.
     //pub axiom fn register_external_step_mmu(
@@ -363,13 +363,13 @@ impl Token {
     pub axiom fn return_mmu_token(tracked &mut self, tracked tok: mmu::rl3::code::Token)
         requires tok.tstate() is Spent,
         ensures
-            self.on_first_step() == old(self).on_first_step(),
-            self.thread() == old(self).thread(),
-            self.consts() == old(self).consts(),
-            self.st() == old(self).st(),
-            self.steps() == old(self).steps(),
-            self.steps_taken() == old(self).steps_taken(),
-            self.progress() is Unready;
+            final(self).on_first_step() == old(self).on_first_step(),
+            final(self).thread() == old(self).thread(),
+            final(self).consts() == old(self).consts(),
+            final(self).st() == old(self).st(),
+            final(self).steps() == old(self).steps(),
+            final(self).steps_taken() == old(self).steps_taken(),
+            final(self).progress() is Unready;
 
 
 
@@ -381,7 +381,7 @@ impl Token {
             old(self).steps().len() > 0,
             old(self).progress() is Ready,
         ensures
-            old(self).withdraw_token(*self),
+            old(self).withdraw_token(*final(self)),
             tok.consts() == old(self).consts().common,
             tok.pre() == old(self).st().os_ext,
             tok.core() == old(self).core(),
@@ -402,14 +402,14 @@ impl Token {
             post.mmu == old(self).st().mmu,
             post.os_ext == old(tok).post(),
         ensures
-            self.on_first_step() == old(self).on_first_step(),
-            self.consts() == old(self).consts(),
-            self.thread() == old(self).thread(),
-            self.st() == post,
-            self.steps() == old(self).steps(),
-            self.steps_taken() == old(self).steps_taken(),
-            self.progress() == old(self).progress(),
-            old(tok).set_valid(*tok);
+            final(self).on_first_step() == old(self).on_first_step(),
+            final(self).consts() == old(self).consts(),
+            final(self).thread() == old(self).thread(),
+            final(self).st() == post,
+            final(self).steps() == old(self).steps(),
+            final(self).steps_taken() == old(self).steps_taken(),
+            final(self).progress() == old(self).progress(),
+            old(tok).set_valid(*final(tok));
 
     pub axiom fn register_external_step_osext(
         tracked &mut self,
@@ -426,25 +426,25 @@ impl Token {
             post.mmu == old(self).st().mmu,
             post.os_ext == old(tok).post(),
         ensures
-            self.on_first_step() == old(self).on_first_step(),
-            self.consts() == old(self).consts(),
-            self.thread() == old(self).thread(),
-            self.st() == post,
-            self.steps() == old(self).steps().drop_first(),
-            self.steps_taken() == old(self).steps_taken().push(lbl),
-            self.progress() == old(self).progress(),
-            old(tok).set_valid(*tok);
+            final(self).on_first_step() == old(self).on_first_step(),
+            final(self).consts() == old(self).consts(),
+            final(self).thread() == old(self).thread(),
+            final(self).st() == post,
+            final(self).steps() == old(self).steps().drop_first(),
+            final(self).steps_taken() == old(self).steps_taken().push(lbl),
+            final(self).progress() == old(self).progress(),
+            old(tok).set_valid(*final(tok));
 
     pub axiom fn return_osext_token(tracked &mut self, tracked tok: os_ext::code::Token)
         requires tok.tstate() is Spent,
         ensures
-            self.on_first_step() == old(self).on_first_step(),
-            self.thread() == old(self).thread(),
-            self.consts() == old(self).consts(),
-            self.st() == old(self).st(),
-            self.steps() == old(self).steps(),
-            self.steps_taken() == old(self).steps_taken(),
-            self.progress() is Unready;
+            final(self).on_first_step() == old(self).on_first_step(),
+            final(self).thread() == old(self).thread(),
+            final(self).consts() == old(self).consts(),
+            final(self).st() == old(self).st(),
+            final(self).steps() == old(self).steps(),
+            final(self).steps_taken() == old(self).steps_taken(),
+            final(self).progress() is Unready;
 
 
     /// Register a step that corresponds to stutter in both mmu and os_ext.
@@ -456,13 +456,13 @@ impl Token {
             post.os_ext == old(self).st().os_ext,
             post.mmu == old(self).st().mmu,
         ensures
-            !self.on_first_step(),
-            self.consts() == old(self).consts(),
-            self.thread() == old(self).thread(),
-            self.st() == post,
-            self.steps() == old(self).steps(),
-            self.steps_taken() == old(self).steps_taken(),
-            self.progress() == Progress::Unready;
+            !final(self).on_first_step(),
+            final(self).consts() == old(self).consts(),
+            final(self).thread() == old(self).thread(),
+            final(self).st() == post,
+            final(self).steps() == old(self).steps(),
+            final(self).steps_taken() == old(self).steps_taken(),
+            final(self).progress() is Unready;
 
     /// Register a step that corresponds to stutter in both mmu and os_ext.
     pub axiom fn register_external_step(tracked &mut self, post: os::State, step: os::Step, lbl: RLbl)
@@ -474,13 +474,13 @@ impl Token {
             post.os_ext == old(self).st().os_ext,
             post.mmu == old(self).st().mmu,
         ensures
-            !self.on_first_step(),
-            self.consts() == old(self).consts(),
-            self.thread() == old(self).thread(),
-            self.st() == post,
-            self.steps() == old(self).steps().drop_first(),
-            self.steps_taken() == old(self).steps_taken().push(lbl),
-            self.progress() == Progress::Unready;
+            !final(self).on_first_step(),
+            final(self).consts() == old(self).consts(),
+            final(self).thread() == old(self).thread(),
+            final(self).st() == post,
+            final(self).steps() == old(self).steps().drop_first(),
+            final(self).steps_taken() == old(self).steps_taken().push(lbl),
+            final(self).progress() is Unready;
 }
 
 pub trait CodeVC {

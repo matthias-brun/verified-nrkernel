@@ -977,10 +977,10 @@ pub mod code {
                 old(self).consts().in_ptmem_range(addr as nat, 8),
                 aligned(addr as nat, 8),
             ensures
-                self.lbl() is Read,
-                self.lbl()->Read_0 == self.core(),
-                self.lbl()->Read_1 == addr,
-                old(self).prophesied_step(*self);
+                final(self).lbl() is Read,
+                final(self).lbl()->Read_0 == final(self).core(),
+                final(self).lbl()->Read_1 == addr,
+                old(self).prophesied_step(*final(self));
 
         pub axiom fn prophesy_write(tracked &mut self, addr: usize, value: usize)
             requires
@@ -989,24 +989,24 @@ pub mod code {
                 old(self).consts().in_ptmem_range(addr as nat, 8),
                 aligned(addr as nat, 8),
             ensures
-                self.lbl() == mmu::Lbl::Write(self.core(), addr, value),
-                old(self).prophesied_step(*self);
+                final(self).lbl() == mmu::Lbl::Write(final(self).core(), addr, value),
+                old(self).prophesied_step(*final(self));
 
         pub axiom fn prophesy_barrier(tracked &mut self)
             requires
                 old(self).tstate() is Init,
                 old(self).consts().valid_core(old(self).core()),
             ensures
-                self.lbl() == mmu::Lbl::Barrier(self.core()),
-                old(self).prophesied_step(*self);
+                final(self).lbl() == mmu::Lbl::Barrier(final(self).core()),
+                old(self).prophesied_step(*final(self));
 
         pub axiom fn prophesy_invlpg(tracked &mut self, addr: usize)
             requires
                 old(self).tstate() is Init,
                 old(self).consts().valid_core(old(self).core()),
             ensures
-                self.lbl() == mmu::Lbl::Invlpg(self.core(), addr),
-                old(self).prophesied_step(*self);
+                final(self).lbl() == mmu::Lbl::Invlpg(final(self).core(), addr),
+                old(self).prophesied_step(*final(self));
     }
 
     // External interface to the  memory allocation of the linux module
@@ -1038,7 +1038,7 @@ pub mod code {
             old(tok).lbl() matches mmu::Lbl::Read(lbl_core, lbl_addr, _)
                && lbl_core == old(tok).core() && lbl_addr == addr,
         ensures
-            tok.tstate() is Spent,
+            final(tok).tstate() is Spent,
             res == old(tok).lbl()->Read_2,
     {
         unsafe {
@@ -1054,7 +1054,7 @@ pub mod code {
             old(tok).tstate() is Validated,
             old(tok).lbl() == mmu::Lbl::Write(old(tok).core(), addr, value),
         ensures
-            tok.tstate() is Spent,
+            final(tok).tstate() is Spent,
     {
         unsafe {
             let vaddr_ptr : *mut usize = local_phys_to_mem(addr) as *mut usize;
@@ -1069,7 +1069,7 @@ pub mod code {
             old(tok).tstate() is Validated,
             old(tok).lbl() == mmu::Lbl::Barrier(old(tok).core()),
         ensures
-            tok.tstate() is Spent,
+            final(tok).tstate() is Spent,
     {
         // let's only have the mfence when we actually compile for the linux module
         #[cfg(feature="linuxmodule")]
@@ -1084,7 +1084,7 @@ pub mod code {
             old(tok).tstate() is Validated,
             old(tok).lbl() == mmu::Lbl::Invlpg(old(tok).core(), vaddr),
         ensures
-            tok.tstate() is Spent,
+            final(tok).tstate() is Spent,
     {
         #[cfg(feature="linuxmodule")]
         unsafe {

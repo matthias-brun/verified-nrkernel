@@ -252,8 +252,8 @@ pub mod code {
             requires
                 old(self).tstate() is Init,
             ensures
-                self.lbl() == (os_ext::Lbl::AcquireLock { core: self.core() }),
-                old(self).prophesied_step(*self);
+                final(self).lbl() == (os_ext::Lbl::AcquireLock { core: final(self).core() }),
+                old(self).prophesied_step(*final(self));
 
         // We have enabling conditions that need to be ensured by the caller and "technical"
         // enabling conditions, which are guaranteed by executing the function. In the first case,
@@ -265,45 +265,45 @@ pub mod code {
                 old(self).tstate() is Init,
                 old(self).pre().lock == Some(old(self).core())
             ensures
-                self.lbl() == (os_ext::Lbl::ReleaseLock { core: self.core() }),
-                old(self).prophesied_step(*self);
+                final(self).lbl() == (os_ext::Lbl::ReleaseLock { core: final(self).core() }),
+                old(self).prophesied_step(*final(self));
 
         pub axiom fn prophesy_init_shootdown(tracked &mut self, vaddr: usize)
             requires
                 old(self).tstate() is Init,
             ensures
-                self.lbl() == (os_ext::Lbl::InitShootdown { core: self.core(), vaddr: vaddr as nat }),
-                old(self).prophesied_step(*self);
+                final(self).lbl() == (os_ext::Lbl::InitShootdown { core: final(self).core(), vaddr: vaddr as nat }),
+                old(self).prophesied_step(*final(self));
 
         pub axiom fn prophesy_wait_shootdown(tracked &mut self)
             requires
                 old(self).tstate() is Init,
             ensures
-                self.lbl() == (os_ext::Lbl::WaitShootdown { core: self.core() }),
-                old(self).prophesied_step(*self);
+                final(self).lbl() == (os_ext::Lbl::WaitShootdown { core: final(self).core() }),
+                old(self).prophesied_step(*final(self));
 
         pub axiom fn prophesy_ack_shootdown(tracked &mut self)
             requires
                 old(self).tstate() is Init,
             ensures
-                self.lbl() == (os_ext::Lbl::AckShootdown { core: self.core() }),
-                old(self).prophesied_step(*self);
+                final(self).lbl() == (os_ext::Lbl::AckShootdown { core: final(self).core() }),
+                old(self).prophesied_step(*final(self));
 
         pub axiom fn prophesy_allocate(tracked &mut self)
             requires
                 old(self).tstate() is Init,
             ensures
-                self.lbl() is Allocate,
-                self.lbl()->Allocate_core == self.core(),
-                old(self).prophesied_step(*self);
+                final(self).lbl() is Allocate,
+                final(self).lbl()->Allocate_core == final(self).core(),
+                old(self).prophesied_step(*final(self));
 
         pub axiom fn prophesy_deallocate(tracked &mut self, reg: MemRegionExec)
             requires
                 old(self).tstate() is Init,
                 old(self).pre().allocated.contains(reg@),
             ensures
-                self.lbl() == (os_ext::Lbl::Deallocate { core: self.core(), reg: reg@ }),
-                old(self).prophesied_step(*self);
+                final(self).lbl() == (os_ext::Lbl::Deallocate { core: final(self).core(), reg: reg@ }),
+                old(self).prophesied_step(*final(self));
     }
 
     // External interface to the  memory allocation of the linux module
@@ -379,7 +379,7 @@ pub mod code {
             old(tok).tstate() is Validated,
             old(tok).lbl() == (os_ext::Lbl::AcquireLock { core: old(tok).core() }),
         ensures
-            tok.tstate() is Spent,
+            final(tok).tstate() is Spent,
     {
         unsafe { mmap_pgtable_lock(); }
     }
@@ -393,7 +393,7 @@ pub mod code {
             old(tok).tstate() is Validated,
             old(tok).lbl() == (os_ext::Lbl::ReleaseLock { core: old(tok).core() }),
         ensures
-            tok.tstate() is Spent,
+            final(tok).tstate() is Spent,
     {
         unsafe { mmap_pgtable_unlock(); }
     }
@@ -430,7 +430,7 @@ pub mod code {
             old(tok).tstate() is Validated,
             old(tok).lbl() == (os_ext::Lbl::InitShootdown { core: old(tok).core(), vaddr: vaddr as nat }),
         ensures
-            tok.tstate() is Spent,
+            final(tok).tstate() is Spent,
     {
         // on linux this is a blocking call to flush the TLB for the given page.
         #[cfg(feature="linuxmodule")]
@@ -461,7 +461,7 @@ pub mod code {
             old(tok).tstate() is Validated,
             old(tok).lbl() == (os_ext::Lbl::WaitShootdown { core: old(tok).core() }),
         ensures
-            tok.tstate() is Spent,
+            final(tok).tstate() is Spent,
     {
         #[cfg(feature="linuxmodule")]
         {
@@ -488,7 +488,7 @@ pub mod code {
             old(tok).tstate() is Validated,
             old(tok).lbl() == (os_ext::Lbl::AckShootdown { core: old(tok).core() }),
         ensures
-            tok.tstate() is Spent,
+            final(tok).tstate() is Spent,
     {
         #[cfg(feature="linuxmodule")]
         {
@@ -538,7 +538,7 @@ pub mod code {
             old(tok).tstate() is Validated,
             old(tok).lbl() matches os_ext::Lbl::Allocate { core: lbl_core, .. } && lbl_core == old(tok).core(),
         ensures
-            tok.tstate() is Spent,
+            final(tok).tstate() is Spent,
             res@ == old(tok).lbl()->Allocate_res,
     {
         let addr = unsafe { pt_memory_alloc(PAGE_SIZE, PAGE_SIZE as u64, layer.try_into().unwrap()) };
@@ -555,7 +555,7 @@ pub mod code {
             old(tok).tstate() is Validated,
             old(tok).lbl() == (os_ext::Lbl::Deallocate { core: old(tok).core(), reg: reg@ }),
         ensures
-            tok.tstate() is Spent,
+            final(tok).tstate() is Spent,
     {
         unsafe { pt_memory_free(reg.base.try_into().unwrap(), reg.size, layer.try_into().unwrap()) };
     }

@@ -760,10 +760,10 @@ fn entry_at(Tracked(tok): Tracked<&mut WrappedMapToken>, Ghost(pt): Ghost<PTDir>
         inv_at(old(tok)@, pt, layer as nat, ptr),
     ensures
         res.layer@ == layer as nat,
-        res == entry_at_spec(tok@, pt, layer as nat, ptr, i as nat),
+        res == entry_at_spec(final(tok)@, pt, layer as nat, ptr, i as nat),
         res.hp_pat_is_zero(),
-        tok@ == old(tok)@,
-        tok.inv(),
+        final(tok)@ == old(tok)@,
+        final(tok).inv(),
         (res@ is Page ==> 0 < res.layer()),
 {
     assert(aligned((ptr + i * WORD_SIZE) as nat, 8)) by {
@@ -795,10 +795,10 @@ fn entry_at_unmap(Tracked(tok): Tracked<&mut WrappedUnmapToken>, Ghost(pt): Ghos
         inv_at(old(tok)@, pt, layer as nat, ptr),
     ensures
         res.layer@ == layer as nat,
-        res == entry_at_spec(tok@, pt, layer as nat, ptr, i as nat),
+        res == entry_at_spec(final(tok)@, pt, layer as nat, ptr, i as nat),
         res.hp_pat_is_zero(),
-        tok@ == old(tok)@,
-        tok.inv(),
+        final(tok)@ == old(tok)@,
+        final(tok).inv(),
         (res@ is Page ==> 0 < res.layer()),
 {
     assert(aligned((ptr + i * WORD_SIZE) as nat, 8)) by {
@@ -825,10 +825,10 @@ fn entry_at_protect(Tracked(tok): Tracked<&mut WrappedProtectToken>, Ghost(pt): 
         inv_at(old(tok)@, pt, layer as nat, ptr),
     ensures
         res.layer@ == layer as nat,
-        res == entry_at_spec(tok@, pt, layer as nat, ptr, i as nat),
+        res == entry_at_spec(final(tok)@, pt, layer as nat, ptr, i as nat),
         res.hp_pat_is_zero(),
-        tok@ == old(tok)@,
-        tok.inv(),
+        final(tok)@ == old(tok)@,
+        final(tok).inv(),
         (res@ is Page ==> 0 < res.layer()),
 {
     assert(aligned((ptr + i * WORD_SIZE) as nat, 8)) by {
@@ -1525,32 +1525,32 @@ fn map_frame_aux(
                                 === interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])).insert(vaddr as nat, pte@)
         }
     ensures
-        tok.inv(),
-        tok@.pt_mem.pml4 == old(tok)@.pt_mem.pml4,
+        final(tok).inv(),
+        final(tok)@.pt_mem.pml4 == old(tok)@.pt_mem.pml4,
         match res {
             Ok(resv) => {
                 let (pt_res, new_regions) = resv@;
                 // We return the regions that we added
-                &&& tok@.regions.dom() === old(tok)@.regions.dom().union(new_regions)
+                &&& final(tok)@.regions.dom() === old(tok)@.regions.dom().union(new_regions)
                 &&& pt_res.used_regions === pt.used_regions.union(new_regions)
                 // and only those we added
                 &&& new_regions.disjoint(old(tok)@.regions.dom())
                 &&& (forall|r: MemRegion| new_regions.contains(r) ==> !(#[trigger] pt.used_regions.contains(r)))
                 // Invariant preserved
-                &&& inv_at(tok@, pt_res, layer as nat, ptr)
-                &&& !empty_at(tok@, pt_res, layer as nat, ptr)
-                &&& no_empty_directories(tok@, pt_res, layer as nat, ptr)
+                &&& inv_at(final(tok)@, pt_res, layer as nat, ptr)
+                &&& !empty_at(final(tok)@, pt_res, layer as nat, ptr)
+                &&& no_empty_directories(final(tok)@, pt_res, layer as nat, ptr)
                 // We only touch already allocated regions if they're in pt.used_regions
                 &&& (forall|r: MemRegion| !(#[trigger] pt.used_regions.contains(r)) && !new_regions.contains(r)
-                    ==> tok@.regions[r] === old(tok)@.regions[r])
+                    ==> final(tok)@.regions[r] === old(tok)@.regions[r])
                 &&& pt_res.region === pt.region
                 &&& !candidate_mapping_overlaps_existing_vmem(interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])), vaddr as nat, pte@)
-                &&& tok@.change_made
-                &&& tok@.result === Ok(())
+                &&& final(tok)@.change_made
+                &&& final(tok)@.result === Ok(())
             },
             Err(e) => {
                 // If error, unchanged
-                &&& tok@ === old(tok)@
+                &&& final(tok)@ === old(tok)@
                 &&& candidate_mapping_overlaps_existing_vmem(interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])), vaddr as nat, pte@)
                 &&& candidate_mapping_overlaps_existing_vmem(interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp(), vaddr as nat, pte@)
             },
@@ -2259,19 +2259,19 @@ pub fn map_frame(Tracked(tok): Tracked<&mut WrappedMapToken>, pt: &mut Ghost<PTD
         pml4 == old(tok)@.pt_mem.pml4,
         old(tok)@.args == (OpArgs::Map { base: vaddr, pte: pte@ }),
     ensures
-        inv_and_nonempty(tok@, pt@),
+        inv_and_nonempty(final(tok)@, final(pt)@),
         match res {
             Ok(_) => {
-                &&& tok@.change_made
-                &&& tok@.result === Ok(())
+                &&& final(tok)@.change_made
+                &&& final(tok)@.result === Ok(())
                 //&&& !candidate_mapping_overlaps_existing_vmem(interp_to_l0(old(tok)@, old(pt)@), vaddr as nat, pte@)
             },
             Err(_) => {
-                &&& tok@ == old(tok)@
-                &&& candidate_mapping_overlaps_existing_vmem(interp_to_l0(tok@, pt@), vaddr as nat, pte@)
+                &&& final(tok)@ == old(tok)@
+                &&& candidate_mapping_overlaps_existing_vmem(interp_to_l0(final(tok)@, final(pt)@), vaddr as nat, pte@)
             },
         },
-        tok.inv(),
+        final(tok).inv(),
 {
     let ghost rebuild_root_pt = |pt_new, new_regions| pt_new;
     match map_frame_aux(Tracked(tok), *pt, 0, pml4, 0, vaddr, pte, Ghost(rebuild_root_pt)) {
@@ -2299,9 +2299,9 @@ fn is_directory_empty(Tracked(tok): Tracked<&mut WrappedUnmapToken>, Ghost(pt): 
         old(tok).inv(),
         inv_at(old(tok)@, pt, layer as nat, ptr),
     ensures
-       tok@ == old(tok)@,
-       tok.inv(),
-       res === empty_at(tok@, pt, layer as nat, ptr),
+       final(tok)@ == old(tok)@,
+       final(tok).inv(),
+       res === empty_at(final(tok)@, pt, layer as nat, ptr),
 {
     let mut idx = 0;
     let num_entries = x86_arch_exec.num_entries(layer);
@@ -2368,26 +2368,26 @@ fn insert_empty_directory(
         candidate_mapping_overlaps_existing_vmem(interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp(), vaddr as nat, pte@)
                     <==> candidate_mapping_overlaps_existing_vmem(interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])), vaddr as nat, pte@),
     ensures
-        tok.inv(),
-        !tok@.change_made,
-        inv_at(tok@, res.0@, layer as nat, ptr),
+        final(tok).inv(),
+        !final(tok)@.change_made,
+        inv_at(final(tok)@, res.0@, layer as nat, ptr),
         !old(tok)@.regions.contains_key(res.1@),
-        tok@.regions.dom() == old(tok)@.regions.dom().insert(res.1@),
-        tok@.pt_mem.pml4 == old(tok)@.pt_mem.pml4,
-        tok@.args == old(tok)@.args,
-        tok@.orig_st == old(tok)@.orig_st,
+        final(tok)@.regions.dom() == old(tok)@.regions.dom().insert(res.1@),
+        final(tok)@.pt_mem.pml4 == old(tok)@.pt_mem.pml4,
+        final(tok)@.args == old(tok)@.args,
+        final(tok)@.orig_st == old(tok)@.orig_st,
         //tok.alloc_available_pages() == old(tok)@.alloc_available_pages() - 1,
-        forall|i: nat| #![auto] i < X86_NUM_ENTRIES && i != idx ==> entry_at_spec(tok@, res.0@, layer as nat, ptr, i)@ == entry_at_spec(old(tok)@, res.0@, layer as nat, ptr, i)@,
-        forall|r: MemRegion| r != res.0@.region && r != res.0@.entries[idx as int]->Some_0.region ==> tok@.regions[r] == old(tok)@.regions[r],
+        forall|i: nat| #![auto] i < X86_NUM_ENTRIES && i != idx ==> entry_at_spec(final(tok)@, res.0@, layer as nat, ptr, i)@ == entry_at_spec(old(tok)@, res.0@, layer as nat, ptr, i)@,
+        forall|r: MemRegion| r != res.0@.region && r != res.0@.entries[idx as int]->Some_0.region ==> final(tok)@.regions[r] == old(tok)@.regions[r],
         ({ let pt_with_empty = res.0@; let new_dir_region = res.1; let new_dir_entry = res.2;
            let rebuild_root_pt_inner = res.3@;
            let new_dir_pt = pt_with_empty.entries[idx as int]->Some_0;
            let entry_base = x86_arch_spec.entry_base(layer as nat, base as nat, idx as nat);
-           let new_dir_interp = interp_at(tok@, new_dir_pt, (layer + 1) as nat, new_dir_region.base, entry_base);
+           let new_dir_interp = interp_at(final(tok)@, new_dir_pt, (layer + 1) as nat, new_dir_region.base, entry_base);
            let interp = interp_at(old(tok)@, pt, layer as nat, ptr, base as nat);
-           &&& entry_at_spec(tok@, pt_with_empty, layer as nat, ptr, idx as nat) == new_dir_entry
-           &&& entry_at_spec(tok@, pt_with_empty, layer as nat, ptr, idx as nat)@ is Directory
-           &&& entry_at_spec(tok@, pt_with_empty, layer as nat, ptr, idx as nat)@->Directory_addr == new_dir_region.base
+           &&& entry_at_spec(final(tok)@, pt_with_empty, layer as nat, ptr, idx as nat) == new_dir_entry
+           &&& entry_at_spec(final(tok)@, pt_with_empty, layer as nat, ptr, idx as nat)@ is Directory
+           &&& entry_at_spec(final(tok)@, pt_with_empty, layer as nat, ptr, idx as nat)@->Directory_addr == new_dir_region.base
            &&& new_dir_interp == interp.new_empty_dir(idx as nat)
            &&& new_dir_interp.empty()
            &&& new_dir_interp.inv()
@@ -2395,23 +2395,23 @@ fn insert_empty_directory(
            &&& pt_with_empty.entries == pt.entries.update(idx as int, Some(new_dir_pt))
            &&& pt_with_empty.used_regions == pt.used_regions.insert(new_dir_region@)
            &&& new_dir_pt.region == new_dir_region@
-           &&& no_empty_directories(tok@, new_dir_pt, (layer + 1) as nat, new_dir_region.base)
+           &&& no_empty_directories(final(tok)@, new_dir_pt, (layer + 1) as nat, new_dir_region.base)
            &&& forall|tok_new, pt_new_inner, new_regions|
-              #[trigger] map_builder_pre(tok@, new_dir_pt, tok_new, pt_new_inner, layer as nat + 1, new_dir_region.base, new_regions)
+              #[trigger] map_builder_pre(final(tok)@, new_dir_pt, tok_new, pt_new_inner, layer as nat + 1, new_dir_region.base, new_regions)
               ==> {
                   &&& inv(tok_new, rebuild_root_pt_inner(pt_new_inner, new_regions))
                   &&& interp_at(tok_new, pt_new_inner, layer as nat + 1, new_dir_region.base, entry_base as nat).interp()
-                          == interp_at(tok@, new_dir_pt, layer as nat + 1, new_dir_region.base, entry_base as nat).interp()
+                          == interp_at(final(tok)@, new_dir_pt, layer as nat + 1, new_dir_region.base, entry_base as nat).interp()
                        ==> interp_to_l0(tok_new, rebuild_root_pt_inner(pt_new_inner, new_regions))
-                               == interp_to_l0(tok@, rebuild_root_pt_inner(new_dir_pt, set![]))
+                               == interp_to_l0(final(tok)@, rebuild_root_pt_inner(new_dir_pt, set![]))
                   &&& interp_at(tok_new, pt_new_inner, layer as nat + 1, new_dir_region.base, entry_base as nat).interp()
-                          === interp_at(tok@, new_dir_pt, layer as nat + 1, new_dir_region.base, entry_base as nat).interp().insert(vaddr as nat, pte@)
+                          === interp_at(final(tok)@, new_dir_pt, layer as nat + 1, new_dir_region.base, entry_base as nat).interp().insert(vaddr as nat, pte@)
                        ==> interp_to_l0(tok_new, rebuild_root_pt_inner(pt_new_inner, new_regions))
-                               === interp_to_l0(tok@, rebuild_root_pt_inner(new_dir_pt, set![])).insert(vaddr as nat, pte@)
+                               === interp_to_l0(final(tok)@, rebuild_root_pt_inner(new_dir_pt, set![])).insert(vaddr as nat, pte@)
            }
-           &&& interp_to_l0(tok@, rebuild_root_pt_inner(new_dir_pt, set![])) == interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![]))
-           &&& candidate_mapping_overlaps_existing_vmem(interp_at(tok@, new_dir_pt, layer as nat + 1, new_dir_region.base, entry_base as nat).interp(), vaddr as nat, pte@)
-               <==> candidate_mapping_overlaps_existing_vmem(interp_to_l0(tok@, rebuild_root_pt_inner(new_dir_pt, set![])), vaddr as nat, pte@)
+           &&& interp_to_l0(final(tok)@, rebuild_root_pt_inner(new_dir_pt, set![])) == interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![]))
+           &&& candidate_mapping_overlaps_existing_vmem(interp_at(final(tok)@, new_dir_pt, layer as nat + 1, new_dir_region.base, entry_base as nat).interp(), vaddr as nat, pte@)
+               <==> candidate_mapping_overlaps_existing_vmem(interp_to_l0(final(tok)@, rebuild_root_pt_inner(new_dir_pt, set![])), vaddr as nat, pte@)
         }),
 {
     broadcast use
@@ -2881,33 +2881,33 @@ fn unmap_aux(
                                 === interp_to_l0(old(tok)@, rebuild_root_pt(pt, set![])).remove(vaddr as nat)
         }
     ensures
-        tok.inv(),
-        tok@.pt_mem.pml4 == old(tok)@.pt_mem.pml4,
+        final(tok).inv(),
+        final(tok)@.pt_mem.pml4 == old(tok)@.pt_mem.pml4,
         match res {
             Ok(resv) => {
                 let (pt_res, removed_regions) = resv@;
-                &&& interp_at(tok@, pt_res, layer as nat, ptr, base as nat).interp()
+                &&& interp_at(final(tok)@, pt_res, layer as nat, ptr, base as nat).interp()
                     == interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp().remove(vaddr as nat)
                 // We return the regions that we removed
-                &&& tok@.regions.dom() == old(tok)@.regions.dom().difference(removed_regions)
+                &&& final(tok)@.regions.dom() == old(tok)@.regions.dom().difference(removed_regions)
                 &&& pt_res.used_regions == pt.used_regions.difference(removed_regions)
                 &&& removed_regions.subset_of(old(tok)@.regions.dom())
                 &&& removed_regions.subset_of(pt.used_regions)
                 // Invariant preserved
-                &&& inv_at(tok@, pt_res, layer as nat, ptr)
-                &&& no_empty_directories(tok@, pt_res, layer as nat, ptr)
+                &&& inv_at(final(tok)@, pt_res, layer as nat, ptr)
+                &&& no_empty_directories(final(tok)@, pt_res, layer as nat, ptr)
                 &&& interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp().contains_key(vaddr as nat)
                 // We only touch regions in pt.used_regions
                 &&& (forall|r: MemRegion|
                      !pt.used_regions.contains(r) ==>
-                     #[trigger] tok@.regions[r] === old(tok)@.regions[r])
+                     #[trigger] final(tok)@.regions[r] === old(tok)@.regions[r])
                 &&& pt_res.region === pt.region
-                &&& tok@.change_made
-                &&& tok@.args == old(tok)@.args
+                &&& final(tok)@.change_made
+                &&& final(tok)@.args == old(tok)@.args
             },
             Err(e) => {
                 // If error, unchanged
-                &&& tok@ === old(tok)@
+                &&& final(tok)@ === old(tok)@
                 &&& !interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp().contains_key(vaddr as nat)
             },
         },
@@ -3344,19 +3344,19 @@ pub fn unmap(Tracked(tok): Tracked<&mut WrappedUnmapToken>, pt: &mut Ghost<PTDir
         pml4 == old(tok)@.pt_mem.pml4,
         old(tok)@.args == (OpArgs::Unmap { base: vaddr }),
     ensures
-        inv_and_nonempty(tok@, pt@),
+        inv_and_nonempty(final(tok)@, final(pt)@),
         match res {
             Ok(_) => {
-                &&& tok@.change_made
-                &&& tok@.args == old(tok)@.args
+                &&& final(tok)@.change_made
+                &&& final(tok)@.args == old(tok)@.args
                 &&& interp_to_l0(old(tok)@, old(pt)@).contains_key(vaddr as nat)
             },
             Err(_) => {
-                &&& tok@ == old(tok)@
-                &&& !interp_to_l0(old(tok)@, pt@).contains_key(vaddr as nat)
+                &&& final(tok)@ == old(tok)@
+                &&& !interp_to_l0(old(tok)@, final(pt)@).contains_key(vaddr as nat)
             },
         },
-        tok.inv(),
+        final(tok).inv(),
 {
     let ghost rebuild_root_pt = |pt_new, removed_regions| pt_new;
     match unmap_aux(Tracked(tok), *pt, 0, pml4, 0, vaddr, frame, Ghost(rebuild_root_pt)) {
@@ -3425,27 +3425,27 @@ fn protect_aux(
                             === #[trigger] interp_to_l0(old(tok)@, root_pt).insert(vaddr as nat, new_pte)
         }
     ensures
-        tok.inv(),
-        tok@.pt_mem.pml4 == old(tok)@.pt_mem.pml4,
+        final(tok).inv(),
+        final(tok)@.pt_mem.pml4 == old(tok)@.pt_mem.pml4,
         match res {
             Ok(_) => {
-                &&& tok@.regions.dom() == old(tok)@.regions.dom()
+                &&& final(tok)@.regions.dom() == old(tok)@.regions.dom()
                 // Invariant preserved
-                &&& inv_at(tok@, pt, layer as nat, ptr)
-                &&& no_empty_directories(tok@, pt, layer as nat, ptr)
+                &&& inv_at(final(tok)@, pt, layer as nat, ptr)
+                &&& no_empty_directories(final(tok)@, pt, layer as nat, ptr)
                 // If it wasn't empty before, it's not empty now
-                &&& !empty_at(old(tok)@, pt, layer as nat, ptr) ==> !empty_at(tok@, pt, layer as nat, ptr)
+                &&& !empty_at(old(tok)@, pt, layer as nat, ptr) ==> !empty_at(final(tok)@, pt, layer as nat, ptr)
                 &&& interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp().contains_key(vaddr as nat)
                 // We only touch regions in pt.used_regions
                 &&& (forall|r: MemRegion|
                      !pt.used_regions.contains(r) ==>
-                     #[trigger] tok@.regions[r] === old(tok)@.regions[r])
-                &&& tok@.change_made
-                &&& tok@.args == old(tok)@.args
+                     #[trigger] final(tok)@.regions[r] === old(tok)@.regions[r])
+                &&& final(tok)@.change_made
+                &&& final(tok)@.args == old(tok)@.args
             },
             Err(e) => {
                 // If error, unchanged
-                &&& tok@ === old(tok)@
+                &&& final(tok)@ === old(tok)@
                 &&& !interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp().contains_key(vaddr as nat)
             },
         },
@@ -3733,19 +3733,19 @@ pub fn protect(Tracked(tok): Tracked<&mut WrappedProtectToken>, pt: &mut Ghost<P
         pml4 == old(tok)@.pt_mem.pml4,
         old(tok)@.args == (OpArgs::Protect { base: vaddr, flags: *permissions }),
     ensures
-        inv_and_nonempty(tok@, pt@),
+        inv_and_nonempty(final(tok)@, final(pt)@),
         match res {
             Ok(_) => {
-                &&& tok@.change_made
-                &&& tok@.args == old(tok)@.args
+                &&& final(tok)@.change_made
+                &&& final(tok)@.args == old(tok)@.args
                 &&& interp_to_l0(old(tok)@, old(pt)@).contains_key(vaddr as nat)
             },
             Err(_) => {
-                &&& tok@ == old(tok)@
-                &&& !interp_to_l0(old(tok)@, pt@).contains_key(vaddr as nat)
+                &&& final(tok)@ == old(tok)@
+                &&& !interp_to_l0(old(tok)@, final(pt)@).contains_key(vaddr as nat)
             },
         },
-        tok.inv(),
+        final(tok).inv(),
 {
     if let Ok(_) = protect_aux(Tracked(tok), *pt, *pt, 0, pml4, 0, vaddr, permissions) {
         assert(inv_and_nonempty(tok@, pt@));
