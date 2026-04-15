@@ -1,6 +1,8 @@
 // #![feature(nonnull_slice_from_raw_parts)]
 //#![no_std]
-#![feature(custom_inner_attributes)]
+#![allow(non_snake_case)]
+#![allow(non_upper_case_globals)]
+#![cfg_attr(not(verus_keep_ghost), feature(custom_inner_attributes))]
 #![cfg_attr(feature="linuxmodule", no_std)]
 #[cfg(not(feature="linuxmodule"))]
 extern crate alloc;
