@@ -242,7 +242,7 @@ impl WrappedTokenView {
                                         crate::impl_u::indexing::lemma_entry_base_from_index(l2_base, l2_bidx as nat, L2_ENTRY_SIZE as nat);
                                     };
                                     assert(interp_l2.interp_of_entry(l2_bidx as nat).dom() =~= set![l3_base as nat]);
-                                    //assert(aligned(vaddr as nat, L2_ENTRY_SIZE as nat));
+                                    assert(aligned(vaddr as nat, L2_ENTRY_SIZE as nat));
                                     assert(align_to_usize(vaddr, L2_ENTRY_SIZE) == vaddr);
                                     assert(self.pt_mem.is_base_pt_walk(vaddr));
                                 },
@@ -301,7 +301,7 @@ impl WrappedTokenView {
                                                 crate::impl_u::indexing::lemma_entry_base_from_index(l2_base, l2_bidx as nat, L2_ENTRY_SIZE as nat);
                                             };
                                             assert(interp_l3.interp_of_entry(l3_bidx as nat).dom() =~= set![l4_base as nat]);
-                                            assert(aligned(vaddr as nat, L3_ENTRY_SIZE as nat));
+                                            //assert(aligned(vaddr as nat, L3_ENTRY_SIZE as nat));
                                             assert(align_to_usize(vaddr, L3_ENTRY_SIZE) == vaddr);
                                             assert(self.pt_mem.is_base_pt_walk(vaddr));
                                         },
