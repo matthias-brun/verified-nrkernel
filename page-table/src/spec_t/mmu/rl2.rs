@@ -1796,7 +1796,7 @@ proof fn next_step_preserves_wf(pre: State, post: State, c: Constants, step: Ste
     assert(post.pt_mem.mem.dom() =~= pre.pt_mem.mem.dom());
 }
 
-#[verifier::rlimit(1000)] #[verifier(spinoff_prover)]
+#[verifier::rlimit(200)] #[verifier(spinoff_prover)]
 proof fn next_step_preserves_inv_inflight_walks_are_prefixes(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
     requires
         pre.wf(c),
@@ -1855,33 +1855,21 @@ proof fn next_step_preserves_inv_inflight_walks_are_prefixes(pre: State, post: S
                     if wrcore == core {
                         lemma_step_Writeback_preserves_writer_mem(pre, post, c, core, lbl);
                     } else {
-                        // TODO: Kind of unstable and really ugly proof
-                        let pre_walkp0 = Walk { vaddr: walk.vaddr, path: seq![], complete: false };
-                        let pre_walkp1 = walk_next(pre.core_mem(core), pre_walkp0);
-                        let pre_walkp2 = walk_next(pre.core_mem(core), pre_walkp1);
-                        let pre_walkp3 = walk_next(pre.core_mem(core), pre_walkp2);
-                        let pre_walkp4 = walk_next(pre.core_mem(core), pre_walkp3);
-                        let post_walkp0 = Walk { vaddr: walk.vaddr, path: seq![], complete: false };
-                        let post_walkp1 = walk_next(post.core_mem(core), post_walkp0);
-                        let post_walkp2 = walk_next(post.core_mem(core), post_walkp1);
-                        let post_walkp3 = walk_next(post.core_mem(core), post_walkp2);
-                        let post_walkp4 = walk_next(post.core_mem(core), post_walkp3);
                         reveal(rl2::walk_next);
-                        //lemma_mem_view_after_step_write(pre, post, c, lbl);
-                        //pt_mem::PTMem::lemma_pt_walk(pre.writer_mem(), walk.vaddr);
+                        assert(!walk.complete);
                         pre.pt_mem.lemma_write_seq(pre.writer_sbuf());
                         post.pt_mem.lemma_write_seq(post.writer_sbuf());
                         assert(bit!(0usize) == 1) by (bit_vector);
                         assert(pre.core_mem(core) == pre.pt_mem);
                         assert(post.core_mem(core) == post.pt_mem);
-                        // The writeback address is in the writer's store buffer
-                        let wraddr = pre.sbuf[wrcore][0].0;
-                        assert(pre.writer_sbuf().contains_fst(wraddr));
-                        // TODO: extract to lemma, also used in lemma_valid_not_pending_implies_equal
+                        // Prove alignment of walk path addresses (needed for inv_mapping__valid_is_not_in_sbuf)
                         assert(forall|i| #![auto] 0 <= i < walk.path.len() ==> aligned(walk.path[i].0 as nat, 8)) by {
                             broadcast use PDE::lemma_view_addr_aligned;
                             crate::spec_t::mmu::translation::lemma_bit_indices_less_512(walk.vaddr);
                         };
+                        // The writeback address is in the writer's store buffer
+                        let wraddr = pre.sbuf[wrcore][0].0;
+                        assert(pre.writer_sbuf().contains_fst(wraddr));
                         // Walk path addresses are not the writeback address, so they read the same in pre and post
                         assert(forall|i| #![auto] 0 <= i < walk.path.len() ==> walk.path[i].0 != wraddr) by {
                             assert forall|i| 0 <= i < walk.path.len() implies #[trigger] walk.path[i].0 != wraddr by {
@@ -1891,31 +1879,7 @@ proof fn next_step_preserves_inv_inflight_walks_are_prefixes(pre: State, post: S
                         };
                         assert(forall|i| #![auto] 0 <= i < walk.path.len() ==>
                             pre.pt_mem.read(walk.path[i].0) == post.pt_mem.read(walk.path[i].0));
-                        if walk.path.len() == 0 {
-                            assert(walk == pre_walkp0);
-                        } else if walk.path.len() == 1 {
-                            assert(walk == pre_walkp1);
-
-                            assert(post_walkp1.path[0] == pre_walkp1.path[0]);
-                        } else if walk.path.len() == 2 {
-                            assert(walk == pre_walkp2);
-                            assert(!pre_walkp1.complete);
-
-                            assert(post_walkp2.path.len() == pre_walkp2.path.len());
-                            assert(post_walkp2.path[0] == pre_walkp2.path[0]);
-                            assert(post_walkp2.path[1] == pre_walkp2.path[1]);
-                        } else if walk.path.len() == 3 {
-                            assert(walk == pre_walkp3);
-                            assert(!pre_walkp1.complete);
-                            assert(!pre_walkp2.complete);
-
-                            assert(post_walkp3.path.len() == pre_walkp3.path.len());
-                            assert(post_walkp3.path[0] == pre_walkp3.path[0]);
-                            assert(post_walkp3.path[1] == pre_walkp3.path[1]);
-                            assert(post_walkp3.path[2] == pre_walkp3.path[2]);
-                        } else {
-                            assert(false);
-                        }
+                        lemma_iter_walk_prefix_mem_agree(pre.pt_mem, post.pt_mem, walk);
                     }
                 };
             };
@@ -2566,6 +2530,43 @@ broadcast proof fn lemma_writes_tso_empty_implies_sbuf_empty(pre: State, c: Cons
         assert_by_contradiction!(pre.sbuf[core] =~= seq![], {
             assert(pre.sbuf[core].contains(pre.sbuf[core][0]));
         });
+    }
+}
+
+proof fn lemma_iter_walk_prefix_mem_agree(mem1: PTMem, mem2: PTMem, walk: Walk)
+    requires
+        mem1.pml4 == mem2.pml4,
+        is_iter_walk_prefix(mem1, walk),
+        walk.path.len() <= 3,
+        forall|i| #![auto] 0 <= i < walk.path.len() ==> mem1.read(walk.path[i].0) == mem2.read(walk.path[i].0),
+    ensures
+        is_iter_walk_prefix(mem2, walk),
+{
+    reveal(rl2::walk_next);
+    let walkp0 = Walk { vaddr: walk.vaddr, path: seq![], complete: false };
+    let pre_walkp1 = walk_next(mem1, walkp0);
+    let post_walkp1 = walk_next(mem2, walkp0);
+    if walk.path.len() == 0 {
+    } else if walk.path.len() == 1 {
+        assert(post_walkp1.path[0] == pre_walkp1.path[0]);
+    } else if walk.path.len() == 2 {
+        assert(!pre_walkp1.complete);
+        let pre_walkp2 = walk_next(mem1, pre_walkp1);
+        let post_walkp2 = walk_next(mem2, post_walkp1);
+        assert(post_walkp2.path[0] == pre_walkp2.path[0]);
+        assert(post_walkp2.path[1] == pre_walkp2.path[1]);
+    } else if walk.path.len() == 3 {
+        assert(!pre_walkp1.complete);
+        let pre_walkp2 = walk_next(mem1, pre_walkp1);
+        let post_walkp2 = walk_next(mem2, post_walkp1);
+        assert(!pre_walkp2.complete);
+        let pre_walkp3 = walk_next(mem1, pre_walkp2);
+        let post_walkp3 = walk_next(mem2, post_walkp2);
+        assert(post_walkp3.path[0] == pre_walkp3.path[0]);
+        assert(post_walkp3.path[1] == pre_walkp3.path[1]);
+        assert(post_walkp3.path[2] == pre_walkp3.path[2]);
+    } else {
+        assert(false);
     }
 }
 
