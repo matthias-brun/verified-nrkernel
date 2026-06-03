@@ -1796,7 +1796,7 @@ proof fn next_step_preserves_wf(pre: State, post: State, c: Constants, step: Ste
     assert(post.pt_mem.mem.dom() =~= pre.pt_mem.mem.dom());
 }
 
-#[verifier::rlimit(150)] #[verifier(spinoff_prover)]
+#[verifier::rlimit(1000)] #[verifier(spinoff_prover)]
 proof fn next_step_preserves_inv_inflight_walks_are_prefixes(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
     requires
         pre.wf(c),
@@ -1874,11 +1874,23 @@ proof fn next_step_preserves_inv_inflight_walks_are_prefixes(pre: State, post: S
                         assert(bit!(0usize) == 1) by (bit_vector);
                         assert(pre.core_mem(core) == pre.pt_mem);
                         assert(post.core_mem(core) == post.pt_mem);
+                        // The writeback address is in the writer's store buffer
+                        let wraddr = pre.sbuf[wrcore][0].0;
+                        assert(pre.writer_sbuf().contains_fst(wraddr));
                         // TODO: extract to lemma, also used in lemma_valid_not_pending_implies_equal
                         assert(forall|i| #![auto] 0 <= i < walk.path.len() ==> aligned(walk.path[i].0 as nat, 8)) by {
                             broadcast use PDE::lemma_view_addr_aligned;
                             crate::spec_t::mmu::translation::lemma_bit_indices_less_512(walk.vaddr);
                         };
+                        // Walk path addresses are not the writeback address, so they read the same in pre and post
+                        assert(forall|i| #![auto] 0 <= i < walk.path.len() ==> walk.path[i].0 != wraddr) by {
+                            assert forall|i| 0 <= i < walk.path.len() implies #[trigger] walk.path[i].0 != wraddr by {
+                                assert(pre.core_mem(core).read(walk.path[i].0) & 1 == 1);
+                                assert(!pre.writer_sbuf().contains_fst(walk.path[i].0));
+                            };
+                        };
+                        assert(forall|i| #![auto] 0 <= i < walk.path.len() ==>
+                            pre.pt_mem.read(walk.path[i].0) == post.pt_mem.read(walk.path[i].0));
                         if walk.path.len() == 0 {
                             assert(walk == pre_walkp0);
                         } else if walk.path.len() == 1 {
@@ -1900,7 +1912,7 @@ proof fn next_step_preserves_inv_inflight_walks_are_prefixes(pre: State, post: S
                             assert(post_walkp3.path.len() == pre_walkp3.path.len());
                             assert(post_walkp3.path[0] == pre_walkp3.path[0]);
                             assert(post_walkp3.path[1] == pre_walkp3.path[1]);
-                            //assert(post_walkp3.path[2] == pre_walkp3.path[2]);
+                            assert(post_walkp3.path[2] == pre_walkp3.path[2]);
                         } else {
                             assert(false);
                         }
