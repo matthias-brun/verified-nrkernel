@@ -31,13 +31,13 @@ pub struct State {
     /// Page table memory
     pt_mem: PTMem,
     /// Per-node state (TLBs)
-    tlbs: Map<Core, Map<usize, PTE>>,
+    tlbs: IMap<Core, IMap<usize, PTE>>,
     /// In-progress page table walks
-    walks: Map<Core, Set<Walk>>,
+    walks: IMap<Core, ISet<Walk>>,
     /// Translation caches
-    cache: Map<Core, Set<Walk>>,
+    cache: IMap<Core, ISet<Walk>>,
     /// Store buffers
-    sbuf: Map<Core, Seq<(usize, usize)>>,
+    sbuf: IMap<Core, Seq<(usize, usize)>>,
     /// History variables. These do not influence the transitions in any way. Neither in enabling
     /// conditions nor in state updates. We only use these during the refinement.
     hist: History,
@@ -46,11 +46,11 @@ pub struct State {
 pub struct History {
     pub happy: bool,
     /// All partial walks since the last invlpg
-    pub walks: Map<Core, Set<Walk>>,
+    pub walks: IMap<Core, ISet<Walk>>,
     pub writes: Writes,
-    pub pending_maps: Map<usize, PTE>,
-    pub pending_unmaps: Map<usize, PTE>,
-    pub pending_protects: Map<usize, PTE>,
+    pub pending_maps: IMap<usize, PTE>,
+    pub pending_unmaps: IMap<usize, PTE>,
+    pub pending_protects: IMap<usize, PTE>,
     pub polarity: Polarity,
 }
 
@@ -59,10 +59,10 @@ pub struct Writes {
     pub core: Core,
     /// Tracks all writes that may cause stale reads due to TSO. Set of addresses. Gets cleared
     /// when the corresponding core drains its store buffer.
-    pub tso: Set<usize>,
+    pub tso: ISet<usize>,
     /// Tracks staleness resulting from non-atomicity and translation caching. Cleared by invlpg if
     /// store buffers are empty.
-    pub nonpos: Set<Core>,
+    pub nonpos: ISet<Core>,
 }
 
 /// Any transition that reads from page table memory takes an arbitrary usize `r`, which is used to
@@ -129,8 +129,8 @@ impl State {
     pub closed spec fn is_happy_writeprotect(self, core: Core, addr: usize, value: usize) -> bool {
         &&& !(self.hist.polarity is Protect) ==> self.can_flip_polarity()
         &&& self.writer_mem().is_prot_write(addr, value)
-        &&& self.hist.writes.tso === set![]
-        &&& self.hist.writes.nonpos === set![]
+        &&& self.hist.writes.tso === iset![]
+        &&& self.hist.writes.nonpos === iset![]
     }
 }
 
@@ -156,18 +156,18 @@ pub closed spec fn step_Invlpg(pre: State, post: State, c: Constants, lbl: Lbl) 
 
     &&& post == State {
         hist: History {
-            walks: pre.hist.walks.insert(core, set![]),
+            walks: pre.hist.walks.insert(core, iset![]),
             writes: Writes {
                 core: pre.hist.writes.core,
-                tso: if core == pre.hist.writes.core { set![] } else { pre.hist.writes.tso },
+                tso: if core == pre.hist.writes.core { iset![] } else { pre.hist.writes.tso },
                 nonpos:
-                    if post.hist.writes.tso === set![] {
+                    if post.hist.writes.tso === iset![] {
                         pre.hist.writes.nonpos.remove(core)
                     } else { pre.hist.writes.nonpos },
             },
-            pending_maps: if core == pre.hist.writes.core { map![] } else { pre.hist.pending_maps },
-            pending_unmaps: if post.hist.writes.nonpos === set![] { map![] } else { pre.hist.pending_unmaps },
-            pending_protects: if post.hist.writes.nonpos === set![] { map![] } else { pre.hist.pending_protects },
+            pending_maps: if core == pre.hist.writes.core { imap![] } else { pre.hist.pending_maps },
+            pending_unmaps: if post.hist.writes.nonpos === iset![] { imap![] } else { pre.hist.pending_unmaps },
+            pending_protects: if post.hist.writes.nonpos === iset![] { imap![] } else { pre.hist.pending_protects },
             ..pre.hist
         },
         ..pre
@@ -438,13 +438,13 @@ pub closed spec fn step_Write(pre: State, post: State, c: Constants, lbl: Lbl) -
     &&& post.hist.writes.tso == pre.hist.writes.tso.insert(addr)
     &&& post.hist.writes.nonpos ==
         if pre.writer_mem().is_nonpos_write(addr, value) || pre.writer_mem().is_prot_write(addr, value) {
-            Set::new(|core| c.valid_core(core))
+            ISet::new(|core| c.valid_core(core))
         } else { pre.hist.writes.nonpos }
     &&& post.hist.writes.core == core
     &&& post.hist.pending_maps
         == if post.hist.polarity is Mapping {
                 pre.hist.pending_maps.union_prefer_right(
-                    Map::new(
+                    IMap::new(
                         |vbase| post.writer_mem()@.contains_key(vbase) && !pre.writer_mem()@.contains_key(vbase),
                         |vbase| post.writer_mem()@[vbase]
                     ))
@@ -452,7 +452,7 @@ pub closed spec fn step_Write(pre: State, post: State, c: Constants, lbl: Lbl) -
     &&& post.hist.pending_unmaps
         == if post.hist.polarity is Unmapping {
                 pre.hist.pending_unmaps.union_prefer_right(
-                    Map::new(
+                    IMap::new(
                         |vbase| pre.writer_mem()@.contains_key(vbase) && !post.writer_mem()@.contains_key(vbase),
                         |vbase| pre.writer_mem()@[vbase]
                     ))
@@ -460,7 +460,7 @@ pub closed spec fn step_Write(pre: State, post: State, c: Constants, lbl: Lbl) -
     &&& post.hist.pending_protects
         == if post.hist.polarity is Protect {
                 pre.hist.pending_protects.union_prefer_right(
-                    Map::new(
+                    IMap::new(
                         |vbase| pre.writer_mem()@.contains_key(vbase)
                                 && post.writer_mem()@[vbase] != pre.writer_mem()@[vbase],
                         |vbase| pre.writer_mem()@[vbase]
@@ -508,10 +508,10 @@ pub closed spec fn step_Barrier(pre: State, post: State, c: Constants, lbl: Lbl)
     &&& post == State {
         hist: History {
             writes: Writes {
-                tso: if core == pre.hist.writes.core { set![] } else { pre.hist.writes.tso },
+                tso: if core == pre.hist.writes.core { iset![] } else { pre.hist.writes.tso },
                 ..pre.hist.writes
             },
-            pending_maps: if core == pre.hist.writes.core { map![] } else { pre.hist.pending_maps },
+            pending_maps: if core == pre.hist.writes.core { imap![] } else { pre.hist.pending_maps },
             ..pre.hist
         },
         ..pre
@@ -547,22 +547,22 @@ pub open spec fn next_step(pre: State, post: State, c: Constants, step: Step, lb
 }
 
 pub closed spec fn init(pre: State, c: Constants) -> bool {
-    &&& pre.tlbs  === Map::new(|core| c.valid_core(core), |core| Map::empty())
-    &&& pre.walks === Map::new(|core| c.valid_core(core), |core| set![])
-    &&& pre.cache === Map::new(|core| c.valid_core(core), |core| set![])
-    &&& pre.sbuf  === Map::new(|core| c.valid_core(core), |core| seq![])
+    &&& pre.tlbs  === IMap::new(|core| c.valid_core(core), |core| IMap::empty())
+    &&& pre.walks === IMap::new(|core| c.valid_core(core), |core| iset![])
+    &&& pre.cache === IMap::new(|core| c.valid_core(core), |core| iset![])
+    &&& pre.sbuf  === IMap::new(|core| c.valid_core(core), |core| seq![])
     &&& pre.hist.happy == true
-    &&& pre.hist.walks === Map::new(|core| c.valid_core(core), |core| set![])
+    &&& pre.hist.walks === IMap::new(|core| c.valid_core(core), |core| iset![])
     //&&& pre.hist.writes.core == ..
-    &&& pre.hist.writes.tso === set![]
-    &&& pre.hist.writes.nonpos === set![]
-    &&& pre.hist.pending_maps === map![]
-    &&& pre.hist.pending_unmaps === map![]
-    &&& pre.hist.pending_protects === map![]
+    &&& pre.hist.writes.tso === iset![]
+    &&& pre.hist.writes.nonpos === iset![]
+    &&& pre.hist.pending_maps === imap![]
+    &&& pre.hist.pending_unmaps === imap![]
+    &&& pre.hist.pending_protects === imap![]
     &&& pre.hist.polarity == Polarity::Mapping
 
     &&& c.valid_core(pre.hist.writes.core)
-    &&& pre.pt_mem.mem === Map::new(|va| aligned(va as nat, 8) && c.in_ptmem_range(va as nat, 8), |va| 0)
+    &&& pre.pt_mem.mem === IMap::new(|va| aligned(va as nat, 8) && c.in_ptmem_range(va as nat, 8), |va| 0)
     &&& aligned(pre.pt_mem.pml4 as nat, 4096)
     &&& c.memories_disjoint()
     &&& pre.phys_mem.len() == c.range_mem.1
@@ -624,8 +624,8 @@ impl State {
     }
 
     pub closed spec fn can_flip_polarity(self) -> bool {
-        &&& self.hist.writes.tso === set![]
-        &&& self.hist.writes.nonpos === set![]
+        &&& self.hist.writes.tso === iset![]
+        &&& self.hist.writes.nonpos === iset![]
     }
 
 } // impl State

@@ -101,7 +101,7 @@ pub open spec fn candidate_mapping_in_bounds_pmem(c: mmu::Constants, pte: PTE) -
 
 // TODO: maybe we can deduplicate these two definitions somehow
 pub open spec fn candidate_mapping_overlaps_existing_vmem_usize(
-    mappings: Map<usize, PTE>,
+    mappings: IMap<usize, PTE>,
     base: usize,
     pte: PTE,
 ) -> bool {
@@ -115,7 +115,7 @@ pub open spec fn candidate_mapping_overlaps_existing_vmem_usize(
 }
 
 pub open spec fn candidate_mapping_overlaps_existing_vmem(
-    mappings: Map<nat, PTE>,
+    mappings: IMap<nat, PTE>,
     base: nat,
     pte: PTE,
 ) -> bool {
@@ -128,7 +128,7 @@ pub open spec fn candidate_mapping_overlaps_existing_vmem(
     }
 }
 
-pub open spec fn candidate_mapping_overlaps_existing_pmem(mappings: Map<nat, PTE>, pte: PTE) -> bool {
+pub open spec fn candidate_mapping_overlaps_existing_pmem(mappings: IMap<nat, PTE>, pte: PTE) -> bool {
     exists|b: nat| #![auto] {
             &&& mappings.contains_key(b)
             &&& overlap(pte.frame, mappings.index(b).frame)
@@ -430,14 +430,14 @@ pub proof fn lemma_x86_arch_spec_inv()
     ensures x86_arch_spec.inv()
 {}
 
-pub open spec fn nat_keys<V>(m: Map<usize, V>) -> Map<nat, V> {
-    Map::new(|k: nat| k <= usize::MAX && m.contains_key(k as usize), |k: nat| m[k as usize])
+pub open spec fn nat_keys<V>(m: IMap<usize, V>) -> IMap<nat, V> {
+    IMap::new(|k: nat| k <= usize::MAX && m.contains_key(k as usize), |k: nat| m[k as usize])
 }
 
-pub open spec fn usize_keys<V>(m: Map<nat, V>) -> Map<usize, V>
+pub open spec fn usize_keys<V>(m: IMap<nat, V>) -> IMap<usize, V>
     recommends forall|k| m.contains_key(k) ==> k <= usize::MAX
 {
-    Map::new(|k: usize| m.contains_key(k as nat), |k: usize| m[k as nat])
+    IMap::new(|k: usize| m.contains_key(k as nat), |k: usize| m[k as nat])
 }
 
 pub open spec fn update_range<A>(s: Seq<A>, idx: int, new: Seq<A>) -> Seq<A>

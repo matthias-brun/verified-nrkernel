@@ -1,5 +1,5 @@
 use vstd::prelude::*;
-use vstd::{ assert_by_contradiction, assert_maps_equal };
+use vstd::{ assert_by_contradiction, assert_imaps_equal };
 
 #[cfg(verus_keep_ghost)]
 use crate::extra::lemma_bits_misc;
@@ -26,14 +26,14 @@ verus! {
 
 pub proof fn lemma_init_implies_empty_map(s: os::State, c: os::Constants)
     requires os::init(c, s),
-    ensures s.interp_pt_mem() === map![]
+    ensures s.interp_pt_mem() === imap![]
 {
     reveal(crate::spec_t::mmu::pt_mem::PTMem::view);
     assert forall|vaddr| #[trigger] s.mmu@.pt_mem.pt_walk(vaddr).result() is Invalid by {
         crate::impl_u::l2_impl::lemma_bitvector_facts_simple();
         crate::spec_t::mmu::translation::lemma_bit_indices_less_512(vaddr);
     };
-    assert(s.interp_pt_mem() =~= map![]);
+    assert(s.interp_pt_mem() =~= imap![]);
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////
@@ -59,7 +59,7 @@ pub proof fn init_implies_inv(c: os::Constants, s: os::State)
                 PTDir {
                     region,
                     entries: new_seq::<Option<PTDir>>(X86_NUM_ENTRIES as nat, None),
-                    used_regions: set![region],
+                    used_regions: iset![region],
                 };
             lemma_new_seq::<Option<PTDir>>(X86_NUM_ENTRIES as nat, None);
             assert forall|i: usize| 0 <= i < 512 implies wtok.regions[region][i as int] == 0 by {
@@ -820,8 +820,8 @@ pub proof fn init_implies_inv_tlb(c: os::Constants, s: os::State)
 {
     to_rl1::init_refines(s.mmu, c.common);
     assert(s.os_ext.shootdown_vec.open_requests.is_empty());
-    Set::lemma_len0_is_empty(s.os_ext.shootdown_vec.open_requests);
-    assert(s.os_ext.shootdown_vec.open_requests === Set::empty());
+    ISet::lemma_len0_is_empty(s.os_ext.shootdown_vec.open_requests);
+    assert(s.os_ext.shootdown_vec.open_requests === ISet::empty());
     assert(s.shootdown_cores_valid(c));
     assert(s.successful_IPI(c));
     assert(s.TLB_dom_subset_of_pt_and_inflight_unmap_vaddr(c));
@@ -1137,7 +1137,7 @@ pub proof fn next_step_preserves_inv_tlb_2(
             assert(s2.shootdown_cores_valid(c));
             assert(forall|core, vaddr: nat| s2.is_unmap_vaddr_core(core, vaddr)
                 <==> s1.is_unmap_vaddr_core(core, vaddr));
-            assert(s1.mmu@.writes.nonpos == Set::new(|core| c.valid_core(core)));
+            assert(s1.mmu@.writes.nonpos == ISet::new(|core| c.valid_core(core)));
             assert(s2.successful_invlpg_unmap(c));
             assert(s2.TLB_dom_subset_of_pt_and_inflight_unmap_vaddr(c));
             assert(s2.TLB_interp_pt_mem_agree(c)) by {
@@ -1163,7 +1163,7 @@ pub proof fn next_step_preserves_inv_tlb_2(
             assert(bit!(0usize) == 1) by (bit_vector);
             lemma_bits_misc();
             assert(s2.all_cores_nonpos_before_shootdown(c)) by {
-                assert(s2.mmu@.writes.nonpos =~= Set::new(|core| c.valid_core(core)));
+                assert(s2.mmu@.writes.nonpos =~= ISet::new(|core| c.valid_core(core)));
             };
             assert(s2.shootdown_cores_valid(c));
             assert(s2.successful_IPI(c));
@@ -1304,7 +1304,7 @@ pub proof fn next_step_preserves_inv_tlb_3(
         os::Step::ProtectInitiateShootdown { core } => {
             assert(forall|core, vaddr: nat| s2.is_unmap_vaddr_core(core, vaddr)
                 <==> s1.is_unmap_vaddr_core(core, vaddr));
-            assert(s1.mmu@.writes.nonpos == Set::new(|core| c.valid_core(core)));
+            assert(s1.mmu@.writes.nonpos == ISet::new(|core| c.valid_core(core)));
             assert(s2.TLB_interp_pt_mem_agree(c)) by {
                 if step is ProtectInitiateShootdown {
                     let vaddr = s1.core_states[core].vaddr();
@@ -1328,7 +1328,7 @@ pub proof fn next_step_preserves_inv_tlb_3(
             assert(bit!(0usize) == 1) by (bit_vector);
             lemma_bits_misc();
             assert(s2.all_cores_nonpos_before_shootdown(c)) by {
-                assert(s2.mmu@.writes.nonpos =~= Set::new(|core| c.valid_core(core)));
+                assert(s2.mmu@.writes.nonpos =~= ISet::new(|core| c.valid_core(core)));
             };
             assert(s2.TLB_interp_pt_mem_agree(c)) by {
                 assert forall|core2: Core, v: usize|
@@ -2171,12 +2171,12 @@ pub proof fn step_MapNoOp_and_step_MapOpChange_preserves_overlap_mem_inv(
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Alternative Definition for inv_inflight_map_no_overlap_inflight_vmem and Equivalence proof
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-pub open spec fn unique_CoreStates(map: Map<Core, os::CoreState>) -> bool {
+pub open spec fn unique_CoreStates(map: IMap<Core, os::CoreState>) -> bool {
     forall|core| #![auto] map.contains_key(core) && !(map[core] is Idle)
         ==> !map.remove(core).values().contains(map[core])
 }
 
-pub open spec fn no_overlap_vmem_values(core_states: Map<Core, os::CoreState>, pt: Map<nat, PTE>) -> bool {
+pub open spec fn no_overlap_vmem_values(core_states: IMap<Core, os::CoreState>, pt: IMap<nat, PTE>) -> bool {
     forall|state1: os::CoreState, state2: os::CoreState|
         core_states.values().contains(state1) && core_states.values().contains(state2)
             && !(state1 is Idle) && !(state2 is Idle)
@@ -2216,8 +2216,8 @@ pub proof fn lemma_unique_and_overlap_values_implies_overlap_vmem(c: os::Constan
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //pub proof fn lemma_insert_idle_corestate_preserves_no_overlap(
 //    c: os::Constants,
-//    core_states: Map<Core, os::CoreState>,
-//    pt: Map<nat, PTE>,
+//    core_states: IMap<Core, os::CoreState>,
+//    pt: IMap<nat, PTE>,
 //    core: Core,
 //)
 //    requires
@@ -2258,8 +2258,8 @@ pub proof fn lemma_unique_and_overlap_values_implies_overlap_vmem(c: os::Constan
 #[verifier(spinoff_prover)]
 pub proof fn lemma_insert_preserves_no_overlap(
     c: os::Constants,
-    core_states: Map<Core, os::CoreState>,
-    pt: Map<nat, PTE>,
+    core_states: IMap<Core, os::CoreState>,
+    pt: IMap<nat, PTE>,
     core: Core,
     new_cs: os::CoreState,
 )
@@ -2325,8 +2325,8 @@ pub proof fn lemma_insert_preserves_no_overlap(
 
 pub proof fn lemma_insert_no_overlap_preserves_no_overlap(
     c: os::Constants,
-    core_states: Map<Core, os::CoreState>,
-    pt: Map<nat, PTE>,
+    core_states: IMap<Core, os::CoreState>,
+    pt: IMap<nat, PTE>,
     core: Core,
     corestate: os::CoreState,
 )
@@ -2405,9 +2405,9 @@ pub proof fn lemma_insert_no_overlap_preserves_no_overlap(
 
 pub proof fn lemma_submap_preserves_no_overlap(
     c: os::Constants,
-    core_states: Map<Core, os::CoreState>,
-    pt: Map<nat, PTE>,
-    sub_pt: Map<nat, PTE>,
+    core_states: IMap<Core, os::CoreState>,
+    pt: IMap<nat, PTE>,
+    sub_pt: IMap<nat, PTE>,
 )
     requires
         unique_CoreStates(core_states),
@@ -2625,7 +2625,7 @@ pub proof fn lemma_candidate_mapping_inflight_pmem_overlap_hl_implies_os(
 // usefull lemmata about maps
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-pub proof fn lemma_map_insert_values_equality<A, B>(map: Map<A, B>, key: A, value: B)
+pub proof fn lemma_map_insert_values_equality<A, B>(map: IMap<A, B>, key: A, value: B)
     requires
         map.contains_key(key),
     ensures
@@ -2650,7 +2650,7 @@ pub proof fn lemma_map_insert_values_equality<A, B>(map: Map<A, B>, key: A, valu
     assert(map.values().insert(value) =~= map.insert(key, value).values().insert(map.index(key)));
 }
 
-pub proof fn lemma_map_insert_value<A, B>(map: Map<A, B>, key: A, value: B)
+pub proof fn lemma_map_insert_value<A, B>(map: IMap<A, B>, key: A, value: B)
     ensures map.insert(key, value).values().contains(value),
 {
     assert(map.insert(key, value).contains_key(key));

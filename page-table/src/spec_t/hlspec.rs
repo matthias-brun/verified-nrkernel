@@ -29,12 +29,12 @@ pub struct Constants {
 pub struct State {
     /// Byte-indexed virtual memory
     pub mem: Seq<u8>,
-    pub thread_state: Map<nat, ThreadState>,
+    pub thread_state: IMap<nat, ThreadState>,
     /// `mappings` constrains the domain of mem and tracks the flags. We could instead move the
     /// flags into `map` as well and write the specification exclusively in terms of `map` but that
     /// also makes some of the enabling conditions awkward, e.g. full mappings have the same flags, etc.
     /// But this is *not* a page table. It's not used for any sort of translation.
-    pub mappings: Map<nat, PTE>,
+    pub mappings: IMap<nat, PTE>,
     pub sound: bool,
 }
 
@@ -109,13 +109,13 @@ pub open spec fn wf(c: Constants, s: State) -> bool {
 
 pub open spec fn init(c: Constants, s: State) -> bool {
     &&& s.mem.len() === MAX_BASE
-    &&& s.mappings === map![]
+    &&& s.mappings === imap![]
     &&& forall|id: nat| id < c.thread_no ==> s.thread_state[id] is Idle
     &&& wf(c, s)
     &&& s.sound
 }
 
-pub open spec fn is_in_mapped_region(phys_mem_size: nat, mappings: Map<nat, PTE>, vaddr: nat) -> bool {
+pub open spec fn is_in_mapped_region(phys_mem_size: nat, mappings: IMap<nat, PTE>, vaddr: nat) -> bool {
     exists|base: nat, pte: PTE| {
         &&& #[trigger] mappings.contains_pair(base, pte)
         &&& between(vaddr, base, base + pte.frame.size)
@@ -168,7 +168,7 @@ impl ThreadState {
 }
 
 pub open spec fn candidate_mapping_overlaps_inflight_vmem(
-    inflightargs: Set<ThreadState>,
+    inflightargs: ISet<ThreadState>,
     base: nat,
     candidate_size: nat,
 ) -> bool {
@@ -180,7 +180,7 @@ pub open spec fn candidate_mapping_overlaps_inflight_vmem(
 }
 
 pub open spec fn candidate_mapping_overlaps_inflight_pmem(
-    inflightargs: Set<ThreadState>,
+    inflightargs: ISet<ThreadState>,
     candidate: PTE,
 ) -> bool {
     exists|b: ThreadState| {
@@ -292,8 +292,8 @@ pub open spec fn step_MemOpNA(c: Constants, s1: State, s2: State, lbl: RLbl) -> 
 // Map
 ///////////////////////////////////////////////////////////////////////////////////////////////
 pub open spec fn step_Map_sound(
-    mappings: Map<nat, PTE>,
-    inflights: Set<ThreadState>,
+    mappings: IMap<nat, PTE>,
+    inflights: ISet<ThreadState>,
     vaddr: nat,
     pte: PTE,
 ) -> bool {
@@ -303,8 +303,8 @@ pub open spec fn step_Map_sound(
 }
 
 pub open spec fn step_Map_enabled(
-    inflight: Set<ThreadState>,
-    map: Map<nat, PTE>,
+    inflight: ISet<ThreadState>,
+    map: IMap<nat, PTE>,
     vaddr: nat,
     pte: PTE,
 ) -> bool {

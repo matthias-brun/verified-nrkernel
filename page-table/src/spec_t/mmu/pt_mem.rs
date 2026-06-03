@@ -16,7 +16,7 @@ use crate::spec_t::mmu::{ Walk, WalkResult };
 verus! {
 
 pub struct PTMem {
-    pub mem: Map<usize, usize>,
+    pub mem: IMap<usize, usize>,
     pub pml4: usize,
 }
 
@@ -221,8 +221,8 @@ impl PTMem {
 
     /// Making this opaque so `pt_walk` isn't immediately visible in all the OS state machine proofs.
     #[verifier(opaque)]
-    pub open spec fn view(self) -> Map<usize,PTE> {
-        Map::new(
+    pub open spec fn view(self) -> IMap<usize,PTE> {
+        IMap::new(
             |va| self.is_base_pt_walk(va),
             |va| self.pt_walk(va).result()->pte
         )

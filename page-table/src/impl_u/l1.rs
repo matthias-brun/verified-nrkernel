@@ -65,13 +65,13 @@ pub struct Directory {
 // Layer 2: 1024 Pages
 
 impl NodeEntry {
-    pub open spec fn interp(self, base: nat) -> Map<nat, PTE>
+    pub open spec fn interp(self, base: nat) -> IMap<nat, PTE>
         decreases self, 0nat, 0nat
     {
         match self {
-            NodeEntry::Page(p)      => map![base => p],
+            NodeEntry::Page(p)      => imap![base => p],
             NodeEntry::Directory(d) => d.interp_aux(0),
-            NodeEntry::Invalid      => map![],
+            NodeEntry::Invalid      => imap![],
         }
     }
 }
@@ -168,7 +168,7 @@ impl Directory {
         // &&& self.frames_aligned()
     }
 
-    pub open spec(checked) fn interp(self) -> Map<nat, PTE> {
+    pub open spec(checked) fn interp(self) -> IMap<nat, PTE> {
         self.interp_aux(0)
     }
 
@@ -194,7 +194,7 @@ impl Directory {
         (self.entry_base(entry), self.entry_base(entry + 1))
     }
 
-    pub open spec fn interp_of_entry(self, entry: nat) -> Map<nat, PTE>
+    pub open spec fn interp_of_entry(self, entry: nat) -> IMap<nat, PTE>
         decreases self, self.entries.len() - entry, 1nat
     {
         if entry < self.entries.len() {
@@ -267,13 +267,13 @@ impl Directory {
     //    }
     //}
 
-    pub open spec fn interp_aux(self, i: nat) -> Map<nat, PTE>
+    pub open spec fn interp_aux(self, i: nat) -> IMap<nat, PTE>
         decreases self, self.entries.len() - i, 2nat
     {
         if i < self.entries.len() {
             self.interp_aux(i + 1).union_prefer_right(self.interp_of_entry(i))
         } else { // i < self.entries.len()
-            map![]
+            imap![]
         }
     }
 
@@ -512,8 +512,8 @@ impl Directory {
              self.inv(),
              self.empty(),
         ensures
-            self.interp_aux(i) === Map::empty(),
-            self.interp_aux(i).dom() === Set::empty(),
+            self.interp_aux(i) === IMap::empty(),
+            self.interp_aux(i).dom() === ISet::empty(),
         decreases self.arch.layers.len() - self.layer, self.num_entries() - i
     {
         if i >= self.entries.len() {
@@ -521,7 +521,7 @@ impl Directory {
             let rem = self.interp_aux(i + 1);
             let entry_i = self.interp_of_entry(i);
             self.lemma_empty_implies_interp_aux_empty(i + 1);
-            assert(rem.union_prefer_right(entry_i) =~= Map::empty());
+            assert(rem.union_prefer_right(entry_i) =~= IMap::empty());
         }
     }
 
@@ -530,8 +530,8 @@ impl Directory {
              self.inv(),
              self.empty()
         ensures
-            self.interp() === Map::empty(),
-            self.interp().dom() === Set::empty()
+            self.interp() === IMap::empty(),
+            self.interp().dom() === ISet::empty()
     {
         self.lemma_empty_implies_interp_aux_empty(0);
     }
@@ -1200,9 +1200,9 @@ impl Directory {
     //        equal(
     //            self.interp_of_entry(j).insert(base, pte),
     //            match n {
-    //                NodeEntry::Page(p)      => map![self.entry_base(j) => p],
+    //                NodeEntry::Page(p)      => imap![self.entry_base(j) => p],
     //                NodeEntry::Directory(d) => d.interp_aux(0),
-    //                NodeEntry::Invalid      => map![],
+    //                NodeEntry::Invalid      => imap![],
     //            }),
     //    ensures
     //        self.interp_aux(i).insert(base, pte) == self.update(j, n).interp_aux(i),
@@ -1441,9 +1441,9 @@ impl Directory {
     //        equal(
     //            self.interp_of_entry(j).map.insert(base, pte),
     //            match n {
-    //                NodeEntry::Page(p)      => map![self.entry_base(j) => p],
+    //                NodeEntry::Page(p)      => imap![self.entry_base(j) => p],
     //                NodeEntry::Directory(d) => d.interp_aux(0).map,
-    //                NodeEntry::Invalid      => map![],
+    //                NodeEntry::Invalid      => imap![],
     //            }),
     //    ensures
     //        self.interp().map.insert(base, pte) == self.update(j, n).interp().map,
@@ -1682,11 +1682,11 @@ impl Directory {
     //                assert(equal(new_dir_mapped.interp(), new_dir.interp().map_frame(base, pte)->Ok_0));
     //
     //                new_dir.lemma_empty_implies_interp_empty(true);
-    //                assert(new_dir.interp().map =~= map![]);
-    //                assert(new_dir.interp().map_frame(base, pte)->Ok_0.map =~= map![base => pte]);
-    //                assert(self.interp_of_entry(entry).map =~= map![]);
-    //                assert(equal(self.interp_of_entry(entry).map, map![]));
-    //                assert(equal(map![].insert(base, pte), new_dir_mapped.interp().map));
+    //                assert(new_dir.interp().map =~= imap![]);
+    //                assert(new_dir.interp().map_frame(base, pte)->Ok_0.map =~= imap![base => pte]);
+    //                assert(self.interp_of_entry(entry).map =~= imap![]);
+    //                assert(equal(self.interp_of_entry(entry).map, imap![]));
+    //                assert(equal(imap![].insert(base, pte), new_dir_mapped.interp().map));
     //                assert(equal(self.interp_of_entry(entry).map.insert(base, pte), new_dir_mapped.interp().map));
     //                self.lemma_insert_interp_of_entry_implies_insert_interp(entry, base, NodeEntry::Directory(new_dir_mapped), pte, true);
     //
@@ -1873,7 +1873,7 @@ impl Directory {
     //    match self.entries.index(entry as int) {
     //        NodeEntry::Page(p) => {
     //            if aligned(base, self.entry_size()) {
-    //                assert(self.interp_of_entry(entry).map.remove(base) =~= map![]);
+    //                assert(self.interp_of_entry(entry).map.remove(base) =~= imap![]);
     //                assert(self.update(entry, NodeEntry::Invalid).inv());
     //                self.lemma_remove_from_interp_of_entry_implies_remove_from_interp(entry, base, NodeEntry::Invalid, true);
     //            } else {
@@ -1900,11 +1900,11 @@ impl Directory {
     //                        assert(new_d.interp().map.dom().len() == 0);
     //                        assert(d.interp().map.dom().len() == 1);
     //                        assert(d.interp().map.contains_key(base));
-    //                        assert(d.interp().map.dom() =~= set![base]);
+    //                        assert(d.interp().map.dom() =~= iset![base]);
     //                        assert(nself_res.is_Ok());
     //                        assert(equal(self.interp_of_entry(entry).map, d.interp().map));
     //                        assert(equal(d.interp().unmap(base)->Ok_0.map, d.interp().map.remove(base)));
-    //                        assert(self.interp_of_entry(entry).map.remove(base) =~= map![]);
+    //                        assert(self.interp_of_entry(entry).map.remove(base) =~= imap![]);
     //                        assert(self.update(entry, NodeEntry::Invalid).inv());
     //                        self.lemma_remove_from_interp_of_entry_implies_remove_from_interp(entry, base, NodeEntry::Invalid, true);
     //                        assert(equal(nself.interp(), i_nself));
@@ -2060,9 +2060,9 @@ impl Directory {
     //        equal(
     //            self.interp_of_entry(j).map.remove(vaddr),
     //            match n {
-    //                NodeEntry::Page(p)      => map![self.entry_base(j) => p],
+    //                NodeEntry::Page(p)      => imap![self.entry_base(j) => p],
     //                NodeEntry::Directory(d) => d.interp_aux(0).map,
-    //                NodeEntry::Invalid      => map![],
+    //                NodeEntry::Invalid      => imap![],
     //            }),
     //    ensures
     //        equal(self.interp_aux(i).map.remove(vaddr), self.update(j, n).interp_aux(i).map),
@@ -2127,9 +2127,9 @@ impl Directory {
     //        equal(
     //            self.interp_of_entry(j).map.remove(vaddr),
     //            match n {
-    //                NodeEntry::Page(p)      => map![self.entry_base(j) => p],
+    //                NodeEntry::Page(p)      => imap![self.entry_base(j) => p],
     //                NodeEntry::Directory(d) => d.interp_aux(0).map,
-    //                NodeEntry::Invalid      => map![],
+    //                NodeEntry::Invalid      => imap![],
     //            })
     //    ensures
     //        equal(self.interp().map.remove(vaddr), self.update(j, n).interp().map),

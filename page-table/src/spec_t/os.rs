@@ -25,7 +25,7 @@ pub struct Constants {
     /// Constants for mmu and os_ext state machines
     pub common: mmu::Constants,
     //maps User Level Thread to its assigned core
-    pub ult2core: Map<nat, Core>,
+    pub ult2core: IMap<nat, Core>,
     //highest thread_id
     pub ult_no: nat,
 }
@@ -33,7 +33,7 @@ pub struct Constants {
 pub struct State {
     pub mmu: rl3::State,
     pub os_ext: os_ext::State,
-    pub core_states: Map<Core, CoreState>,
+    pub core_states: IMap<Core, CoreState>,
     /// `sound` is a history variable. It doesn't affect the behavior of the state machine but is
     /// used in the refinement.
     pub sound: bool,
@@ -158,8 +158,8 @@ impl Constants {
 // Overlapping inflight memory helper functions for HL-soundness
 ///////////////////////////////////////////////////////////////////////////////////////////////
 pub open spec fn candidate_mapping_overlaps_inflight_pmem(
-    pt: Map<nat, PTE>,
-    inflightargs: Set<CoreState>,
+    pt: IMap<nat, PTE>,
+    inflightargs: ISet<CoreState>,
     candidate: PTE,
 ) -> bool {
     exists|cs: CoreState| #![auto] {
@@ -171,7 +171,7 @@ pub open spec fn candidate_mapping_overlaps_inflight_pmem(
 // TODO: Can this use something like inflight_vmem_region to be closer to
 // candidate_mapping_overlaps_inflight_vmem?
 pub open spec fn candidate_mapping_overlaps_inflight_pmem_corestate(
-    pt: Map<nat, PTE>,
+    pt: IMap<nat, PTE>,
     cs: CoreState,
     candidate: PTE,
 ) -> bool {
@@ -207,15 +207,15 @@ pub open spec fn candidate_mapping_overlaps_inflight_pmem_corestate(
     }
 }
 
-pub open spec fn inflight_vmem_region(pt: Map<nat, PTE>, cs: CoreState) -> MemRegion
+pub open spec fn inflight_vmem_region(pt: IMap<nat, PTE>, cs: CoreState) -> MemRegion
     recommends !(cs is Idle)
 {
     MemRegion { base: cs.vaddr(), size: cs.pte_size(pt) }
 }
 
 pub open spec fn candidate_mapping_overlaps_inflight_vmem(
-    pt: Map<nat, PTE>,
-    inflightargs: Set<CoreState>,
+    pt: IMap<nat, PTE>,
+    inflightargs: ISet<CoreState>,
     base: nat,
     candidate_size: nat,
 ) -> bool {
@@ -290,8 +290,8 @@ pub open spec fn step_Invlpg(c: Constants, s1: State, s2: State, core: Core, lbl
 // Map
 ///////////////////////////////////////////////////////////////////////////////////////////////
 pub open spec fn step_Map_sound(
-    pt: Map<nat, PTE>,
-    inflightargs: Set<CoreState>,
+    pt: IMap<nat, PTE>,
+    inflightargs: ISet<CoreState>,
     vaddr: nat,
     pte: PTE,
 ) -> bool {
@@ -435,8 +435,8 @@ pub open spec fn step_MapEnd(c: Constants, s1: State, s2: State, core: Core, lbl
     &&& c.valid_core(core)
     &&& s1.core_states[core] matches CoreState::MapDone { ult_id, vaddr: vaddr2, pte, result: result2 }
     &&& thread_id == ult_id && vaddr == vaddr2 && result == result2
-    &&& s1.mmu@.writes.tso === set![]
-    &&& s1.mmu@.pending_maps === map![]
+    &&& s1.mmu@.writes.tso === iset![]
+    &&& s1.mmu@.pending_maps === imap![]
     &&& s2.inv_impl() // impl invariant is re-established
 
     // mmu statemachine steps
@@ -573,7 +573,7 @@ pub open spec fn step_UnmapInitiateShootdown(c: Constants, s1: State, s2: State,
     // enabling conditions
     &&& c.valid_core(core)
     &&& s1.core_states[core] matches CoreState::UnmapExecuting { ult_id, vaddr, result: Some(Ok(pte)) }
-    &&& s1.mmu@.writes.tso === set![]
+    &&& s1.mmu@.writes.tso === iset![]
     // mmu statemachine steps
     &&& s2.mmu == s1.mmu
     &&& os_ext::next(s1.os_ext, s2.os_ext, c.common, os_ext::Lbl::InitShootdown { core, vaddr })
@@ -637,9 +637,9 @@ pub open spec fn step_UnmapEnd(c: Constants, s1: State, s2: State, core: Core, l
         _ => false,
     }
     &&& s2.inv_impl() // impl invariant is re-established
-    &&& s1.mmu@.writes.tso === set![]
-    &&& s1.mmu@.writes.nonpos === set![]
-    &&& s1.mmu@.pending_unmaps === map![]
+    &&& s1.mmu@.writes.tso === iset![]
+    &&& s1.mmu@.writes.nonpos === iset![]
+    &&& s1.mmu@.pending_unmaps === imap![]
     // mmu statemachine steps
     &&& s2.mmu == s1.mmu
     &&& os_ext::next(s1.os_ext, s2.os_ext, c.common, os_ext::Lbl::ReleaseLock { core })
@@ -739,7 +739,7 @@ pub open spec fn step_ProtectInitiateShootdown(c: Constants, s1: State, s2: Stat
     // enabling conditions
     &&& c.valid_core(core)
     &&& s1.core_states[core] matches CoreState::ProtectExecuting { ult_id, vaddr, flags, result: Some(Ok(pte)) }
-    &&& s1.mmu@.writes.tso === set![]
+    &&& s1.mmu@.writes.tso === iset![]
     // mmu statemachine steps
     &&& s2.mmu == s1.mmu
     &&& os_ext::next(s1.os_ext, s2.os_ext, c.common, os_ext::Lbl::InitShootdown { core, vaddr })
@@ -772,9 +772,9 @@ pub open spec fn step_ProtectEnd(c: Constants, s1: State, s2: State, core: Core,
         _ => false,
     }
     &&& s2.inv_impl() // impl invariant is re-established
-    &&& s1.mmu@.writes.tso === set![]
-    &&& s1.mmu@.writes.nonpos === set![]
-    &&& s1.mmu@.pending_protects === map![]
+    &&& s1.mmu@.writes.tso === iset![]
+    &&& s1.mmu@.writes.nonpos === iset![]
+    &&& s1.mmu@.pending_protects === imap![]
     // mmu statemachine steps
     &&& s2.mmu == s1.mmu
     &&& os_ext::next(s1.os_ext, s2.os_ext, c.common, os_ext::Lbl::ReleaseLock { core })
@@ -825,11 +825,11 @@ pub open spec fn next(c: Constants, s1: State, s2: State, lbl: RLbl) -> bool {
 
 pub open spec fn init(c: Constants, s: State) -> bool {
     // hardware stuff
-    //&&& s.interp_pt_mem() === Map::empty()
+    //&&& s.interp_pt_mem() === IMap::empty()
     &&& rl3::init(s.mmu, c.common)
     &&& os_ext::init(s.os_ext, c.common)
     // We start with a single directory already allocated for PML4
-    &&& s.os_ext.allocated === set![MemRegion { base: s.mmu@.pt_mem.pml4 as nat, size: 4096 }]
+    &&& s.os_ext.allocated === iset![MemRegion { base: s.mmu@.pt_mem.pml4 as nat, size: 4096 }]
     // and that directory is empty
     &&& forall|i: usize| 0 <= i < 512 ==> #[trigger] s.mmu@.pt_mem.read(add(s.mmu@.pt_mem.pml4, mul(i, 8))) == 0
     //wf of ult2core mapping
@@ -852,7 +852,7 @@ impl Constants {
 }
 
 impl CoreState {
-    pub open spec fn pte_size(self, pt: Map<nat, PTE>) -> nat
+    pub open spec fn pte_size(self, pt: IMap<nat, PTE>) -> nat
         recommends !(self is Idle)
     {
         match self {
@@ -902,7 +902,7 @@ impl CoreState {
         }
     }
 
-    pub open spec fn has_pte(self, pt: Map<nat, PTE>) -> bool {
+    pub open spec fn has_pte(self, pt: IMap<nat, PTE>) -> bool {
         match self {
             CoreState::MapWaiting { pte, .. }
             | CoreState::MapExecuting { pte, .. }
@@ -921,7 +921,7 @@ impl CoreState {
         }
     }
 
-    pub open spec fn paddr(self, pt: Map<nat, PTE>) -> nat
+    pub open spec fn paddr(self, pt: IMap<nat, PTE>) -> nat
         recommends self.has_pte(pt),
     {
         match self {
@@ -1009,12 +1009,12 @@ impl State {
     //         && self.core_states[core] !is UnmapWaiting
     // }
 
-    pub open spec fn interp_pt_mem(self) -> Map<nat, PTE> {
+    pub open spec fn interp_pt_mem(self) -> IMap<nat, PTE> {
         crate::spec_t::mmu::defs::nat_keys(self.mmu@.pt_mem@)
     }
 
-    pub open spec fn inflight_unmap_vaddr(self) -> Set<nat> {
-        Set::new(|va: nat| {
+    pub open spec fn inflight_unmap_vaddr(self) -> ISet<nat> {
+        ISet::new(|va: nat| {
             &&& self.interp_pt_mem().contains_key(va)
             &&& exists|core: Core|
                 self.core_states.contains_key(core) && match self.core_states[core] {
@@ -1043,8 +1043,8 @@ impl State {
         }
     }
 
-    pub open spec fn inflight_mapunmap_vaddr(self) -> Set<nat> {
-        Set::new(|va: nat| {
+    pub open spec fn inflight_mapunmap_vaddr(self) -> ISet<nat> {
+        ISet::new(|va: nat| {
             &&& self.interp_pt_mem().contains_key(va)
             &&& exists|core: Core|
                 self.core_states.contains_key(core) && match self.core_states[core] {
@@ -1111,33 +1111,33 @@ impl State {
         choose|core: Core| self.is_inflight_protect_vaddr_core(va, core)
     }
 
-    pub open spec fn inflight_protect_params(self) -> Map<nat, PTE> {
-        Map::new(
+    pub open spec fn inflight_protect_params(self) -> IMap<nat, PTE> {
+        IMap::new(
             |va| self.is_inflight_protect_vaddr(va),
             |va| self.inflight_protect_core_get_pte(self.choose_inflight_protect_vaddr_core(va))
         )
     }
 
-    pub open spec fn effective_mappings(self) -> Map<nat, PTE> {
+    pub open spec fn effective_mappings(self) -> IMap<nat, PTE> {
         self.interp_pt_mem()
             .union_prefer_right(self.inflight_protect_params())
             .remove_keys(self.inflight_mapunmap_vaddr())
     }
 
-    pub open spec fn has_base_and_pte_for_vaddr(applied_mappings: Map<nat, PTE>, vaddr: int) -> bool {
+    pub open spec fn has_base_and_pte_for_vaddr(applied_mappings: IMap<nat, PTE>, vaddr: int) -> bool {
         exists|base: nat|
             #[trigger] applied_mappings.contains_key(base)
             && between(vaddr as nat, base, base + applied_mappings[base].frame.size)
     }
 
-    pub open spec fn base_and_pte_for_vaddr(applied_mappings: Map<nat, PTE>, vaddr: int) -> (nat, PTE) {
+    pub open spec fn base_and_pte_for_vaddr(applied_mappings: IMap<nat, PTE>, vaddr: int) -> (nat, PTE) {
         let base = choose|base: nat|
             #[trigger] applied_mappings.contains_key(base)
             && between(vaddr as nat, base, base + applied_mappings[base].frame.size);
         (base, applied_mappings[base])
     }
 
-    pub open spec fn vmem_apply_mappings(applied_mappings: Map<nat, PTE>, phys_mem: Seq<u8>) -> Seq<u8> {
+    pub open spec fn vmem_apply_mappings(applied_mappings: IMap<nat, PTE>, phys_mem: Seq<u8>) -> Seq<u8> {
         Seq::new(
             MAX_BASE,
             |vaddr: int| {
@@ -1158,7 +1158,7 @@ impl State {
     ///
     /// This definition ignores inflight mprotects. We disregard the permissions when interpreting
     /// the memory, so mprotects have no effect.
-    pub open spec fn applied_mappings(self) -> Map<nat, PTE> {
+    pub open spec fn applied_mappings(self) -> IMap<nat, PTE> {
         // Prefer interp_pt_mem because there might be a situation where we have
         // something in the MapStart state which conflicts with something in interp_pt_mem.
         // In that case the map will eventually end in an error;
@@ -1190,8 +1190,8 @@ impl State {
         exists|core: Core| self.is_unmap_vaddr_core(core, vaddr)
     }
 
-    pub open spec fn unmap_vaddr_set(self) -> Set<nat> {
-        Set::new(|vaddr: nat| self.is_unmap_vaddr(vaddr))
+    pub open spec fn unmap_vaddr_set(self) -> ISet<nat> {
+        ISet::new(|vaddr: nat| self.is_unmap_vaddr(vaddr))
     }
 
     // "extra vaddrs"
@@ -1251,8 +1251,8 @@ impl State {
     }
 
     #[verifier::opaque]
-    pub open spec fn extra_mappings(self) -> Map<nat, PTE> {
-        Map::new(
+    pub open spec fn extra_mappings(self) -> IMap<nat, PTE> {
+        IMap::new(
             |vaddr: nat| self.is_extra_vaddr(vaddr) && !self.candidate_vaddr_overlaps(vaddr),
             |vaddr: nat| self.extra_mapping_for_vaddr(vaddr),
         )
@@ -1260,8 +1260,8 @@ impl State {
 
     //// Interp thread state
 
-    pub open spec fn interp_thread_state(self, c: Constants) -> Map<nat, hlspec::ThreadState> {
-        Map::new(
+    pub open spec fn interp_thread_state(self, c: Constants) -> IMap<nat, hlspec::ThreadState> {
+        IMap::new(
             |ult_id: nat| c.valid_ult(ult_id),
             |ult_id2: nat| {
                     match self.core_states[c.ult2core[ult_id2]] {
@@ -1474,7 +1474,7 @@ impl State {
 
         // Some of this is duplicated from rl2's invariant but we should close that definition
         // probably.
-        &&& self.mmu@.pt_mem.mem.dom() === Set::new(|va| aligned(va as nat, 8) && c.common.in_ptmem_range(va as nat, 8))
+        &&& self.mmu@.pt_mem.mem.dom() === ISet::new(|va| aligned(va as nat, 8) && c.common.in_ptmem_range(va as nat, 8))
         &&& aligned(self.mmu@.pt_mem.pml4 as nat, 4096)
         &&& c.common.in_ptmem_range(self.mmu@.pt_mem.pml4 as nat, 4096)
         &&& c.common.range_mem.0 < c.common.range_mem.1 < c.common.range_ptmem.0 < c.common.range_ptmem.1
@@ -1511,29 +1511,29 @@ impl State {
             ==> self.os_ext.shootdown_vec.open_requests.is_empty()
         &&& (self.os_ext.lock matches Some(core) && self.core_states[core].is_in_shootdown())
             ==> {
-                &&& self.mmu@.writes.tso === set![]
+                &&& self.mmu@.writes.tso === iset![]
                 &&& self.mmu@.writes.nonpos.subset_of(self.os_ext.shootdown_vec.open_requests)
             }
     }
 
     pub open spec fn inv_writes(self, c: Constants) -> bool {
-        &&& self.mmu@.writes.nonpos.subset_of(Set::new(|core| c.valid_core(core)))
+        &&& self.mmu@.writes.nonpos.subset_of(ISet::new(|core| c.valid_core(core)))
         &&& (self.os_ext.lock matches Some(core) && self.core_states[core].is_mapping())
-                ==> self.mmu@.writes.nonpos === set![]
+                ==> self.mmu@.writes.nonpos === iset![]
         &&& (self.os_ext.lock matches Some(core) &&
             self.core_states[core] matches CoreState::UnmapExecuting { result: None, .. })
-                ==> self.mmu@.writes.tso === set![] && self.mmu@.writes.nonpos === set![]
+                ==> self.mmu@.writes.tso === iset![] && self.mmu@.writes.nonpos === iset![]
         &&& (self.os_ext.lock matches Some(core) &&
             self.core_states[core] matches CoreState::ProtectExecuting { result: None, .. })
-                ==> self.mmu@.writes.tso === set![] && self.mmu@.writes.nonpos === set![]
+                ==> self.mmu@.writes.tso === iset![] && self.mmu@.writes.nonpos === iset![]
         &&& self.os_ext.lock is None ==> {
-            &&& self.mmu@.writes.tso === set![]
-            &&& self.mmu@.writes.nonpos === set![]
+            &&& self.mmu@.writes.tso === iset![]
+            &&& self.mmu@.writes.nonpos === iset![]
         }
         &&& forall|core|
             #[trigger] c.valid_core(core)
             && self.core_states[core].is_in_crit_sect()
-            && self.mmu@.writes.tso !== set![]
+            && self.mmu@.writes.tso !== iset![]
                 ==> self.mmu@.writes.core == core
     }
 
@@ -1620,7 +1620,7 @@ impl State {
         (self.os_ext.lock matches Some(core)
             && (self.core_states[core] matches CoreState::UnmapExecuting { result: Some(_), .. }
                 || self.core_states[core] matches CoreState::ProtectExecuting { result: Some(_), .. }))
-        ==> self.mmu@.writes.nonpos == Set::new(|core| c.valid_core(core))
+        ==> self.mmu@.writes.nonpos == ISet::new(|core| c.valid_core(core))
     }
 
      pub open spec fn successful_invlpg_unmap(self, c: Constants) -> bool {
@@ -1691,7 +1691,7 @@ impl State {
     }
 
     pub open spec fn shootdown_exists(self, c: Constants) -> bool {
-       self.os_ext.shootdown_vec.open_requests !== set![]
+       self.os_ext.shootdown_vec.open_requests !== iset![]
            ==> {
                &&& self.os_ext.lock matches Some(core)
                &&& self.core_states[core].is_in_shootdown()

@@ -1,7 +1,7 @@
 use vstd::prelude::*;
 
 
-use vstd::map::*;
+use vstd::imap::*;
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::defs::{ aligned, bit, bitmask_inc };
 use crate::spec_t::mmu::translation::{ MASK_NEG_PROT_FLAGS, MASK_NEG_DIRTY_ACCESS };
@@ -122,8 +122,8 @@ pub proof fn aligned_transitive_auto()
 }
 
 pub proof fn lemma_subset_is_finite<A>(
-    a: Set<A>,
-    b: Set<A>,
+    a: ISet<A>,
+    b: ISet<A>,
 )
     requires 
         a.finite(),
@@ -137,16 +137,16 @@ pub proof fn lemma_subset_is_finite<A>(
 
 pub proof fn lemma_set_of_first_n_nat_is_finite( n: nat, )
     requires
-    ensures Set::new(|i: nat| i < n).finite()
+    ensures ISet::new(|i: nat| i < n).finite()
     decreases n
 {   
-    let b = Set::new(|i: nat| i < n);
+    let b = ISet::new(|i: nat| i < n);
     if (n == 0) {    
-        assert(Set::new(|i: nat| i < 0) === Set::empty());
-        assert(Set::new(|i: nat| i < 0).finite());
+        assert(ISet::new(|i: nat| i < 0) === ISet::empty());
+        assert(ISet::new(|i: nat| i < 0).finite());
     } else {
         lemma_set_of_first_n_nat_is_finite((n - 1) as nat);
-        let c = Set::new(|i: nat| i < n - 1).insert((n - 1) as nat);
+        let c = ISet::new(|i: nat| i < n - 1).insert((n - 1) as nat);
         assert(c.finite());
         assert(c === b);
         assert(b.finite());
@@ -263,7 +263,7 @@ pub proof fn mult_less_mono_both2(a: nat, b: nat, c: nat, d: nat)
 { }
 
 
-pub proof fn assert_maps_equal_contains_pair<K,V>(m1: Map<K,V>, m2: Map<K,V>)
+pub proof fn assert_imaps_equal_contains_pair<K,V>(m1: IMap<K,V>, m2: IMap<K,V>)
     requires
         forall|k:K,v:V| m1.contains_pair(k, v) ==> m2.contains_pair(k, v),
         forall|k:K,v:V| m2.contains_pair(k, v) ==> m1.contains_pair(k, v),
@@ -286,7 +286,7 @@ pub proof fn assert_maps_equal_contains_pair<K,V>(m1: Map<K,V>, m2: Map<K,V>)
         assert(m1.contains_pair(k, v));
         assert(m2.contains_pair(k, v));
     };
-    assert_maps_equal!(m1, m2);
+    assert_imaps_equal!(m1, m2);
 }
 
 // FIXME: Something like these functions should probably be added to vstd. One problem with that:
