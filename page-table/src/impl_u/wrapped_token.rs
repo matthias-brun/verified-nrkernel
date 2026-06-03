@@ -242,6 +242,7 @@ impl WrappedTokenView {
                                         crate::impl_u::indexing::lemma_entry_base_from_index(l2_base, l2_bidx as nat, L2_ENTRY_SIZE as nat);
                                     };
                                     assert(interp_l2.interp_of_entry(l2_bidx as nat).dom() =~= iset![l3_base as nat]);
+                                    assert(interp_l2.interp_of_entry(l2_bidx as nat).contains_key(vaddr as nat));
                                     assert(aligned(vaddr as nat, L2_ENTRY_SIZE as nat));
                                     assert(align_to_usize(vaddr, L2_ENTRY_SIZE) == vaddr);
                                     assert(self.pt_mem.is_base_pt_walk(vaddr));

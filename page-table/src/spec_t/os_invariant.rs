@@ -954,6 +954,7 @@ pub proof fn next_step_mmu_preserves_inv_tlb(
     }
 }
 
+#[verifier::rlimit(200)]
 #[verifier::spinoff_prover]
 pub proof fn next_step_preserves_inv_tlb_1(
     c: os::Constants,
@@ -1037,32 +1038,91 @@ pub proof fn next_step_preserves_inv_tlb_1(
             assert(s2.inv_tlb(c));
         },
         os::Step::MapOpChange { core, .. } => {
-            broadcast use PTMem::lemma_disj_nonneg_prot_write;
-            assert(!rl1::step_WriteProtect(s1.mmu@, s2.mmu@, c.common, step.mmu_lbl(s1, lbl)));
-            to_rl1::next_preserves_inv(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
-            assert(forall|core, vaddr: nat| s2.is_unmap_vaddr_core(core, vaddr)
-                <==> s1.is_unmap_vaddr_core(core, vaddr));
-            // assert(forall|va, core| s2.is_inflight_critical_protect_vaddr_core(va, core)
-            //     <==> s1.is_inflight_critical_protect_vaddr_core(va, core));
-            assert(s2.TLB_interp_pt_mem_agree(c)) by {
-                assert forall|tlb_core: Core, v: usize|
-                    #[trigger] c.valid_core(tlb_core)
-                    && #[trigger] s2.mmu@.tlbs[tlb_core].contains_key(v)
-                    && s2.interp_pt_mem().contains_key(v as nat)
-                        implies
-                    s2.mmu@.tlbs[tlb_core][v] == s2.interp_pt_mem()[v as nat]
-                by {
-                    assert(s1.mmu@.tlbs[tlb_core].contains_key(v));
-                    assert(s1.interp_pt_mem().dom().union(s1.unmap_vaddr_set()).contains(v as nat));
-                    assert_by_contradiction!(!s1.unmap_vaddr_set().contains(v as nat), {
-                        let unmap_core = choose|core: Core| s1.is_unmap_vaddr_core(core, v as nat);
-                    });
-                };
-            };
-            assert(s2.inv_tlb(c));
+            next_step_preserves_inv_tlb_1_map_op_change(c, s1, s2, core, step, lbl);
         },
         _ => {},
     }
+}
+
+#[verifier::rlimit(800)]
+#[verifier::spinoff_prover]
+proof fn next_step_preserves_inv_tlb_1_map_op_change(
+    c: os::Constants,
+    s1: os::State,
+    s2: os::State,
+    core: Core,
+    step: os::Step,
+    lbl: RLbl,
+)
+    requires
+        s1.inv_tlb(c),
+        s1.inv_mmu(c),
+        s1.inv_basic(c),
+        s2.inv_basic(c),
+        os::next_step(c, s1, s2, step, lbl),
+        step matches os::Step::MapOpChange { core: core2, .. } && core == core2,
+    ensures
+        s2.inv_tlb(c),
+{
+    to_rl1::next_refines(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
+    broadcast use PTMem::lemma_disj_nonneg_prot_write;
+    assert(!rl1::step_WriteProtect(s1.mmu@, s2.mmu@, c.common, step.mmu_lbl(s1, lbl)));
+    to_rl1::next_preserves_inv(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
+    assert(forall|core, vaddr: nat| s2.is_unmap_vaddr_core(core, vaddr)
+        <==> s1.is_unmap_vaddr_core(core, vaddr));
+    assert(s1.unmap_vaddr_set() =~= s2.unmap_vaddr_set()) by {
+        assert forall |vaddr| s1.is_unmap_vaddr(vaddr) implies
+            s2.is_unmap_vaddr(vaddr) by {
+                let unmap_core = choose|unmap_core| s1.is_unmap_vaddr_core(unmap_core, vaddr);
+                assert(s2.is_unmap_vaddr_core(unmap_core, vaddr));
+            }
+        assert forall |vaddr| s2.is_unmap_vaddr(vaddr) implies
+            s1.is_unmap_vaddr(vaddr) by {
+                let unmap_core = choose|unmap_core| s2.is_unmap_vaddr_core(unmap_core, vaddr);
+                assert(s1.is_unmap_vaddr_core(unmap_core, vaddr));
+            }
+    }
+    assert(forall|va, core| s2.is_inflight_critical_protect_vaddr_core(va, core)
+        <==> s1.is_inflight_critical_protect_vaddr_core(va, core))
+    by {
+        assert forall|va, prot_core| s2.is_inflight_critical_protect_vaddr_core(va, prot_core)
+            <==> s1.is_inflight_critical_protect_vaddr_core(va, prot_core)
+        by {
+            if s2.is_inflight_critical_protect_vaddr_core(va, prot_core) {
+                assert(s2.interp_pt_mem().contains_key(va));
+                assert(s1.interp_pt_mem().contains_key(va));
+            }
+            if s1.is_inflight_critical_protect_vaddr_core(va, prot_core) {
+                assert(s1.interp_pt_mem().contains_key(va));
+                assert(s2.interp_pt_mem().contains_key(va));
+            }
+        };
+    };
+    assert(s2.TLB_interp_pt_mem_agree(c)) by {
+        assert forall|tlb_core: Core, v: usize|
+            #[trigger] c.valid_core(tlb_core)
+            && #[trigger] s2.mmu@.tlbs[tlb_core].contains_key(v)
+            && s2.interp_pt_mem().contains_key(v as nat)
+            && !s2.is_inflight_critical_protect_vaddr(v as nat)
+                implies
+            s2.mmu@.tlbs[tlb_core][v] == s2.interp_pt_mem()[v as nat]
+        by {
+            assert(s1.mmu@.tlbs[tlb_core].contains_key(v));
+            assert(s1.interp_pt_mem().dom().union(s1.unmap_vaddr_set()).contains(v as nat));
+            assert_by_contradiction!(!s1.unmap_vaddr_set().contains(v as nat), {
+                let unmap_core = choose|core: Core| s1.is_unmap_vaddr_core(core, v as nat);
+            });
+            assert(s1.interp_pt_mem().contains_key(v as nat));
+            assert(!s1.is_inflight_critical_protect_vaddr(v as nat)) by {
+                if s1.is_inflight_critical_protect_vaddr(v as nat) {
+                    let prot_core = choose|prot_core| s1.is_inflight_critical_protect_vaddr_core(v as nat, prot_core);
+                    assert(s2.is_inflight_critical_protect_vaddr_core(v as nat, prot_core));
+                    assert(s2.is_inflight_critical_protect_vaddr(v as nat));
+                }
+            };
+        };
+    };
+    assert(s2.inv_tlb(c));
 }
 
 #[verifier::spinoff_prover]
@@ -1463,6 +1523,7 @@ pub proof fn next_step_preserves_inv_tlb(
 // Proof of overlapping virtual memory Invariants
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+#[verifier::rlimit(500)]
 #[verifier(spinoff_prover)]
 pub proof fn next_step_preserves_overlap_mem_inv(
     c: os::Constants,
