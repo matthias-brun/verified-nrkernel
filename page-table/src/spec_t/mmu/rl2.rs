@@ -1796,7 +1796,7 @@ proof fn next_step_preserves_wf(pre: State, post: State, c: Constants, step: Ste
     assert(post.pt_mem.mem.dom() =~= pre.pt_mem.mem.dom());
 }
 
-#[verifier::rlimit(200)] #[verifier(spinoff_prover)]
+#[verifier(spinoff_prover)]
 proof fn next_step_preserves_inv_inflight_walks_are_prefixes(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
     requires
         pre.wf(c),
@@ -1855,31 +1855,7 @@ proof fn next_step_preserves_inv_inflight_walks_are_prefixes(pre: State, post: S
                     if wrcore == core {
                         lemma_step_Writeback_preserves_writer_mem(pre, post, c, core, lbl);
                     } else {
-                        reveal(rl2::walk_next);
-                        assert(!walk.complete);
-                        pre.pt_mem.lemma_write_seq(pre.writer_sbuf());
-                        post.pt_mem.lemma_write_seq(post.writer_sbuf());
-                        assert(bit!(0usize) == 1) by (bit_vector);
-                        assert(pre.core_mem(core) == pre.pt_mem);
-                        assert(post.core_mem(core) == post.pt_mem);
-                        // Prove alignment of walk path addresses (needed for inv_mapping__valid_is_not_in_sbuf)
-                        assert(forall|i| #![auto] 0 <= i < walk.path.len() ==> aligned(walk.path[i].0 as nat, 8)) by {
-                            broadcast use PDE::lemma_view_addr_aligned;
-                            crate::spec_t::mmu::translation::lemma_bit_indices_less_512(walk.vaddr);
-                        };
-                        // The writeback address is in the writer's store buffer
-                        let wraddr = pre.sbuf[wrcore][0].0;
-                        assert(pre.writer_sbuf().contains_fst(wraddr));
-                        // Walk path addresses are not the writeback address, so they read the same in pre and post
-                        assert(forall|i| #![auto] 0 <= i < walk.path.len() ==> walk.path[i].0 != wraddr) by {
-                            assert forall|i| 0 <= i < walk.path.len() implies #[trigger] walk.path[i].0 != wraddr by {
-                                assert(pre.core_mem(core).read(walk.path[i].0) & 1 == 1);
-                                assert(!pre.writer_sbuf().contains_fst(walk.path[i].0));
-                            };
-                        };
-                        assert(forall|i| #![auto] 0 <= i < walk.path.len() ==>
-                            pre.pt_mem.read(walk.path[i].0) == post.pt_mem.read(walk.path[i].0));
-                        lemma_iter_walk_prefix_mem_agree(pre.pt_mem, post.pt_mem, walk);
+                        lemma_writeback_other_core_preserves_walk_prefix(pre, post, c, core, wrcore, walk, step, lbl);
                     }
                 };
             };
@@ -2531,6 +2507,51 @@ broadcast proof fn lemma_writes_tso_empty_implies_sbuf_empty(pre: State, c: Cons
             assert(pre.sbuf[core].contains(pre.sbuf[core][0]));
         });
     }
+}
+
+proof fn lemma_writeback_other_core_preserves_walk_prefix(
+    pre: State, post: State, c: Constants, core: Core, wrcore: Core, walk: Walk, step: Step, lbl: Lbl
+)
+    requires
+        pre.wf(c),
+        pre.happy,
+        post.happy,
+        post.polarity is Mapping,
+        pre.inv_sbuf_facts(c),
+        post.inv_sbuf_facts(c),
+        pre.inv_mapping__valid_is_not_in_sbuf(c),
+        pre.inv_inflight_walks_are_prefixes(c),
+        c.valid_core(core),
+        pre.walks[core].contains(walk),
+        next_step(pre, post, c, step, lbl),
+        step == (Step::Writeback { core: wrcore }),
+        core != wrcore,
+    ensures
+        is_iter_walk_prefix(post.core_mem(core), walk),
+{
+    broadcast use group_ambient, lemma_step_core_mem;
+    reveal(rl2::walk_next);
+    assert(!walk.complete);
+    pre.pt_mem.lemma_write_seq(pre.writer_sbuf());
+    post.pt_mem.lemma_write_seq(post.writer_sbuf());
+    assert(bit!(0usize) == 1) by (bit_vector);
+    assert(pre.core_mem(core) == pre.pt_mem);
+    assert(post.core_mem(core) == post.pt_mem);
+    assert(forall|i| #![auto] 0 <= i < walk.path.len() ==> aligned(walk.path[i].0 as nat, 8)) by {
+        broadcast use PDE::lemma_view_addr_aligned;
+        crate::spec_t::mmu::translation::lemma_bit_indices_less_512(walk.vaddr);
+    };
+    let wraddr = pre.sbuf[wrcore][0].0;
+    assert(pre.writer_sbuf().contains_fst(wraddr));
+    assert(forall|i| #![auto] 0 <= i < walk.path.len() ==> walk.path[i].0 != wraddr) by {
+        assert forall|i| 0 <= i < walk.path.len() implies #[trigger] walk.path[i].0 != wraddr by {
+            assert(pre.core_mem(core).read(walk.path[i].0) & 1 == 1);
+            assert(!pre.writer_sbuf().contains_fst(walk.path[i].0));
+        };
+    };
+    assert(forall|i| #![auto] 0 <= i < walk.path.len() ==>
+        pre.pt_mem.read(walk.path[i].0) == post.pt_mem.read(walk.path[i].0));
+    lemma_iter_walk_prefix_mem_agree(pre.pt_mem, post.pt_mem, walk);
 }
 
 proof fn lemma_iter_walk_prefix_mem_agree(mem1: PTMem, mem2: PTMem, walk: Walk)

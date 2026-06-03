@@ -954,7 +954,6 @@ pub proof fn next_step_mmu_preserves_inv_tlb(
     }
 }
 
-#[verifier::rlimit(150)]
 #[verifier::spinoff_prover]
 pub proof fn next_step_preserves_inv_tlb_1(
     c: os::Constants,
@@ -1044,7 +1043,6 @@ pub proof fn next_step_preserves_inv_tlb_1(
     }
 }
 
-#[verifier::rlimit(400)]
 #[verifier::spinoff_prover]
 proof fn next_step_preserves_inv_tlb_1_map_op_change(
     c: os::Constants,
@@ -1105,32 +1103,58 @@ proof fn next_step_preserves_inv_tlb_1_map_op_change(
         };
     };
 
-    // TLB_interp_pt_mem_agree
-    assert(s2.TLB_interp_pt_mem_agree(c)) by {
-        assert forall|tlb_core: Core, v: usize|
-            #[trigger] c.valid_core(tlb_core)
-            && #[trigger] s2.mmu@.tlbs[tlb_core].contains_key(v)
-            && s2.interp_pt_mem().contains_key(v as nat)
-            && !s2.is_inflight_critical_protect_vaddr(v as nat)
-                implies
-            s2.mmu@.tlbs[tlb_core][v] == s2.interp_pt_mem()[v as nat]
-        by {
-            assert(s1.mmu@.tlbs[tlb_core].contains_key(v));
-            assert(s1.interp_pt_mem().dom().union(s1.unmap_vaddr_set()).contains(v as nat));
-            assert_by_contradiction!(!s1.unmap_vaddr_set().contains(v as nat), {
-                let uc = choose|c2: Core| s1.is_unmap_vaddr_core(c2, v as nat);
-            });
-            assert(s1.interp_pt_mem().contains_key(v as nat));
-            assert(!s1.is_inflight_critical_protect_vaddr(v as nat)) by {
-                if s1.is_inflight_critical_protect_vaddr(v as nat) {
-                    let pc = choose|pc| s1.is_inflight_critical_protect_vaddr_core(v as nat, pc);
-                    assert(s2.is_inflight_critical_protect_vaddr_core(v as nat, pc));
-                    assert(s2.is_inflight_critical_protect_vaddr(v as nat));
-                }
-            };
+    // TLB_interp_pt_mem_agree via helper
+    lemma_map_op_change_tlb_agree(c, s1, s2, core, step, lbl);
+    assert(s2.inv_tlb(c));
+}
+
+proof fn lemma_map_op_change_tlb_agree(
+    c: os::Constants,
+    s1: os::State,
+    s2: os::State,
+    core: Core,
+    step: os::Step,
+    lbl: RLbl,
+)
+    requires
+        s1.inv_tlb(c),
+        s1.inv_mmu(c),
+        s1.inv_basic(c),
+        s2.inv_basic(c),
+        os::next_step(c, s1, s2, step, lbl),
+        step matches os::Step::MapOpChange { core: core2, .. } && core == core2,
+        s1.unmap_vaddr_set() =~= s2.unmap_vaddr_set(),
+        forall|va: nat, c2: Core| s2.is_inflight_critical_protect_vaddr_core(va, c2)
+            <==> s1.is_inflight_critical_protect_vaddr_core(va, c2),
+    ensures
+        s2.TLB_interp_pt_mem_agree(c),
+{
+    to_rl1::next_refines(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
+    broadcast use PTMem::lemma_disj_nonneg_prot_write;
+    to_rl1::next_preserves_inv(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
+
+    assert forall|tlb_core: Core, v: usize|
+        #[trigger] c.valid_core(tlb_core)
+        && #[trigger] s2.mmu@.tlbs[tlb_core].contains_key(v)
+        && s2.interp_pt_mem().contains_key(v as nat)
+        && !s2.is_inflight_critical_protect_vaddr(v as nat)
+            implies
+        s2.mmu@.tlbs[tlb_core][v] == s2.interp_pt_mem()[v as nat]
+    by {
+        assert(s1.mmu@.tlbs[tlb_core].contains_key(v));
+        assert(s1.interp_pt_mem().dom().union(s1.unmap_vaddr_set()).contains(v as nat));
+        assert_by_contradiction!(!s1.unmap_vaddr_set().contains(v as nat), {
+            let uc = choose|c2: Core| s1.is_unmap_vaddr_core(c2, v as nat);
+        });
+        assert(s1.interp_pt_mem().contains_key(v as nat));
+        assert(!s1.is_inflight_critical_protect_vaddr(v as nat)) by {
+            if s1.is_inflight_critical_protect_vaddr(v as nat) {
+                let pc = choose|pc| s1.is_inflight_critical_protect_vaddr_core(v as nat, pc);
+                assert(s2.is_inflight_critical_protect_vaddr_core(v as nat, pc));
+                assert(s2.is_inflight_critical_protect_vaddr(v as nat));
+            }
         };
     };
-    assert(s2.inv_tlb(c));
 }
 
 #[verifier::spinoff_prover]
@@ -1531,7 +1555,6 @@ pub proof fn next_step_preserves_inv_tlb(
 // Proof of overlapping virtual memory Invariants
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-#[verifier::rlimit(300)]
 #[verifier(spinoff_prover)]
 pub proof fn next_step_preserves_overlap_mem_inv(
     c: os::Constants,
@@ -1554,9 +1577,8 @@ pub proof fn next_step_preserves_overlap_mem_inv(
 {
     match step { // Broadcasting these is very slow
         os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
-        | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
-        | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
-        | os::Step::ProtectOpChange { .. } => {
+        | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
+        | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. } => {
             to_rl1::next_refines(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
             to_rl1::next_preserves_inv(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
         },
@@ -1672,170 +1694,10 @@ pub proof fn next_step_preserves_overlap_mem_inv(
             assert(s2.inv_overlapping_mem(c));
         },
         os::Step::UnmapOpChange { core, .. } => {
-            let vaddr = s1.core_states[core]->UnmapExecuting_vaddr;
-            let ult_id = s1.core_states[core]->UnmapExecuting_ult_id;
-
-            let pt = s1.interp_pt_mem();
-            //proofgoal (1/2):  assert(s2.inv_inflight_map_no_overlap_inflight_vmem(c));
-            assert(s2.interp_pt_mem().submap_of(s1.interp_pt_mem()));
-            assert(s1.core_states[core].pte_size(s1.interp_pt_mem()) >= s2.core_states[core].pte_size(s2.interp_pt_mem()));
-            lemma_insert_preserves_no_overlap(c, s1.core_states, s1.interp_pt_mem(), core, s2.core_states[core]);
-            assert forall|state1, state2|
-                s2.core_states.values().contains(state1) && s2.core_states.values().contains(state2)
-                && !(state1 is Idle) && !(state2 is Idle)
-                && overlap(
-                    MemRegion { base: state1.vaddr(), size: state1.pte_size(pt) },
-                    MemRegion { base: state2.vaddr(), size: state2.pte_size(pt) },
-                ) implies state1 == state2
-            by {
-                if state1 === s2.core_states[core] || state2 == s2.core_states[core] {
-                    let other_state = if state1 === s2.core_states[core] {state2} else {state1};
-                }
-            }
-            lemma_submap_preserves_no_overlap(c, s2.core_states, s1.interp_pt_mem(), s2.interp_pt_mem());
-            lemma_unique_and_overlap_values_implies_overlap_vmem(c, s2);
-            assert(s2.interp_pt_mem().submap_of(s1.interp_pt_mem()));
-            assert forall|base| #[trigger] s2.interp_pt_mem().contains_key(base) implies
-                !candidate_mapping_overlaps_existing_vmem(
-                    s2.interp_pt_mem().remove(base),
-                    base,
-                    s2.interp_pt_mem()[base])
-            by {
-                assert(s2.interp_pt_mem().contains_key(base));
-                if candidate_mapping_overlaps_existing_vmem(
-                    s2.interp_pt_mem().remove(base),
-                    base,
-                    s2.interp_pt_mem()[base],
-                ) {
-                    let overlap_vaddr = choose|b: nat| #![auto] {
-                        &&& s2.interp_pt_mem().remove(base).contains_key(b)
-                        &&& overlap(
-                            MemRegion {
-                                base: base,
-                                size: s2.interp_pt_mem()[base].frame.size,
-                            },
-                            MemRegion { base: b, size: s2.interp_pt_mem()[b].frame.size },
-                        )
-                    };
-                    assert(s1.interp_pt_mem().remove(base).contains_key(overlap_vaddr));
-                    // assert(s1.inv_existing_map_no_overlap_existing_vmem(c));
-                    assert(false);
-                }
-            }
-            assert(s2.inv_existing_map_no_overlap_existing_vmem(c));
-            assert(s2.inv_inflight_pmem_no_overlap_inflight_pmem(c)) by {
-                    assert forall |core1: Core, core2: Core|
-                            (c.valid_core(core1) && c.valid_core(core2)
-                                && s2.core_states[core1].has_pte(s2.interp_pt_mem()) && s2.core_states[core2].has_pte(s2.interp_pt_mem())
-                                && overlap(
-                                MemRegion {
-                                    base: s2.core_states[core1].paddr(s2.interp_pt_mem()),
-                                    size: s2.core_states[core1].pte_size(s2.interp_pt_mem()),
-                                },
-                                MemRegion {
-                                    base: s2.core_states[core2].paddr(s2.interp_pt_mem()),
-                                    size: s2.core_states[core2].pte_size(s2.interp_pt_mem()),
-                                },
-                            )) implies core1 === core2 by {
-                                assert(s1.core_states[core1].has_pte(s1.interp_pt_mem()) && s1.core_states[core2].has_pte(s1.interp_pt_mem()));
-                                assert(s1.core_states[core1].pte_size(s1.interp_pt_mem()) == s2.core_states[core1].pte_size(s2.interp_pt_mem()));
-                                assert(s1.core_states[core2].pte_size(s1.interp_pt_mem()) == s2.core_states[core2].pte_size(s2.interp_pt_mem()));
-                                assert(overlap(MemRegion {
-                                    base: s1.core_states[core1].paddr(s1.interp_pt_mem()),
-                                    size: s1.core_states[core1].pte_size(s1.interp_pt_mem()),
-                                },
-                                MemRegion {
-                                    base: s1.core_states[core2].paddr(s1.interp_pt_mem()),
-                                    size: s1.core_states[core2].pte_size(s1.interp_pt_mem()),
-                                },));
-                            }
-            }
-            assert(s2.inv_overlapping_mem(c));
+            step_UnmapOpChange_preserves_overlap_mem_inv(c, s1, s2, step, lbl);
         },
         os::Step::ProtectOpChange { core, .. } => {
-            let vaddr = s1.core_states[core]->ProtectExecuting_vaddr;
-            let ult_id = s1.core_states[core]->ProtectExecuting_ult_id;
-             // Existing mappings
-            assert(s1.interp_pt_mem().dom() =~= s1.interp_pt_mem().dom());
-            assert(s1.interp_pt_mem().remove(vaddr) =~= s2.interp_pt_mem().remove(vaddr));
-            assert(forall |va| #[trigger] (s2.interp_pt_mem().contains_key(va)) ==> s1.interp_pt_mem()[va].frame == s2.interp_pt_mem()[va].frame);
-            assert forall|va| #[trigger] s2.interp_pt_mem().contains_key(va)
-                implies !candidate_mapping_overlaps_existing_vmem(
-                        s2.interp_pt_mem().remove(va),
-                        va,
-                        s2.interp_pt_mem()[va],
-            ) by {
-                if candidate_mapping_overlaps_existing_vmem(
-                        s2.interp_pt_mem().remove(va),
-                        va,
-                        s2.interp_pt_mem()[va]) {
-                    let conflict_va = choose|b: nat| {
-                        &&& #[trigger] s2.interp_pt_mem().remove(va).contains_key(b)
-                        &&& overlap(
-                            MemRegion { base: va, size: s2.interp_pt_mem()[va].frame.size },
-                            MemRegion { base: b, size: s2.interp_pt_mem().remove(va)[b].frame.size },
-                        )
-                    };
-                    assert(s1.interp_pt_mem().remove(va).contains_key(conflict_va));
-                    assert(!s1.inv_existing_map_no_overlap_existing_vmem(c));
-                    assert(false);
-                }
-            }
-            assert(s2.inv_existing_map_no_overlap_existing_vmem(c));
-            assert forall|core1: Core, core2: Core|
-                (c.valid_core(core1) && c.valid_core(core2)
-                    && !(s2.core_states[core1] is Idle) && !(s2.core_states[core2] is Idle)
-                    && overlap(
-                        MemRegion {
-                            base: s2.core_states[core1].vaddr(),
-                            size: s2.core_states[core1].pte_size(s2.interp_pt_mem()),
-                        },
-                        MemRegion {
-                            base: s2.core_states[core2].vaddr(),
-                            size: s2.core_states[core2].pte_size(s2.interp_pt_mem()),
-                        },
-                )) implies core1 === core2 by {
-                    assert(!(s1.core_states[core1] is Idle) && !(s1.core_states[core2] is Idle));
-                    assert(overlap(
-                        MemRegion {
-                            base: s1.core_states[core1].vaddr(),
-                            size: s1.core_states[core1].pte_size(s1.interp_pt_mem()),
-                        },
-                        MemRegion {
-                            base: s1.core_states[core2].vaddr(),
-                            size: s1.core_states[core2].pte_size(s1.interp_pt_mem()),
-                        },));
-                    assert(core1 === core2);
-            }
-            assert(s2.inv_inflight_map_no_overlap_inflight_vmem(c));
-            assert forall|core1: Core, core2: Core|
-                (c.valid_core(core1) && c.valid_core(core2)
-                    && s2.core_states[core1].has_pte(s2.interp_pt_mem()) && s2.core_states[core2].has_pte(s2.interp_pt_mem())
-                    && overlap(
-                        MemRegion {
-                            base: s2.core_states[core1].paddr(s2.interp_pt_mem()),
-                            size: s2.core_states[core1].pte_size(s2.interp_pt_mem()),
-                        },
-                        MemRegion {
-                            base: s2.core_states[core2].paddr(s2.interp_pt_mem()),
-                            size: s2.core_states[core2].pte_size(s2.interp_pt_mem()),
-                        },
-                )) implies core1 === core2 by {
-                    assert(s1.core_states[core1].has_pte(s1.interp_pt_mem()) && s1.core_states[core2].has_pte(s1.interp_pt_mem()));
-                    assert(s1.core_states[core1].pte_size(s1.interp_pt_mem()) == s2.core_states[core1].pte_size(s2.interp_pt_mem()));
-                    assert(s1.core_states[core2].pte_size(s1.interp_pt_mem()) == s2.core_states[core2].pte_size(s2.interp_pt_mem()));
-                    assert(overlap(
-                        MemRegion {
-                            base: s1.core_states[core1].paddr(s1.interp_pt_mem()),
-                            size: s1.core_states[core1].pte_size(s1.interp_pt_mem()),
-                        },
-                        MemRegion {
-                            base: s1.core_states[core2].paddr(s1.interp_pt_mem()),
-                            size: s1.core_states[core2].pte_size(s1.interp_pt_mem()),
-                            },));
-                    assert(core1 === core2);
-            }
-            assert(s2.inv_inflight_pmem_no_overlap_inflight_pmem(c));
+            step_ProtectOpChange_preserves_overlap_mem_inv(c, s1, s2, step, lbl);
         },
         os::Step::UnmapOpFail { core }
         | os::Step::ProtectOpFail { core, .. } => {
@@ -1915,6 +1777,227 @@ pub proof fn next_step_preserves_overlap_mem_inv(
             assert(s2.inv_overlapping_mem(c));
         },
     }
+}
+
+proof fn step_UnmapOpChange_preserves_overlap_mem_inv(
+    c: os::Constants,
+    s1: os::State,
+    s2: os::State,
+    step: os::Step,
+    lbl: RLbl,
+)
+    requires
+        s1.inv_protect_frame_unchanged(c),
+        s1.inv_basic(c),
+        s1.inv_mmu(c),
+        s1.inv_overlapping_mem(c),
+        s2.inv_basic(c),
+        s2.inv_mmu(c),
+        s1.sound, s2.sound,
+        os::next_step(c, s1, s2, step, lbl),
+        step is UnmapOpChange,
+    ensures
+        s2.inv_overlapping_mem(c),
+{
+    broadcast use
+        to_rl1::next_preserves_inv,
+        to_rl1::next_refines;
+    let _ = s2.interp_pt_mem(); let _ = s1.interp_pt_mem();
+    let core = match step {
+        os::Step::UnmapOpChange { core, .. } => core,
+        _ => arbitrary(),
+    };
+    let vaddr = s1.core_states[core]->UnmapExecuting_vaddr;
+    let ult_id = s1.core_states[core]->UnmapExecuting_ult_id;
+
+    let pt = s1.interp_pt_mem();
+    assert(s2.interp_pt_mem().submap_of(s1.interp_pt_mem()));
+    assert(s1.core_states[core].pte_size(s1.interp_pt_mem()) >= s2.core_states[core].pte_size(s2.interp_pt_mem()));
+    lemma_insert_preserves_no_overlap(c, s1.core_states, s1.interp_pt_mem(), core, s2.core_states[core]);
+    assert forall|state1, state2|
+        s2.core_states.values().contains(state1) && s2.core_states.values().contains(state2)
+        && !(state1 is Idle) && !(state2 is Idle)
+        && overlap(
+            MemRegion { base: state1.vaddr(), size: state1.pte_size(pt) },
+            MemRegion { base: state2.vaddr(), size: state2.pte_size(pt) },
+        ) implies state1 == state2
+    by {
+        if state1 === s2.core_states[core] || state2 == s2.core_states[core] {
+            let other_state = if state1 === s2.core_states[core] {state2} else {state1};
+        }
+    }
+    lemma_submap_preserves_no_overlap(c, s2.core_states, s1.interp_pt_mem(), s2.interp_pt_mem());
+    lemma_unique_and_overlap_values_implies_overlap_vmem(c, s2);
+    assert(s2.interp_pt_mem().submap_of(s1.interp_pt_mem()));
+    assert forall|base| #[trigger] s2.interp_pt_mem().contains_key(base) implies
+        !candidate_mapping_overlaps_existing_vmem(
+            s2.interp_pt_mem().remove(base),
+            base,
+            s2.interp_pt_mem()[base])
+    by {
+        assert(s2.interp_pt_mem().contains_key(base));
+        if candidate_mapping_overlaps_existing_vmem(
+            s2.interp_pt_mem().remove(base),
+            base,
+            s2.interp_pt_mem()[base],
+        ) {
+            let overlap_vaddr = choose|b: nat| #![auto] {
+                &&& s2.interp_pt_mem().remove(base).contains_key(b)
+                &&& overlap(
+                    MemRegion {
+                        base: base,
+                        size: s2.interp_pt_mem()[base].frame.size,
+                    },
+                    MemRegion { base: b, size: s2.interp_pt_mem()[b].frame.size },
+                )
+            };
+            assert(s1.interp_pt_mem().remove(base).contains_key(overlap_vaddr));
+            assert(false);
+        }
+    }
+    assert(s2.inv_existing_map_no_overlap_existing_vmem(c));
+    assert(s2.inv_inflight_pmem_no_overlap_inflight_pmem(c)) by {
+            assert forall |core1: Core, core2: Core|
+                    (c.valid_core(core1) && c.valid_core(core2)
+                        && s2.core_states[core1].has_pte(s2.interp_pt_mem()) && s2.core_states[core2].has_pte(s2.interp_pt_mem())
+                        && overlap(
+                        MemRegion {
+                            base: s2.core_states[core1].paddr(s2.interp_pt_mem()),
+                            size: s2.core_states[core1].pte_size(s2.interp_pt_mem()),
+                        },
+                        MemRegion {
+                            base: s2.core_states[core2].paddr(s2.interp_pt_mem()),
+                            size: s2.core_states[core2].pte_size(s2.interp_pt_mem()),
+                        },
+                    )) implies core1 === core2 by {
+                        assert(s1.core_states[core1].has_pte(s1.interp_pt_mem()) && s1.core_states[core2].has_pte(s1.interp_pt_mem()));
+                        assert(s1.core_states[core1].pte_size(s1.interp_pt_mem()) == s2.core_states[core1].pte_size(s2.interp_pt_mem()));
+                        assert(s1.core_states[core2].pte_size(s1.interp_pt_mem()) == s2.core_states[core2].pte_size(s2.interp_pt_mem()));
+                        assert(overlap(MemRegion {
+                            base: s1.core_states[core1].paddr(s1.interp_pt_mem()),
+                            size: s1.core_states[core1].pte_size(s1.interp_pt_mem()),
+                        },
+                        MemRegion {
+                            base: s1.core_states[core2].paddr(s1.interp_pt_mem()),
+                            size: s1.core_states[core2].pte_size(s1.interp_pt_mem()),
+                        },));
+                    }
+    }
+    assert(s2.inv_overlapping_mem(c));
+}
+
+proof fn step_ProtectOpChange_preserves_overlap_mem_inv(
+    c: os::Constants,
+    s1: os::State,
+    s2: os::State,
+    step: os::Step,
+    lbl: RLbl,
+)
+    requires
+        s1.inv_protect_frame_unchanged(c),
+        s1.inv_basic(c),
+        s1.inv_mmu(c),
+        s1.inv_overlapping_mem(c),
+        s2.inv_basic(c),
+        s2.inv_mmu(c),
+        s1.sound, s2.sound,
+        os::next_step(c, s1, s2, step, lbl),
+        step is ProtectOpChange,
+    ensures
+        s2.inv_overlapping_mem(c),
+{
+    broadcast use
+        to_rl1::next_preserves_inv,
+        to_rl1::next_refines;
+    let _ = s2.interp_pt_mem(); let _ = s1.interp_pt_mem();
+    let core = match step {
+        os::Step::ProtectOpChange { core, .. } => core,
+        _ => arbitrary(),
+    };
+    let vaddr = s1.core_states[core]->ProtectExecuting_vaddr;
+    let ult_id = s1.core_states[core]->ProtectExecuting_ult_id;
+     // Existing mappings
+    assert(s1.interp_pt_mem().dom() =~= s1.interp_pt_mem().dom());
+    assert(s1.interp_pt_mem().remove(vaddr) =~= s2.interp_pt_mem().remove(vaddr));
+    assert(forall |va| #[trigger] (s2.interp_pt_mem().contains_key(va)) ==> s1.interp_pt_mem()[va].frame == s2.interp_pt_mem()[va].frame);
+    assert forall|va| #[trigger] s2.interp_pt_mem().contains_key(va)
+        implies !candidate_mapping_overlaps_existing_vmem(
+                s2.interp_pt_mem().remove(va),
+                va,
+                s2.interp_pt_mem()[va],
+    ) by {
+        if candidate_mapping_overlaps_existing_vmem(
+                s2.interp_pt_mem().remove(va),
+                va,
+                s2.interp_pt_mem()[va]) {
+            let conflict_va = choose|b: nat| {
+                &&& #[trigger] s2.interp_pt_mem().remove(va).contains_key(b)
+                &&& overlap(
+                    MemRegion { base: va, size: s2.interp_pt_mem()[va].frame.size },
+                    MemRegion { base: b, size: s2.interp_pt_mem().remove(va)[b].frame.size },
+                )
+            };
+            assert(s1.interp_pt_mem().remove(va).contains_key(conflict_va));
+            assert(!s1.inv_existing_map_no_overlap_existing_vmem(c));
+            assert(false);
+        }
+    }
+    assert(s2.inv_existing_map_no_overlap_existing_vmem(c));
+    assert forall|core1: Core, core2: Core|
+        (c.valid_core(core1) && c.valid_core(core2)
+            && !(s2.core_states[core1] is Idle) && !(s2.core_states[core2] is Idle)
+            && overlap(
+                MemRegion {
+                    base: s2.core_states[core1].vaddr(),
+                    size: s2.core_states[core1].pte_size(s2.interp_pt_mem()),
+                },
+                MemRegion {
+                    base: s2.core_states[core2].vaddr(),
+                    size: s2.core_states[core2].pte_size(s2.interp_pt_mem()),
+                },
+        )) implies core1 === core2 by {
+            assert(!(s1.core_states[core1] is Idle) && !(s1.core_states[core2] is Idle));
+            assert(overlap(
+                MemRegion {
+                    base: s1.core_states[core1].vaddr(),
+                    size: s1.core_states[core1].pte_size(s1.interp_pt_mem()),
+                },
+                MemRegion {
+                    base: s1.core_states[core2].vaddr(),
+                    size: s1.core_states[core2].pte_size(s1.interp_pt_mem()),
+                },));
+            assert(core1 === core2);
+    }
+    assert(s2.inv_inflight_map_no_overlap_inflight_vmem(c));
+    assert forall|core1: Core, core2: Core|
+        (c.valid_core(core1) && c.valid_core(core2)
+            && s2.core_states[core1].has_pte(s2.interp_pt_mem()) && s2.core_states[core2].has_pte(s2.interp_pt_mem())
+            && overlap(
+                MemRegion {
+                    base: s2.core_states[core1].paddr(s2.interp_pt_mem()),
+                    size: s2.core_states[core1].pte_size(s2.interp_pt_mem()),
+                },
+                MemRegion {
+                    base: s2.core_states[core2].paddr(s2.interp_pt_mem()),
+                    size: s2.core_states[core2].pte_size(s2.interp_pt_mem()),
+                },
+        )) implies core1 === core2 by {
+            assert(s1.core_states[core1].has_pte(s1.interp_pt_mem()) && s1.core_states[core2].has_pte(s1.interp_pt_mem()));
+            assert(s1.core_states[core1].pte_size(s1.interp_pt_mem()) == s2.core_states[core1].pte_size(s2.interp_pt_mem()));
+            assert(s1.core_states[core2].pte_size(s1.interp_pt_mem()) == s2.core_states[core2].pte_size(s2.interp_pt_mem()));
+            assert(overlap(
+                MemRegion {
+                    base: s1.core_states[core1].paddr(s1.interp_pt_mem()),
+                    size: s1.core_states[core1].pte_size(s1.interp_pt_mem()),
+                },
+                MemRegion {
+                    base: s1.core_states[core2].paddr(s1.interp_pt_mem()),
+                    size: s1.core_states[core2].pte_size(s1.interp_pt_mem()),
+                    },));
+            assert(core1 === core2);
+    }
+    assert(s2.inv_inflight_pmem_no_overlap_inflight_pmem(c));
+    assert(s2.inv_overlapping_mem(c));
 }
 
 pub proof fn next_step_MapStart_preserves_overlap_mem_inv(
