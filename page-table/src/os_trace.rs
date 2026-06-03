@@ -21,30 +21,30 @@ proof fn program_1() {
     let c = Constants {
         hw: hw::Constants { node_count: 1, core_count: 4, phys_mem_size: 4096 * 4096 },
         ult_no: 4,
-        ult2core: Map::new(|i: nat| i < 4, |i| Core { node_id: 0, core_id: i }),
+        ult2core: IMap::new(|i: nat| i < 4, |i| Core { node_id: 0, core_id: i }),
     };
 
     let global_pt: mem::PageTableMemory;
-    assume(hw::interp_pt_mem(global_pt) =~= Map::empty());
+    assume(hw::interp_pt_mem(global_pt) =~= IMap::empty());
     // Have to assume because this isn't really modeled in sufficient detail.
     assume(global_pt.alloc_available_pages() >= 3);
     let mem = Seq::new(c.hw.phys_mem_size, |i| 0);
-    let core_state = hw::PerCoreState { tlb: Map::empty() };
+    let core_state = hw::PerCoreState { tlb: IMap::empty() };
     let numa_state = hw::PerNodeState {
-        cores: Map::new(|i: nat| i < c.hw.core_count, |i| core_state),
+        cores: IMap::new(|i: nat| i < c.hw.core_count, |i| core_state),
     };
     let s1 = State {
         hw: hw::State {
             mem: mem,
-            nodes: Map::new(|i: nat| i < c.hw.node_count, |i| numa_state),
+            nodes: IMap::new(|i: nat| i < c.hw.node_count, |i| numa_state),
             global_pt: global_pt,
             mmu: DummyAtomicMMU {}
         },
-        core_states: Map::new(
+        core_states: IMap::new(
             |core: Core| core.node_id < c.hw.node_count && core.core_id < c.hw.core_count,
             |c| CoreState::Idle,
         ),
-        TLB_Shootdown: ShootdownVector { vaddr: 0, open_requests: set![] },
+        TLB_Shootdown: ShootdownVector { vaddr: 0, open_requests: iset![] },
         sound: true,
     };
 
@@ -210,7 +210,7 @@ proof fn program_1() {
         TLB_Shootdown: ShootdownVector {
             vaddr: 4096 * 3,
             open_requests:
-                set![
+                iset![
                 core0,
                 core1,
                 core2,
@@ -220,7 +220,7 @@ proof fn program_1() {
         ..s9b
     };
 
-    assert(Set::new(|core: Core| hw::valid_core(c.hw, core))
+    assert(ISet::new(|core: Core| hw::valid_core(c.hw, core))
         =~= s10.TLB_Shootdown.open_requests);
     assert(next_step(c, s9b, s10, Step::UnmapInitiateShootdown { core: core1 }));
 
@@ -228,7 +228,7 @@ proof fn program_1() {
         TLB_Shootdown: ShootdownVector {
             vaddr: 4096 * 3,
             open_requests:
-                set![
+                iset![
                 core0,
                 core2,
                 core3,
@@ -243,7 +243,7 @@ proof fn program_1() {
     let s12 = State {
         TLB_Shootdown: ShootdownVector {
             vaddr: 4096 * 3,
-            open_requests: set![
+            open_requests: iset![
                 core2,
                 core3,
             ],
@@ -257,7 +257,7 @@ proof fn program_1() {
     let s13 = State {
         TLB_Shootdown: ShootdownVector {
             vaddr: 4096 * 3,
-            open_requests: set![
+            open_requests: iset![
                 core2,
             ],
         },
@@ -293,7 +293,7 @@ proof fn program_1() {
     ));
 
     let s15 = State {
-        TLB_Shootdown: ShootdownVector { vaddr: 4096 * 3, open_requests: set![] },
+        TLB_Shootdown: ShootdownVector { vaddr: 4096 * 3, open_requests: iset![] },
         ..s14
     };
 

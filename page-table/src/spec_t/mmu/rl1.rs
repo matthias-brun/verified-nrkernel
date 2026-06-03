@@ -20,15 +20,15 @@ pub ghost struct State {
     /// Page table memory
     pub pt_mem: PTMem,
     /// Per-node state (TLBs)
-    pub tlbs: Map<Core, Map<usize, PTE>>,
+    pub tlbs: IMap<Core, IMap<usize, PTE>>,
     pub writes: Writes,
     /// Tracks the virtual addresses and entries for which we may see non-atomic results.
     /// If polarity is positive, translations may non-atomically fail.
     /// If polarity is negative, translations may non-atomically succeed.
     /// If polarity is protect, translations may non-atomically still have old permissions.
-    pub pending_maps: Map<usize, PTE>,
-    pub pending_unmaps: Map<usize, PTE>,
-    pub pending_protects: Map<usize, PTE>,
+    pub pending_maps: IMap<usize, PTE>,
+    pub pending_unmaps: IMap<usize, PTE>,
+    pub pending_protects: IMap<usize, PTE>,
     pub polarity: Polarity,
 }
 
@@ -78,8 +78,8 @@ impl State {
         // restriction probably wouldn't be very hard, since writes (due to the bit 7 condition)
         // can only affect pages and thus we would retain the rl2::inv_inflight_walks_are_prefixes
         // invariant. But our code only makes a single modification, so we keep it simple.
-        &&& self.writes.tso === set![]
-        &&& self.writes.nonpos === set![]
+        &&& self.writes.tso === iset![]
+        &&& self.writes.nonpos === iset![]
     }
 
     pub open spec fn is_tso_read_deterministic(self, core: Core, addr: usize) -> bool {
@@ -87,8 +87,8 @@ impl State {
     }
 
     pub open spec fn can_flip_polarity(self, c: Constants) -> bool {
-        &&& self.writes.tso === set![]
-        &&& self.writes.nonpos === set![]
+        &&& self.writes.tso === iset![]
+        &&& self.writes.nonpos === iset![]
     }
 
     //pub open spec fn wf(self, c: Constants) -> bool {
@@ -114,15 +114,15 @@ pub open spec fn step_Invlpg(pre: State, post: State, c: Constants, lbl: Lbl) ->
     &&& post == State {
         writes: Writes {
             core: pre.writes.core,
-            tso: if core == pre.writes.core { set![] } else { pre.writes.tso },
+            tso: if core == pre.writes.core { iset![] } else { pre.writes.tso },
             nonpos:
-                if post.writes.tso === set![] {
+                if post.writes.tso === iset![] {
                     pre.writes.nonpos.remove(core)
                 } else { pre.writes.nonpos },
         },
-        pending_maps: if core == pre.writes.core { map![] } else { pre.pending_maps },
-        pending_unmaps: if post.writes.nonpos === set![] { map![] } else { pre.pending_unmaps },
-        pending_protects: if post.writes.nonpos === set![] { map![] } else { pre.pending_protects },
+        pending_maps: if core == pre.writes.core { imap![] } else { pre.pending_maps },
+        pending_unmaps: if post.writes.nonpos === iset![] { imap![] } else { pre.pending_unmaps },
+        pending_protects: if post.writes.nonpos === iset![] { imap![] } else { pre.pending_protects },
         ..pre
     }
 }
@@ -291,7 +291,7 @@ pub open spec fn step_WriteNonneg(pre: State, post: State, c: Constants, lbl: Lb
     &&& post.polarity == Polarity::Mapping
     &&& post.writes.nonpos == pre.writes.nonpos
     &&& post.pending_maps == pre.pending_maps.union_prefer_right(
-        Map::new(
+        IMap::new(
             |vbase| post.pt_mem@.contains_key(vbase) && !pre.pt_mem@.contains_key(vbase),
             |vbase| post.pt_mem@[vbase]
         ))
@@ -316,10 +316,10 @@ pub open spec fn step_WriteNonpos(pre: State, post: State, c: Constants, lbl: Lb
     &&& post.writes.tso == pre.writes.tso.insert(addr)
     &&& post.writes.core == core
     &&& post.polarity == Polarity::Unmapping
-    &&& post.writes.nonpos == Set::new(|core| c.valid_core(core))
+    &&& post.writes.nonpos == ISet::new(|core| c.valid_core(core))
     &&& post.pending_maps == pre.pending_maps
     &&& post.pending_unmaps == pre.pending_unmaps.union_prefer_right(
-        Map::new(
+        IMap::new(
             |vbase| pre.pt_mem@.contains_key(vbase) && !post.pt_mem@.contains_key(vbase),
             |vbase| pre.pt_mem@[vbase]
         ))
@@ -343,13 +343,13 @@ pub open spec fn step_WriteProtect(pre: State, post: State, c: Constants, lbl: L
     &&& post.writes.tso == pre.writes.tso.insert(addr)
     &&& post.writes.core == core
     &&& post.polarity == Polarity::Protect
-    &&& post.writes.nonpos == Set::new(|core| c.valid_core(core))
+    &&& post.writes.nonpos == ISet::new(|core| c.valid_core(core))
     &&& post.pending_maps == pre.pending_maps
     &&& post.pending_unmaps == pre.pending_unmaps
     &&& post.pending_protects
         == if post.polarity is Protect {
                 pre.pending_protects.union_prefer_right(
-                    Map::new(
+                    IMap::new(
                         |vbase| pre.pt_mem@.contains_key(vbase) && post.pt_mem@[vbase] != pre.pt_mem@[vbase],
                         |vbase| pre.pt_mem@[vbase]
                     ))
@@ -377,10 +377,10 @@ pub open spec fn step_Barrier(pre: State, post: State, c: Constants, lbl: Lbl) -
 
     &&& post == State {
         writes: Writes {
-            tso: if core == pre.writes.core { set![] } else { pre.writes.tso },
+            tso: if core == pre.writes.core { iset![] } else { pre.writes.tso },
             ..pre.writes
         },
-        pending_maps: if core == pre.writes.core { map![] } else { pre.pending_maps },
+        pending_maps: if core == pre.writes.core { imap![] } else { pre.pending_maps },
         ..pre
     }
 }
@@ -433,16 +433,16 @@ pub open spec fn next(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
 
 pub open spec fn init(pre: State, c: Constants) -> bool {
     &&& pre.happy
-    &&& pre.tlbs === Map::new(|core| c.valid_core(core), |core| map![])
-    &&& pre.writes.tso === set![]
-    &&& pre.writes.nonpos === set![]
-    &&& pre.pending_maps === map![]
-    &&& pre.pending_unmaps === map![]
-    &&& pre.pending_protects === map![]
+    &&& pre.tlbs === IMap::new(|core| c.valid_core(core), |core| imap![])
+    &&& pre.writes.tso === iset![]
+    &&& pre.writes.nonpos === iset![]
+    &&& pre.pending_maps === imap![]
+    &&& pre.pending_unmaps === imap![]
+    &&& pre.pending_protects === imap![]
     &&& pre.polarity === Polarity::Mapping
 
     &&& c.valid_core(pre.writes.core)
-    &&& pre.pt_mem.mem === Map::new(|va| aligned(va as nat, 8) && c.in_ptmem_range(va as nat, 8), |va| 0)
+    &&& pre.pt_mem.mem === IMap::new(|va| aligned(va as nat, 8) && c.in_ptmem_range(va as nat, 8), |va| 0)
     &&& aligned(pre.pt_mem.pml4 as nat, 4096)
     &&& c.memories_disjoint()
     &&& pre.phys_mem.len() == c.range_mem.1

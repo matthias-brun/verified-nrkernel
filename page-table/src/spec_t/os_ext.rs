@@ -29,12 +29,12 @@ pub enum Lbl {
 pub struct State {
     pub lock: Option<Core>,
     pub shootdown_vec: ShootdownVector,
-    pub allocated: Set<MemRegion>,
+    pub allocated: ISet<MemRegion>,
 }
 
 pub struct ShootdownVector {
     pub vaddr: nat,
-    pub open_requests: Set<Core>,
+    pub open_requests: ISet<Core>,
 }
 
 impl State {
@@ -89,12 +89,12 @@ pub open spec fn step_InitShootdown(pre: State, post: State, c: Constants, lbl: 
     &&& lbl matches Lbl::InitShootdown { core, vaddr }
 
     &&& c.valid_core(core)
-    &&& pre.shootdown_vec.open_requests === set![]
+    &&& pre.shootdown_vec.open_requests === iset![]
 
     &&& post == State {
         shootdown_vec: ShootdownVector {
             vaddr,
-            open_requests: Set::new(|core| c.valid_core(core))
+            open_requests: ISet::new(|core| c.valid_core(core))
         },
         ..pre
     }
@@ -105,7 +105,7 @@ pub open spec fn step_WaitShootdown(pre: State, post: State, c: Constants, lbl: 
     &&& lbl matches Lbl::WaitShootdown { core }
 
     &&& c.valid_core(core)
-    &&& pre.shootdown_vec.open_requests === set![]
+    &&& pre.shootdown_vec.open_requests === iset![]
 
     &&& post == pre
 }
@@ -171,11 +171,11 @@ pub open spec fn next_step(pre: State, post: State, c: Constants, step: Step, lb
 
 pub open spec fn init(pre: State, c: Constants) -> bool {
     &&& pre.lock === None
-    &&& pre.shootdown_vec.open_requests === set![]
+    &&& pre.shootdown_vec.open_requests === iset![]
     &&& c.memories_disjoint()
     // The OS state machine specifies this field. We assume that we already start with one
     // directory allocated for the PML4 directory.
-    //&&& pre.allocated === set![]
+    //&&& pre.allocated === iset![]
 }
 
 pub open spec fn next(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {

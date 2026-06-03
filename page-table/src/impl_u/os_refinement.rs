@@ -1,7 +1,7 @@
 #![allow(unused_imports)]
 
 use vstd::prelude::*;
-use vstd::map::*;
+use vstd::imap::*;
 use vstd::{ assert_by_contradiction, assert_seqs_equal };
 
 // use crate::spec_t::hlspec::*;
@@ -126,7 +126,7 @@ proof fn lemma_inflight_mapunmap_vaddr_implies_hl_unmap_or_map(c: os::Constants,
                     || (thread_state matches hlspec::ThreadState::Map { vaddr, .. } && vaddr === v_addr))
             },
 {
-    if (!(s.inflight_mapunmap_vaddr() =~= Set::empty()) && s.inflight_unmap_vaddr() =~= Set::empty()) {
+    if (!(s.inflight_mapunmap_vaddr() =~= ISet::empty()) && s.inflight_unmap_vaddr() =~= ISet::empty()) {
         let v_address = s.inflight_mapunmap_vaddr().choose();
         assert(s.interp_pt_mem().contains_key(v_address));
         let map_core = choose|core| s.core_states.contains_key(core) && match s.core_states[core] {
@@ -313,8 +313,8 @@ pub proof fn os_init_refines_hl_init(c: os::Constants, s: os::State)
         assert(c.valid_core(core));
         assert(s.core_states[core] === os::CoreState::Idle);  //nn
     };
-    //assert(abs_s.mem === Map::empty());
-    assert(abs_s.mappings =~= Map::empty()) by {
+    //assert(abs_s.mem === IMap::empty());
+    assert(abs_s.mappings =~= IMap::empty()) by {
         lemma_init_implies_empty_map(s, c);
     };
 }
@@ -870,7 +870,7 @@ proof fn extra_mappings_preserved(c: os::Constants, s1: os::State, s2: os::State
     vaddr_distinct(c, s2);
 
     reveal(os::State::extra_mappings);
-    assert_maps_equal!(s1.extra_mappings(), s2.extra_mappings(), vaddr => {
+    assert_imaps_equal!(s1.extra_mappings(), s2.extra_mappings(), vaddr => {
         if s1.extra_mappings().contains_key(vaddr) {
             let core = choose |core: Core| s1.is_extra_vaddr_core(core, vaddr);
             assert(s1.core_states[core].PTE() == s2.core_states[core].PTE());
@@ -929,7 +929,7 @@ proof fn extra_mappings_preserved_effective_mapping_inserted(
     vaddr_distinct(c, s2);
 
     reveal(os::State::extra_mappings);
-    assert_maps_equal!(s1.extra_mappings(), s2.extra_mappings(), vaddr => {
+    assert_imaps_equal!(s1.extra_mappings(), s2.extra_mappings(), vaddr => {
         if vaddr == this_vaddr {
             if s1.extra_mappings().contains_key(vaddr) {
                 assert(s2.extra_mappings().contains_key(vaddr));
@@ -1051,7 +1051,7 @@ proof fn extra_mappings_preserved_effective_mapping_inserted_protect(
     vaddr_distinct(c, s2);
 
     reveal(os::State::extra_mappings);
-    assert_maps_equal!(s1.extra_mappings(), s2.extra_mappings(), vaddr => {
+    assert_imaps_equal!(s1.extra_mappings(), s2.extra_mappings(), vaddr => {
         if vaddr == this_vaddr {
             if s1.extra_mappings().contains_key(vaddr) {
                 assert(s2.extra_mappings().contains_key(vaddr));
@@ -1180,8 +1180,8 @@ proof fn extra_mappings_submap(
 }
 
 proof fn monotonic_candidate_mapping_overlaps_existing_vmem_weak(
-    mappings1: Map<nat, PTE>,
-    mappings2: Map<nat, PTE>,
+    mappings1: IMap<nat, PTE>,
+    mappings2: IMap<nat, PTE>,
     base: nat,
     pte: PTE,
 )
@@ -1196,8 +1196,8 @@ proof fn monotonic_candidate_mapping_overlaps_existing_vmem_weak(
 }
 
 proof fn monotonic_candidate_mapping_overlaps_existing_vmem(
-    mappings1: Map<nat, PTE>,
-    mappings2: Map<nat, PTE>,
+    mappings1: IMap<nat, PTE>,
+    mappings2: IMap<nat, PTE>,
     base: nat,
     pte: PTE,
 )
@@ -1254,7 +1254,7 @@ proof fn extra_mappings_preserved_effective_mapping_removed(
     vaddr_distinct(c, s2);
 
     reveal(os::State::extra_mappings);
-    assert_maps_equal!(s1.extra_mappings(), s2.extra_mappings(), vaddr => {
+    assert_imaps_equal!(s1.extra_mappings(), s2.extra_mappings(), vaddr => {
         if vaddr == this_vaddr {
             if s1.extra_mappings().contains_key(vaddr) {
                 assert(s2.extra_mappings().contains_key(vaddr));
@@ -1386,7 +1386,7 @@ proof fn extra_mappings_preserved_for_overlap_map(c: os::Constants, s1: os::Stat
     vaddr_distinct(c, s2);
 
     reveal(os::State::extra_mappings);
-    assert_maps_equal!(s1.extra_mappings(), s2.extra_mappings(), vaddr => {
+    assert_imaps_equal!(s1.extra_mappings(), s2.extra_mappings(), vaddr => {
         if vaddr == this_vaddr {
             if s1.extra_mappings().contains_key(vaddr) {
                 assert(candidate_mapping_overlaps_existing_vmem(s1.interp_pt_mem(), vaddr, this_pte));
@@ -1502,7 +1502,7 @@ proof fn extra_mappings_removed(
     vaddr_distinct(c, s2);
 
     reveal(os::State::extra_mappings);
-    assert_maps_equal!(s2.extra_mappings(), s1.extra_mappings().remove(this_vaddr), vaddr => {
+    assert_imaps_equal!(s2.extra_mappings(), s1.extra_mappings().remove(this_vaddr), vaddr => {
         if vaddr == this_vaddr {
             assert(!s2.extra_mappings().contains_key(vaddr));
         } else {
@@ -1581,7 +1581,7 @@ proof fn extra_mappings_inserted(
     vaddr_distinct(c, s2);
 
     reveal(os::State::extra_mappings);
-    assert_maps_equal!(s2.extra_mappings(), s1.extra_mappings().insert(this_vaddr, s1.interp_pt_mem()[this_vaddr]), vaddr => {
+    assert_imaps_equal!(s2.extra_mappings(), s1.extra_mappings().insert(this_vaddr, s1.interp_pt_mem()[this_vaddr]), vaddr => {
         if vaddr == this_vaddr {
             assert(s2.is_extra_vaddr_core(this_core, this_vaddr));
             assert(s2.get_extra_vaddr_core(this_vaddr) == this_core);
@@ -1722,20 +1722,20 @@ proof fn vaddr_mapping_is_being_modified_from_vaddr_unmap(
     }
 }
 
-spec fn no_overlaps(m: Map<nat, PTE>) -> bool {
+spec fn no_overlaps(m: IMap<nat, PTE>) -> bool {
     forall |i, j|
         #[trigger] m.contains_key(i) && #[trigger] m.contains_key(j) && i != j
           ==> i + m[i].frame.size <= j
            || j + m[j].frame.size <= i
 }
 
-spec fn no_overlaps_pmem(m: Map<nat, PTE>) -> bool {
+spec fn no_overlaps_pmem(m: IMap<nat, PTE>) -> bool {
     forall |i, j|
         #[trigger] m.contains_key(i) && #[trigger] m.contains_key(j) && i != j
           ==> !overlap(m[i].frame, m[j].frame)
 }
 
-spec fn bounds(c: os::Constants, m: Map<nat, PTE>) -> bool {
+spec fn bounds(c: os::Constants, m: IMap<nat, PTE>) -> bool {
     forall |i|
         #[trigger] m.contains_key(i)
           ==> candidate_mapping_in_bounds(i, m[i])

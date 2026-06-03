@@ -34,13 +34,13 @@ proof fn program_1() {
     let s1 = State {
         mem: seq![arbitrary(); crate::spec_t::mmu::defs::MAX_BASE],
         thread_state:
-            map![
+            imap![
             0 => ThreadState::Idle,
             1 => ThreadState::Idle,
             2 => ThreadState::Idle,
             3 => ThreadState::Idle,
         ],
-        mappings: Map::empty(),
+        mappings: IMap::empty(),
         sound: true,
     };
 
@@ -53,7 +53,7 @@ proof fn program_1() {
     };
 
     assert(candidate_mapping_in_bounds(4096 * 3, pte1));
-    assert(step_Map_enabled(set![], s1.mappings, 4096 * 3, pte1));
+    assert(step_Map_enabled(iset![], s1.mappings, 4096 * 3, pte1));
 
     let s2 = State {
         thread_state: s1.thread_state.insert(
@@ -83,7 +83,7 @@ proof fn program_1() {
         ..s2
     };
     // assert(s3.mem.dom() == s2.mem.dom().union(
-    //     Set::new(
+    //     ISet::new(
     //         |w: nat|
     //             crate::spec_t::mmu::defs::word_index_spec(4096 * 3) <= w
     //                 < crate::spec_t::mmu::defs::word_index_spec(4096 * 3) + (4096nat / WORD_SIZE as nat),
@@ -152,14 +152,14 @@ mod util {
 
     use super::*;
 
-    pub open spec fn all_bytes_in_range(vaddr: nat, size: nat) -> Set<nat>
+    pub open spec fn all_bytes_in_range(vaddr: nat, size: nat) -> ISet<nat>
         decreases size,
         // via all_bytes_in_range_decreases
     {
         if size > 0 {
             all_bytes_in_range((vaddr + 1) as nat, (size - 1) as nat).insert(vaddr)
         } else {
-            Set::empty()
+            ISet::empty()
         }
     }
 
@@ -197,7 +197,7 @@ mod util {
     //         aligned(size, WORD_SIZE as nat),
     //     ensures
     //         r.dom() =~= map.dom() + all_bytes_in_range(vaddr, size),
-    //         r.dom() =~= map.dom().union(Set::new(|w: nat| vaddr <= w < vaddr + size)),
+    //         r.dom() =~= map.dom().union(ISet::new(|w: nat| vaddr <= w < vaddr + size)),
     //     decreases size,
     // {
     //     if size > 0 {
@@ -229,7 +229,7 @@ mod util {
     //     }
     // }
 
-    // pub proof fn lemma_contract_mem_domain(map: Seq<u8>, vaddr: nat, size: nat) -> (r: Map<
+    // pub proof fn lemma_contract_mem_domain(map: Seq<u8>, vaddr: nat, size: nat) -> (r: IMap<
     //     nat,
     //     nat,
     // >)
@@ -238,7 +238,7 @@ mod util {
     //         aligned(size, WORD_SIZE as nat),
     //     ensures
     //         r.dom() =~= map.dom() - all_bytes_in_range(vaddr, size),
-    //         r.dom() =~= map.dom().difference(Set::new(|w: nat| vaddr <= w < vaddr + size)),
+    //         r.dom() =~= map.dom().difference(ISet::new(|w: nat| vaddr <= w < vaddr + size)),
     //     decreases size,
     // {
     //     if size > 0 {
@@ -289,14 +289,14 @@ proof fn program_threads_4() {
     let s1 = State {
         mem: seq![arbitrary(); crate::spec_t::mmu::defs::MAX_BASE],
         thread_state:
-            map![
+            imap![
             0 => ThreadState::Idle,
             1 => ThreadState::Idle,
             2 => ThreadState::Idle,
             3 => ThreadState::Idle,
             4 => ThreadState::Idle,
         ],
-        mappings: Map::empty(),
+        mappings: IMap::empty(),
         sound: true,
     };
 
@@ -342,7 +342,7 @@ proof fn program_threads_4() {
 
     // sync point
 
-    let mut threads = set![1nat, 2, 3, 4];
+    let mut threads = iset![1nat, 2, 3, 4];
     let all_threads = threads;
     assert(threads <= all_threads);
     assert(forall|t| all_threads.contains(t) ==> t < 5);
@@ -557,13 +557,13 @@ mod program_two {
         T2MapEnd,
     }
 
-    spec fn pending_inv(pending: Set<MapTransition>) -> bool {
+    spec fn pending_inv(pending: ISet<MapTransition>) -> bool {
         &&& pending.contains(MapTransition::T1MapStart) ==> pending.contains(MapTransition::T1MapEnd)
         &&& pending.contains(MapTransition::T2MapStart) ==> pending.contains(MapTransition::T2MapEnd)
         &&& !pending.is_empty() ==> exists|t| pending_enabled(pending, t)
     }
 
-    spec(checked) fn pending_enabled(pending: Set<MapTransition>, t: MapTransition) -> bool
+    spec(checked) fn pending_enabled(pending: ISet<MapTransition>, t: MapTransition) -> bool
         // recommends pending_inv(pending),
     {
         &&& pending.contains(t)
@@ -631,8 +631,8 @@ mod program_two {
     spec fn map_next(
         c: Constants,
         s: State,
-        pending: Set<MapTransition>,
-    ) -> (MapTransition, State, Set<MapTransition>)
+        pending: ISet<MapTransition>,
+    ) -> (MapTransition, State, ISet<MapTransition>)
         recommends
             pending_inv(pending),
             !pending.is_empty(),
@@ -648,9 +648,9 @@ mod program_two {
         (t, s2, pending)
     }
 
-    spec fn map_inv(c: Constants, s: State, pending: Set<MapTransition>) -> bool {
+    spec fn map_inv(c: Constants, s: State, pending: ISet<MapTransition>) -> bool {
         &&& s.sound
-        &&& s.thread_state.dom() == set![0nat, 1]
+        &&& s.thread_state.dom() == iset![0nat, 1]
         &&& forall|n: nat| n < c.thread_no ==> s.thread_state.contains_key(n)
         &&& if pending.contains(MapTransition::T1MapStart) { s.thread_state[0] == ThreadState::Idle } else {
             pending.contains(MapTransition::T1MapEnd) ==> s.thread_state[0] == ThreadState::Map { vaddr: pte1_vaddr, pte: pte1 }
@@ -661,8 +661,8 @@ mod program_two {
         &&& s.thread_state[0] == ThreadState::Idle || s.thread_state[0] == ThreadState::Map { vaddr: pte1_vaddr, pte: pte1 }
         &&& s.thread_state[1] == ThreadState::Idle || s.thread_state[1] == ThreadState::Map { vaddr: pte2_vaddr, pte: pte2 }
         &&& s.mappings == (
-            if !pending.contains(MapTransition::T1MapEnd) { map![pte1_vaddr => pte1] } else { Map::empty() }.union_prefer_right(
-            if !pending.contains(MapTransition::T2MapEnd) { map![pte2_vaddr => pte2] } else { Map::empty() })
+            if !pending.contains(MapTransition::T1MapEnd) { imap![pte1_vaddr => pte1] } else { IMap::empty() }.union_prefer_right(
+            if !pending.contains(MapTransition::T2MapEnd) { imap![pte2_vaddr => pte2] } else { IMap::empty() })
         )
         &&& s.mem.len() == crate::spec_t::mmu::defs::MAX_BASE
     }
@@ -671,8 +671,8 @@ mod program_two {
         c: Constants,
         s1: State,
         s2: State,
-        pending1: Set<MapTransition>,
-        pending2: Set<MapTransition>,
+        pending1: ISet<MapTransition>,
+        pending2: ISet<MapTransition>,
         t: MapTransition,
     )
         requires
@@ -697,8 +697,8 @@ mod program_two {
         } else if pending1.len() == 1 {
             assert(exists|t| pending_enabled(pending1, t));
             assert(pending_enabled(pending1, t));
-            assert(pending1 == set![t]);
-            assert(set![t].remove(t) == Set::<MapTransition>::empty());
+            assert(pending1 == iset![t]);
+            assert(iset![t].remove(t) == Set::<MapTransition>::empty());
             assert(pending2.is_empty());
         } else {
             assert(pending1.len() > 1);
@@ -710,7 +710,7 @@ mod program_two {
                 }
                 MapTransition::T1MapEnd => {
                     assert(!pending1.contains(MapTransition::T1MapStart));
-                    assert(pending2 <= set![MapTransition::T2MapStart, MapTransition::T2MapEnd]);
+                    assert(pending2 <= iset![MapTransition::T2MapStart, MapTransition::T2MapEnd]);
                     if pending2.contains(MapTransition::T2MapStart) {
                         assert(pending_enabled(pending2, MapTransition::T2MapStart));
                     } else {
@@ -727,7 +727,7 @@ mod program_two {
                 }
                 MapTransition::T2MapEnd => {
                     assert(!pending1.contains(MapTransition::T2MapStart));
-                    assert(pending2 <= set![MapTransition::T1MapStart, MapTransition::T1MapEnd]);
+                    assert(pending2 <= iset![MapTransition::T1MapStart, MapTransition::T1MapEnd]);
                     if pending2.contains(MapTransition::T1MapStart) {
                         assert(pending_enabled(pending2, MapTransition::T1MapStart));
                     } else {
@@ -740,8 +740,8 @@ mod program_two {
         }
 
         assert(s2.mappings =~= (
-            if !pending2.contains(MapTransition::T1MapEnd) { map![pte1_vaddr => pte1] } else { Map::empty() }.union_prefer_right(
-            if !pending2.contains(MapTransition::T2MapEnd) { map![pte2_vaddr => pte2] } else { Map::empty() })
+            if !pending2.contains(MapTransition::T1MapEnd) { imap![pte1_vaddr => pte1] } else { IMap::empty() }.union_prefer_right(
+            if !pending2.contains(MapTransition::T2MapEnd) { imap![pte2_vaddr => pte2] } else { IMap::empty() })
         ));
         assert(s2.thread_state.dom() =~= s1.thread_state.dom());
         // Needed to trigger the quantifier in `contains_value` for `s1.thread_state.values()`
@@ -749,8 +749,8 @@ mod program_two {
         let _ = s1.thread_state.contains_key(1);
         match t {
             MapTransition::T1MapStart => {
-                assert(s1.thread_state.values() =~= set![ThreadState::Idle]
-                    || s1.thread_state.values() =~= set![ThreadState::Idle,ThreadState::Map { vaddr: pte2_vaddr, pte: pte2 }]);
+                assert(s1.thread_state.values() =~= iset![ThreadState::Idle]
+                    || s1.thread_state.values() =~= iset![ThreadState::Idle,ThreadState::Map { vaddr: pte2_vaddr, pte: pte2 }]);
                 assert(step_Map_sound(s1.mappings, s1.thread_state.values(), pte1_vaddr, pte1));
                 assert(s1.thread_state[0] == ThreadState::Idle);
                 assert(s2.thread_state[0] == ThreadState::Map { vaddr: pte1_vaddr, pte: pte1 });
@@ -763,8 +763,8 @@ mod program_two {
                 assert(map_inv(c, s2, pending2));
             }
             MapTransition::T2MapStart => {
-                assert(s1.thread_state.values() =~= set![ThreadState::Idle]
-                    || s1.thread_state.values() =~= set![ThreadState::Idle,ThreadState::Map { vaddr: pte1_vaddr, pte: pte1 }]);
+                assert(s1.thread_state.values() =~= iset![ThreadState::Idle]
+                    || s1.thread_state.values() =~= iset![ThreadState::Idle,ThreadState::Map { vaddr: pte1_vaddr, pte: pte1 }]);
                 assert(step_Map_sound(s1.mappings, s1.thread_state.values(), pte2_vaddr, pte2));
                 assert(s1.thread_state[1] == ThreadState::Idle);
                 assert(s2.thread_state[1] == ThreadState::Map { vaddr: pte2_vaddr, pte: pte2 });
@@ -789,23 +789,23 @@ mod program_two {
         let s1 = State {
             mem: seq![arbitrary(); crate::spec_t::mmu::defs::MAX_BASE],
             thread_state:
-                map![
+                imap![
                 0 => ThreadState::Idle,
                 1 => ThreadState::Idle,
             ],
-            mappings: Map::empty(),
+            mappings: IMap::empty(),
             sound: true,
         };
 
         assert(wf(c, s1));
         assert(init(c, s1));
 
-        let pending1 = set![MapTransition::T1MapStart, MapTransition::T1MapEnd, MapTransition::T2MapStart, MapTransition::T2MapEnd];
+        let pending1 = iset![MapTransition::T1MapStart, MapTransition::T1MapEnd, MapTransition::T2MapStart, MapTransition::T2MapEnd];
         assert(pending_enabled(pending1, MapTransition::T1MapStart));
         assert(pending_inv(pending1));
         assert(s1.mappings =~=
-            if !pending1.contains(MapTransition::T1MapEnd) { map![pte1_vaddr => pte1] } else { Map::empty() }.union_prefer_right(
-            if !pending1.contains(MapTransition::T2MapEnd) { map![pte2_vaddr => pte2] } else { Map::empty() })
+            if !pending1.contains(MapTransition::T1MapEnd) { imap![pte1_vaddr => pte1] } else { IMap::empty() }.union_prefer_right(
+            if !pending1.contains(MapTransition::T2MapEnd) { imap![pte2_vaddr => pte2] } else { IMap::empty() })
         );
         assert(map_inv(c, s1, pending1));
         let (t1, s2, pending2) = map_next(c, s1, pending1);
@@ -822,14 +822,14 @@ mod program_two {
         assert(pending5.len() == 0);
 
         assert(s5.thread_state == s1.thread_state);
-        assert(s5.mappings == map![
+        assert(s5.mappings == imap![
             pte1_vaddr => pte1,
             pte2_vaddr => pte2,
         ]);
 
         // sync point
 
-        let mut threads = set![0nat, 1];
+        let mut threads = iset![0nat, 1];
         let all_threads = threads;
         assert(threads <= all_threads);
         assert(forall|t| all_threads.contains(t) ==> t < 2);
@@ -964,8 +964,8 @@ mod program_three {
 
         let s1 = State {
             mem: seq![arbitrary(); crate::spec_t::mmu::defs::MAX_BASE],
-            thread_state: map![0 => ThreadState::Idle],
-            mappings: Map::empty(),
+            thread_state: imap![0 => ThreadState::Idle],
+            mappings: IMap::empty(),
             sound: true,
         };
 
@@ -1042,8 +1042,8 @@ mod program_four {
 
         let s1 = State {
             mem: seq![arbitrary(); crate::spec_t::mmu::defs::MAX_BASE],
-            thread_state: map![0 => ThreadState::Idle],
-            mappings: Map::empty(),
+            thread_state: imap![0 => ThreadState::Idle],
+            mappings: IMap::empty(),
             sound: true,
         };
 

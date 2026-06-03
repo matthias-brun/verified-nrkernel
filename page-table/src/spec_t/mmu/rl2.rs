@@ -27,20 +27,20 @@ pub ghost struct State {
     /// Page table memory
     pub pt_mem: PTMem,
     /// Per-node state (TLBs)
-    pub tlbs: Map<Core, Map<usize, PTE>>,
+    pub tlbs: IMap<Core, IMap<usize, PTE>>,
     /// In-progress page table walks
-    pub walks: Map<Core, Set<Walk>>,
+    pub walks: IMap<Core, ISet<Walk>>,
     /// Store buffers
-    pub sbuf: Map<Core, Seq<(usize, usize)>>,
+    pub sbuf: IMap<Core, Seq<(usize, usize)>>,
     pub writes: Writes,
     pub polarity: Polarity,
     pub hist: History,
 }
 
 pub struct History {
-    pub pending_maps: Map<usize, PTE>,
-    pub pending_unmaps: Map<usize, PTE>,
-    pub pending_protects: Map<usize, PTE>,
+    pub pending_maps: IMap<usize, PTE>,
+    pub pending_unmaps: IMap<usize, PTE>,
+    pub pending_protects: IMap<usize, PTE>,
 }
 
 pub ghost enum Step {
@@ -101,15 +101,15 @@ impl State {
 
     pub open spec fn is_happy_writeprotect(self, core: Core, addr: usize, value: usize) -> bool {
         &&& self.writer_mem().is_prot_write(addr, value)
-        &&& self.writes.tso === set![]
-        &&& self.writes.nonpos === set![]
+        &&& self.writes.tso === iset![]
+        &&& self.writes.nonpos === iset![]
     }
 
     pub open spec fn can_flip_polarity(self, c: Constants) -> bool {
-        //&&& self.hist.pending_maps === map![]
-        //&&& self.hist.pending_unmaps === map![]
-        &&& self.writes.tso === set![]
-        &&& self.writes.nonpos === set![]
+        //&&& self.hist.pending_maps === imap![]
+        //&&& self.hist.pending_unmaps === imap![]
+        &&& self.writes.tso === iset![]
+        &&& self.writes.nonpos === iset![]
     }
 
     // pub open spec fn pending_unmap_for(self, va: usize) -> bool {
@@ -148,19 +148,19 @@ pub open spec fn step_Invlpg(pre: State, post: State, c: Constants, lbl: Lbl) ->
     &&& !pre.tlbs[core].contains_key(va)
 
     &&& post == State {
-        walks: pre.walks.insert(core, set![]),
+        walks: pre.walks.insert(core, iset![]),
         writes: Writes {
             core: pre.writes.core,
-            tso: if core == pre.writes.core { set![] } else { pre.writes.tso },
+            tso: if core == pre.writes.core { iset![] } else { pre.writes.tso },
             nonpos:
-                if post.writes.tso === set![] {
+                if post.writes.tso === iset![] {
                     pre.writes.nonpos.remove(core)
                 } else { pre.writes.nonpos },
         },
         hist: History {
-            pending_maps: if core == pre.writes.core { map![] } else { pre.hist.pending_maps },
-            pending_unmaps: if post.writes.nonpos === set![] { map![] } else { pre.hist.pending_unmaps },
-            pending_protects: if post.writes.nonpos === set![] { map![] } else { pre.hist.pending_protects },
+            pending_maps: if core == pre.writes.core { imap![] } else { pre.hist.pending_maps },
+            pending_unmaps: if post.writes.nonpos === iset![] { imap![] } else { pre.hist.pending_unmaps },
+            pending_protects: if post.writes.nonpos === iset![] { imap![] } else { pre.hist.pending_protects },
             ..pre.hist
         },
         ..pre
@@ -352,7 +352,7 @@ pub open spec fn step_WriteNonneg(pre: State, post: State, c: Constants, lbl: Lb
     &&& post.writes.core == core
     &&& post.polarity == Polarity::Mapping
     &&& post.hist.pending_maps == pre.hist.pending_maps.union_prefer_right(
-        Map::new(
+        IMap::new(
             |vbase| post.writer_mem()@.contains_key(vbase) && !pre.writer_mem()@.contains_key(vbase),
             |vbase| post.writer_mem()@[vbase]
         ))
@@ -378,12 +378,12 @@ pub open spec fn step_WriteNonpos(pre: State, post: State, c: Constants, lbl: Lb
     &&& post.sbuf == pre.sbuf.insert(core, pre.sbuf[core].push((addr, value)))
     &&& post.walks == pre.walks
     &&& post.writes.tso === pre.writes.tso.insert(addr)
-    &&& post.writes.nonpos == Set::new(|core| c.valid_core(core))
+    &&& post.writes.nonpos == ISet::new(|core| c.valid_core(core))
     &&& post.writes.core == core
     &&& post.polarity == Polarity::Unmapping
     &&& post.hist.pending_maps == pre.hist.pending_maps
     &&& post.hist.pending_unmaps == pre.hist.pending_unmaps.union_prefer_right(
-        Map::new(
+        IMap::new(
             |vbase| pre.writer_mem()@.contains_key(vbase) && !post.writer_mem()@.contains_key(vbase),
             |vbase| pre.writer_mem()@[vbase]
         ))
@@ -407,7 +407,7 @@ pub open spec fn step_WriteProtect(pre: State, post: State, c: Constants, lbl: L
     &&& post.sbuf == pre.sbuf.insert(core, pre.sbuf[core].push((addr, value)))
     &&& post.walks == pre.walks
     &&& post.writes.tso === pre.writes.tso.insert(addr)
-    &&& post.writes.nonpos == Set::new(|core| c.valid_core(core))
+    &&& post.writes.nonpos == ISet::new(|core| c.valid_core(core))
     &&& post.writes.core == core
     &&& post.polarity == Polarity::Protect
     &&& post.hist.pending_maps == pre.hist.pending_maps
@@ -415,7 +415,7 @@ pub open spec fn step_WriteProtect(pre: State, post: State, c: Constants, lbl: L
     &&& post.hist.pending_protects
         == if post.polarity is Protect {
                 pre.hist.pending_protects.union_prefer_right(
-                    Map::new(
+                    IMap::new(
                         |vbase| pre.writer_mem()@.contains_key(vbase)
                                 && post.writer_mem()@[vbase] != pre.writer_mem()@[vbase],
                         |vbase| pre.writer_mem()@[vbase]
@@ -467,10 +467,10 @@ pub open spec fn step_Barrier(pre: State, post: State, c: Constants, lbl: Lbl) -
 
     &&& post == State {
         writes: Writes {
-            tso: if core == pre.writes.core { set![] } else { pre.writes.tso },
+            tso: if core == pre.writes.core { iset![] } else { pre.writes.tso },
             ..pre.writes
         },
-        hist: if core == pre.writes.core { History { pending_maps: map![], ..pre.hist } } else { pre.hist },
+        hist: if core == pre.writes.core { History { pending_maps: imap![], ..pre.hist } } else { pre.hist },
         ..pre
     }
 }
@@ -522,19 +522,19 @@ pub open spec fn next(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
 }
 
 pub open spec fn init(pre: State, c: Constants) -> bool {
-    &&& pre.tlbs  === Map::new(|core| c.valid_core(core), |core| Map::empty())
-    &&& pre.walks === Map::new(|core| c.valid_core(core), |core| set![])
-    &&& pre.sbuf  === Map::new(|core| c.valid_core(core), |core| seq![])
+    &&& pre.tlbs  === IMap::new(|core| c.valid_core(core), |core| IMap::empty())
+    &&& pre.walks === IMap::new(|core| c.valid_core(core), |core| iset![])
+    &&& pre.sbuf  === IMap::new(|core| c.valid_core(core), |core| seq![])
     &&& pre.happy == true
-    &&& pre.writes.tso === set![]
-    &&& pre.writes.nonpos === set![]
-    &&& pre.hist.pending_maps === map![]
-    &&& pre.hist.pending_unmaps === map![]
-    &&& pre.hist.pending_protects === map![]
+    &&& pre.writes.tso === iset![]
+    &&& pre.writes.nonpos === iset![]
+    &&& pre.hist.pending_maps === imap![]
+    &&& pre.hist.pending_unmaps === imap![]
+    &&& pre.hist.pending_protects === imap![]
     &&& pre.polarity === Polarity::Mapping
     &&& c.valid_core(pre.writes.core)
 
-    &&& pre.pt_mem.mem === Map::new(|va| aligned(va as nat, 8) && c.in_ptmem_range(va as nat, 8), |va| 0)
+    &&& pre.pt_mem.mem === IMap::new(|va| aligned(va as nat, 8) && c.in_ptmem_range(va as nat, 8), |va| 0)
     &&& aligned(pre.pt_mem.pml4 as nat, 4096)
     &&& c.memories_disjoint()
     &&& pre.phys_mem.len() == c.range_mem.1
@@ -566,7 +566,7 @@ impl State {
     // For some reason this causes issues in a few proofs, so making it opaque
     #[verifier(opaque)]
     pub open spec fn wf_ptmem_range(self, c: Constants) -> bool {
-        //self.pt_mem.mem.dom() === Set::new(|va| aligned(va as nat, 8) && c.in_ptmem_range(va as nat, 8))
+        //self.pt_mem.mem.dom() === ISet::new(|va| aligned(va as nat, 8) && c.in_ptmem_range(va as nat, 8))
         &&& forall|va| #[trigger] self.pt_mem.mem.contains_key(va)
             <==> aligned(va as nat, 8) && c.in_ptmem_range(va as nat, 8)
         &&& forall|i| #![auto] 0 <= i < self.writer_sbuf().len() ==> {
@@ -711,9 +711,9 @@ impl State {
         &&& self.inv_mapping__valid_not_pending_is_not_in_sbuf(c)
         &&& self.inv_inflight_walks_are_prefixes(c)
         &&& self.inv_mapping__pending_map_is_base_walk(c)
-        &&& self.hist.pending_unmaps === map![]
-        &&& self.hist.pending_protects === map![]
-        &&& self.writes.tso === set![] ==> self.hist.pending_maps === map![]
+        &&& self.hist.pending_unmaps === imap![]
+        &&& self.hist.pending_protects === imap![]
+        &&& self.writes.tso === iset![] ==> self.hist.pending_maps === imap![]
     }
 
     pub open spec fn inv_unmapping(self, c: Constants) -> bool {
@@ -722,10 +722,10 @@ impl State {
         &&& self.inv_unmapping__core_vs_writer_reads(c)
         &&& self.inv_unmapping__valid_walk(c)
         &&& self.inv_notin_nonpos(c)
-        &&& self.hist.pending_maps === map![]
-        &&& self.hist.pending_protects === map![]
-        &&& self.writes.nonpos === set![] ==> self.hist.pending_unmaps === map![]
-        &&& self.writes.tso !== set![] ==> self.writes.nonpos === Set::new(|core| c.valid_core(core))
+        &&& self.hist.pending_maps === imap![]
+        &&& self.hist.pending_protects === imap![]
+        &&& self.writes.nonpos === iset![] ==> self.hist.pending_unmaps === imap![]
+        &&& self.writes.tso !== iset![] ==> self.writes.nonpos === ISet::new(|core| c.valid_core(core))
     }
 
     pub open spec fn inv_protect__sbuf_implies_bit7(self, c: Constants) -> bool {
@@ -766,10 +766,10 @@ impl State {
         &&& self.inv_protect__core_walks(c)
         &&& self.inv_protect__core_walks_invalid(c)
         &&& self.inv_protect__pending_pte_is_different(c)
-        &&& self.hist.pending_maps === map![]
-        &&& self.hist.pending_unmaps === map![]
-        &&& self.writes.nonpos === set![] ==> self.hist.pending_protects === map![]
-        &&& self.writes.tso !== set![] ==> self.writes.nonpos === Set::new(|core| c.valid_core(core))
+        &&& self.hist.pending_maps === imap![]
+        &&& self.hist.pending_unmaps === imap![]
+        &&& self.writes.nonpos === iset![] ==> self.hist.pending_protects === imap![]
+        &&& self.writes.tso !== iset![] ==> self.writes.nonpos === ISet::new(|core| c.valid_core(core))
         &&& self.writer_sbuf().len() <= 1
     }
 
@@ -809,8 +809,8 @@ proof fn next_step_preserves_inv(pre: State, post: State, c: Constants, step: St
     ensures post.inv(c)
 {
     if pre.happy && post.happy {
-        assert_by_contradiction!(Set::new(|core| c.valid_core(core)) !== set![], {
-            assert(Set::new(|core| c.valid_core(core)).contains(pre.writes.core));
+        assert_by_contradiction!(ISet::new(|core| c.valid_core(core)) !== iset![], {
+            assert(ISet::new(|core| c.valid_core(core)).contains(pre.writes.core));
         });
         next_step_preserves_wf(pre, post, c, step, lbl);
         next_step_preserves_inv_sbuf_facts(pre, post, c, step, lbl);
@@ -822,9 +822,9 @@ proof fn next_step_preserves_inv(pre: State, post: State, c: Constants, step: St
             } else if pre.polarity is Protect {
                 assert(pre.inv_inflight_walks_are_prefixes(c));
             }
-            assert(post.writes.tso === set![] ==> post.hist.pending_maps === map![]) by {
-                assert_by_contradiction!(Set::new(|core| c.valid_core(core)) !== set![], {
-                    assert(Set::new(|core| c.valid_core(core)).contains(pre.writes.core));
+            assert(post.writes.tso === iset![] ==> post.hist.pending_maps === imap![]) by {
+                assert_by_contradiction!(ISet::new(|core| c.valid_core(core)) !== iset![], {
+                    assert(ISet::new(|core| c.valid_core(core)).contains(pre.writes.core));
                 });
             };
             next_step_preserves_inv_inflight_walks_are_prefixes(pre, post, c, step, lbl);
@@ -852,9 +852,9 @@ proof fn next_step_preserves_inv_protect(pre: State, post: State, c: Constants, 
         next_step(pre, post, c, step, lbl),
     ensures post.inv_protect(c)
 {
-    assert(post.writes.tso === set![] ==> post.hist.pending_maps === map![]) by {
-        assert_by_contradiction!(Set::new(|core| c.valid_core(core)) !== set![], {
-            assert(Set::new(|core| c.valid_core(core)).contains(pre.writes.core));
+    assert(post.writes.tso === iset![] ==> post.hist.pending_maps === imap![]) by {
+        assert_by_contradiction!(ISet::new(|core| c.valid_core(core)) !== iset![], {
+            assert(ISet::new(|core| c.valid_core(core)).contains(pre.writes.core));
         });
     };
     broadcast use lemma_writes_tso_empty_implies_sbuf_empty;
@@ -883,8 +883,8 @@ proof fn next_step_preserves_inv_unmapping(pre: State, post: State, c: Constants
         next_step(pre, post, c, step, lbl),
     ensures post.inv_unmapping(c)
 {
-    assert_by_contradiction!(Set::new(|core| c.valid_core(core)) !== set![], {
-        assert(Set::new(|core| c.valid_core(core)).contains(pre.writes.core));
+    assert_by_contradiction!(ISet::new(|core| c.valid_core(core)) !== iset![], {
+        assert(ISet::new(|core| c.valid_core(core)).contains(pre.writes.core));
     });
 
     if pre.can_flip_polarity(c) {
@@ -915,7 +915,7 @@ proof fn next_step_preserves_inv_unmapping__valid_walk(pre: State, post: State, 
         pre.happy,
         post.happy,
         post.polarity is Unmapping,
-        pre.writes.nonpos === set![] ==> pre.hist.pending_unmaps === map![],
+        pre.writes.nonpos === iset![] ==> pre.hist.pending_unmaps === imap![],
         pre.inv_sbuf_facts(c),
         pre.writer_sbuf_entries_have_present_bit_0(),
         pre.inv_unmapping__valid_walk(c),
@@ -1071,7 +1071,7 @@ proof fn next_step_preserves_inv_protect__core_walks(pre: State, post: State, c:
         pre.inv_sbuf_facts(c),
         pre.inv_protect__core_walks(c),
         pre.writer_sbuf().len() <= 1,
-        pre.writes.nonpos === set![] ==> pre.hist.pending_protects === map![],
+        pre.writes.nonpos === iset![] ==> pre.hist.pending_protects === imap![],
         next_step(pre, post, c, step, lbl),
     ensures post.inv_protect__core_walks(c)
 {
@@ -1083,7 +1083,7 @@ proof fn next_step_preserves_inv_protect__core_walks(pre: State, post: State, c:
             assert(pre.writer_sbuf() =~= seq![]) by {
                 broadcast use lemma_writes_tso_empty_implies_sbuf_empty;
             };
-            assert(pre.hist.pending_protects =~= map![]);
+            assert(pre.hist.pending_protects =~= imap![]);
             assert forall|va: usize, core| #![auto] c.valid_core(core) && va < MAX_BASE
                 && post.core_mem(core).pt_walk(va).result() is Valid
                 implies {
@@ -1130,7 +1130,7 @@ proof fn next_step_preserves_inv_protect__core_walks(pre: State, post: State, c:
         Step::Invlpg => {
             let core = lbl->Invlpg_0;
             if pre.writes.nonpos.contains(core) {
-                if post.writes.nonpos === set![] {
+                if post.writes.nonpos === iset![] {
                     assert(pre.writer_sbuf() =~= seq![]) by {
                         broadcast use lemma_writes_tso_empty_implies_sbuf_empty;
                     };
@@ -1192,7 +1192,7 @@ proof fn next_step_preserves_inv_protect__pending_pte_is_different(pre: State, p
         pre.inv_sbuf_facts(c),
         pre.inv_protect__pending_pte_is_different(c),
         pre.writer_sbuf().len() <= 1,
-        pre.writes.nonpos === set![] ==> pre.hist.pending_protects === map![],
+        pre.writes.nonpos === iset![] ==> pre.hist.pending_protects === imap![],
         next_step(pre, post, c, step, lbl),
     ensures post.inv_protect__pending_pte_is_different(c)
 {
@@ -2542,7 +2542,7 @@ proof fn lemma_step_Writeback_preserves_writer_mem(pre: State, post: State, c: C
 broadcast proof fn lemma_writes_tso_empty_implies_sbuf_empty(pre: State, c: Constants, core: Core)
     requires
         pre.inv_sbuf_facts(c),
-        pre.writes.tso === set![],
+        pre.writes.tso === iset![],
         #[trigger] c.valid_core(core),
     ensures
         #[trigger] pre.sbuf[core] === seq![]
@@ -2963,8 +2963,8 @@ pub mod refinement {
                     if pre.hist.pending_protects.contains_pair(vbase, pte) {
                         assert(pre.writer_mem().pt_walk(vbase).result()->Valid_pte != pte);
                         assert_by_contradiction!(pre.writes.nonpos.contains(core), {
-                            assert(pre.writes.tso === set![]);
-                            assert(pre.writes.tso !~= set![]) by {
+                            assert(pre.writes.tso === iset![]);
+                            assert(pre.writes.tso !~= iset![]) by {
                                 assert(pre.writer_sbuf() !== seq![]);
                                 assert(pre.writes.tso.contains(pre.writer_sbuf()[0].0));
                             };

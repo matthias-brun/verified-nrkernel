@@ -46,7 +46,7 @@ pub struct WrappedTokenView {
     pub orig_st: os::State,
     pub args: OpArgs,
     pub change_made: bool,
-    pub regions: Map<MemRegion, Seq<usize>>,
+    pub regions: IMap<MemRegion, Seq<usize>>,
     /// We also keep the flat memory directly because this is what the MMU's interpretation is
     /// defined on.
     pub pt_mem: mmu::pt_mem::PTMem,
@@ -59,7 +59,7 @@ impl WrappedTokenView {
         self.regions[r][idx as int] & MASK_NEG_DIRTY_ACCESS
     }
 
-    pub open spec fn interp(self) -> Map<usize, PTE> {
+    pub open spec fn interp(self) -> IMap<usize, PTE> {
         self.pt_mem@
     }
 
@@ -189,7 +189,7 @@ impl WrappedTokenView {
                             assert(aligned(l2_base, L1_ENTRY_SIZE as nat)) by {
                                 crate::impl_u::indexing::lemma_entry_base_from_index(l1_base, l1_bidx as nat, L1_ENTRY_SIZE as nat);
                             };
-                            assert(interp_l1.interp_of_entry(l1_bidx as nat).dom() =~= set![l2_base as nat]);
+                            assert(interp_l1.interp_of_entry(l1_bidx as nat).dom() =~= iset![l2_base as nat]);
                             assert(self.pt_mem.is_base_pt_walk(vaddr));
                         },
                         GPDE::Directory { addr: l2_daddr, .. } => {
@@ -241,7 +241,7 @@ impl WrappedTokenView {
                                         crate::impl_u::indexing::lemma_entry_base_from_index(l1_base, l1_bidx as nat, L1_ENTRY_SIZE as nat);
                                         crate::impl_u::indexing::lemma_entry_base_from_index(l2_base, l2_bidx as nat, L2_ENTRY_SIZE as nat);
                                     };
-                                    assert(interp_l2.interp_of_entry(l2_bidx as nat).dom() =~= set![l3_base as nat]);
+                                    assert(interp_l2.interp_of_entry(l2_bidx as nat).dom() =~= iset![l3_base as nat]);
                                     assert(aligned(vaddr as nat, L2_ENTRY_SIZE as nat));
                                     assert(align_to_usize(vaddr, L2_ENTRY_SIZE) == vaddr);
                                     assert(self.pt_mem.is_base_pt_walk(vaddr));
@@ -300,7 +300,7 @@ impl WrappedTokenView {
                                                 crate::impl_u::indexing::lemma_entry_base_from_index(l1_base, l1_bidx as nat, L1_ENTRY_SIZE as nat);
                                                 crate::impl_u::indexing::lemma_entry_base_from_index(l2_base, l2_bidx as nat, L2_ENTRY_SIZE as nat);
                                             };
-                                            assert(interp_l3.interp_of_entry(l3_bidx as nat).dom() =~= set![l4_base as nat]);
+                                            assert(interp_l3.interp_of_entry(l3_bidx as nat).dom() =~= iset![l4_base as nat]);
                                             //assert(aligned(vaddr as nat, L3_ENTRY_SIZE as nat));
                                             assert(align_to_usize(vaddr, L3_ENTRY_SIZE) == vaddr);
                                             assert(self.pt_mem.is_base_pt_walk(vaddr));
@@ -536,7 +536,7 @@ impl WrappedTokenView {
         self.lemma_interps_match_aux2(pt);
 
         assert(PT::interp_at(self, pt, 0, self.pt_mem.pml4, 0).interp() ==
-            Map::new(|vaddr: nat| vaddr <= usize::MAX && self.pt_mem@.contains_key(vaddr as usize), |vaddr: nat| self.pt_mem@[vaddr as usize]));
+            IMap::new(|vaddr: nat| vaddr <= usize::MAX && self.pt_mem@.contains_key(vaddr as usize), |vaddr: nat| self.pt_mem@[vaddr as usize]));
 
         assert(PT::interp(self, pt).interp() =~= crate::spec_t::mmu::defs::nat_keys(self.interp()));
     }
@@ -559,7 +559,7 @@ impl WrappedMapToken {
                 },
             change_made: self.change_made,
             regions:
-                Map::new(
+                IMap::new(
                     |r: MemRegion| self.tok.st().os_ext.allocated.contains(r),
                     |r: MemRegion| Seq::new(512, |i: int| self.tok.st().mmu@.pt_mem.mem[(r.base + i * 8) as usize])),
             pt_mem: self.tok.st().mmu@.pt_mem,
@@ -595,10 +595,10 @@ impl WrappedMapToken {
             orig_st: tok.st(),
         };
         assert(t@.regions.dom() =~= tok.st().os_ext.allocated);
-        assert(Map::new(
+        assert(IMap::new(
                 |k| t.tok.st().mmu@.pt_mem@.contains_key(k) && !t@.orig_st.mmu@.pt_mem@.contains_key(k),
                 |k| t.tok.st().mmu@.pt_mem@[k])
-            =~= map![]);
+            =~= imap![]);
         t
     }
 
@@ -993,8 +993,8 @@ impl WrappedMapToken {
                 assert(tok.tok.st().mmu@.pt_mem == tok@.pt_mem);
                 assert(tok.tok.st().os_ext.allocated == tok@.regions.dom());
             };
-            assert(tok.tok.st().mmu@.pending_maps =~= map![]);
-            assert(tok.tok.st().mmu@.writes.tso =~= set![]);
+            assert(tok.tok.st().mmu@.pending_maps =~= imap![]);
+            assert(tok.tok.st().mmu@.writes.tso =~= iset![]);
             assert(os::step_MapEnd(tok.tok.consts(), tok.tok.st(), post, core, lbl));
             let step = os::Step::MapEnd { core };
             assert(os::next_step(tok.tok.consts(), tok.tok.st(), post, step, lbl));
@@ -1137,7 +1137,7 @@ impl WrappedUnmapToken {
                 },
             change_made: self.change_made,
             regions:
-                Map::new(
+                IMap::new(
                     |r: MemRegion| self.tok.st().os_ext.allocated.contains(r),
                     |r: MemRegion| Seq::new(512, |i: int| self.tok.st().mmu@.pt_mem.mem[(r.base + i * 8) as usize])),
             pt_mem: self.tok.st().mmu@.pt_mem,
@@ -1175,10 +1175,10 @@ impl WrappedUnmapToken {
             orig_st: tok.st(),
         };
         assert(t@.regions.dom() =~= tok.st().os_ext.allocated);
-        assert(Map::new(
+        assert(IMap::new(
                 |k| t.tok.st().mmu@.pt_mem@.contains_key(k) && !t@.orig_st.mmu@.pt_mem@.contains_key(k),
                 |k| t.tok.st().mmu@.pt_mem@[k])
-            =~= map![]);
+            =~= imap![]);
         t
     }
 
@@ -1549,7 +1549,7 @@ impl WrappedUnmapToken {
                     os_ext: osext_tok.post(),
                     ..tok.tok.st()
                 };
-                assert(tok.tok.st().mmu@.writes.tso =~= set![]);
+                assert(tok.tok.st().mmu@.writes.tso =~= iset![]);
                 assert(os_ext::next(tok.tok.st().os_ext, post.os_ext, tok.tok.consts().common, osext_tok.lbl()));
                 assert(os::step_UnmapInitiateShootdown(tok.tok.consts(), tok.tok.st(), post, core, RLbl::Tau));
                 let step = os::Step::UnmapInitiateShootdown { core };
@@ -1659,8 +1659,8 @@ impl WrappedUnmapToken {
             }
 
             assert(state10.os_ext.shootdown_vec.open_requests.is_empty());
-            assert(tok.tok.st().mmu@.writes.tso === set![]);
-            assert(tok.tok.st().mmu@.writes.nonpos =~= set![]);
+            assert(tok.tok.st().mmu@.writes.tso === iset![]);
+            assert(tok.tok.st().mmu@.writes.nonpos =~= iset![]);
         } else {
             // register fail
             assert(result is None);
@@ -1681,8 +1681,8 @@ impl WrappedUnmapToken {
                 let ghost state2 = tok.tok.st();
                 let pidx = tok.tok.do_concurrent_trs();
                 lemma_concurrent_trs(state2, tok.tok.st(), tok.tok.consts(), tok.tok.core(), pidx);
-                assert(tok.tok.st().mmu@.writes.tso === set![]);
-                assert(tok.tok.st().mmu@.writes.nonpos === set![]);
+                assert(tok.tok.st().mmu@.writes.tso === iset![]);
+                assert(tok.tok.st().mmu@.writes.nonpos === iset![]);
             }
         }
 
@@ -1708,7 +1708,7 @@ impl WrappedUnmapToken {
                 assert(tok.tok.st().mmu@.pt_mem == tok@.pt_mem);
                 assert(tok.tok.st().os_ext.allocated == tok@.regions.dom());
             };
-            assert(tok.tok.st().mmu@.pending_unmaps === map![]);
+            assert(tok.tok.st().mmu@.pending_unmaps === imap![]);
             assert(os::step_UnmapEnd(tok.tok.consts(), tok.tok.st(), post, core, lbl));
             let step = os::Step::UnmapEnd { core };
             assert(os::next_step(tok.tok.consts(), tok.tok.st(), post, step, lbl));
@@ -1747,7 +1747,7 @@ impl WrappedProtectToken {
                 },
             change_made: self.change_made,
             regions:
-                Map::new(
+                IMap::new(
                     |r: MemRegion| self.tok.st().os_ext.allocated.contains(r),
                     |r: MemRegion| Seq::new(512, |i: int| self.tok.st().mmu@.pt_mem.mem[(r.base + i * 8) as usize])),
             pt_mem: self.tok.st().mmu@.pt_mem,
@@ -1785,10 +1785,10 @@ impl WrappedProtectToken {
             orig_st: tok.st(),
         };
         assert(t@.regions.dom() =~= tok.st().os_ext.allocated);
-        assert(Map::new(
+        assert(IMap::new(
                 |k| t.tok.st().mmu@.pt_mem@.contains_key(k) && !t@.orig_st.mmu@.pt_mem@.contains_key(k),
                 |k| t.tok.st().mmu@.pt_mem@[k])
-            =~= map![]);
+            =~= imap![]);
         t
     }
 
@@ -1936,8 +1936,8 @@ impl WrappedProtectToken {
                     lemma_bits_prot();
                 };
             };
-            assert(tok.tok.st().mmu@.writes.tso =~= set![]);
-            assert(tok.tok.st().mmu@.writes.nonpos =~= set![]);
+            assert(tok.tok.st().mmu@.writes.tso =~= iset![]);
+            assert(tok.tok.st().mmu@.writes.nonpos =~= iset![]);
             assert(tok.tok.st().mmu@.is_happy_writeprotect(core, addr, value));
 
 
@@ -2062,7 +2062,7 @@ impl WrappedProtectToken {
                     os_ext: osext_tok.post(),
                     ..tok.tok.st()
                 };
-                assert(tok.tok.st().mmu@.writes.tso =~= set![]);
+                assert(tok.tok.st().mmu@.writes.tso =~= iset![]);
                 assert(os_ext::next(tok.tok.st().os_ext, post.os_ext, tok.tok.consts().common, osext_tok.lbl()));
                 assert(os::step_ProtectInitiateShootdown(tok.tok.consts(), tok.tok.st(), post, core, RLbl::Tau));
                 let step = os::Step::ProtectInitiateShootdown { core };
@@ -2165,8 +2165,8 @@ impl WrappedProtectToken {
             }
 
             assert(state10.os_ext.shootdown_vec.open_requests.is_empty());
-            assert(tok.tok.st().mmu@.writes.tso === set![]);
-            assert(tok.tok.st().mmu@.writes.nonpos =~= set![]);
+            assert(tok.tok.st().mmu@.writes.tso === iset![]);
+            assert(tok.tok.st().mmu@.writes.nonpos =~= iset![]);
         } else {
             // register fail
             assert(result is None);
@@ -2187,8 +2187,8 @@ impl WrappedProtectToken {
                 let ghost state2 = tok.tok.st();
                 let pidx = tok.tok.do_concurrent_trs();
                 lemma_concurrent_trs(state2, tok.tok.st(), tok.tok.consts(), tok.tok.core(), pidx);
-                assert(tok.tok.st().mmu@.writes.tso === set![]);
-                assert(tok.tok.st().mmu@.writes.nonpos === set![]);
+                assert(tok.tok.st().mmu@.writes.tso === iset![]);
+                assert(tok.tok.st().mmu@.writes.nonpos === iset![]);
             }
         }
 
@@ -2214,7 +2214,7 @@ impl WrappedProtectToken {
                 assert(tok.tok.st().mmu@.pt_mem == tok@.pt_mem);
                 assert(tok.tok.st().os_ext.allocated == tok@.regions.dom());
             };
-            assert(tok.tok.st().mmu@.pending_protects === map![]);
+            assert(tok.tok.st().mmu@.pending_protects === imap![]);
             assert(os::step_ProtectEnd(tok.tok.consts(), tok.tok.st(), post, core, lbl));
             let step = os::Step::ProtectEnd { core };
             assert(os::next_step(tok.tok.consts(), tok.tok.st(), post, step, lbl));
