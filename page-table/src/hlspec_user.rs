@@ -698,7 +698,7 @@ mod program_two {
             assert(exists|t| pending_enabled(pending1, t));
             assert(pending_enabled(pending1, t));
             assert(pending1 == iset![t]);
-            assert(iset![t].remove(t) == Set::<MapTransition>::empty());
+            assert(iset![t].remove(t) == ISet::<MapTransition>::empty());
             assert(pending2.is_empty());
         } else {
             assert(pending1.len() > 1);
