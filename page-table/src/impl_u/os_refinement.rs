@@ -649,28 +649,7 @@ proof fn step_MemOp_refines(c: os::Constants, s1: os::State, s2: os::State, step
             assert(tlb_va + pte.frame.size <= s1.interp_vmem(c).len());
             assert(pte.frame.base + pte.frame.size <= s1.mmu@.phys_mem.len());
 
-            match op {
-                MemOp::Store { new_value, result } => {
-                    if paddr < d.phys_mem_size && !pte.flags.is_supervisor && pte.flags.is_writable {
-                        assert(result is Ok);
-                        interp_vmem_update_range(c, s1, tlb_va, pte, vaddr as int, op.op_size() as int, new_value);
-                        assert(s2.interp(c).mem === update_range(s1.interp(c).mem, vaddr as int, new_value));
-                    } else {
-                        assert(result is Pagefault);
-                        assert(s2.interp(c).mem === s1.interp(c).mem);
-                    }
-                },
-                MemOp::Load { is_exec, result, .. } => {
-                    assert(s2.interp(c).mem === s1.interp(c).mem);
-                    if paddr < d.phys_mem_size && !pte.flags.is_supervisor && (is_exec ==> !pte.flags.disable_execute) {
-                        assert(result is Value);
-                        interp_vmem_subrange(c, s1, tlb_va, pte, vaddr as int, op.op_size() as int);
-                        assert(result->0 == s1.interp(c).mem.subrange(vaddr as int, vaddr + op.op_size() as int));
-                    } else {
-                        assert(result is Pagefault);
-                    }
-                }
-            }
+            step_MemOp_refines_tlb_mem(c, s1, s2, core, vaddr, op, tlb_va, pte);
 
             if s1.effective_mappings().contains_key(tlb_va)
                 && s1.effective_mappings()[tlb_va] == pte
@@ -796,6 +775,86 @@ proof fn step_MemOp_refines(c: os::Constants, s1: os::State, s2: os::State, step
             assert(false);
         },
     };
+}
+
+// Memory-content reasoning of step_MemOp_refines's MemOpTLB arm.  Takes the no_overlaps/bounds
+// facts (derived by the caller) directly so it doesn't need to re-establish the full os invariant
+#[verifier::spinoff_prover]
+proof fn step_MemOp_refines_tlb_mem(
+    c: os::Constants,
+    s1: os::State,
+    s2: os::State, core: Core, vaddr: nat,
+    op: MemOp,
+    tlb_va: nat,
+    pte: PTE,
+)
+    requires
+        s1.inv(c),
+        s2.inv(c),
+        s1.sound,
+        s1.applied_mappings() =~= s2.applied_mappings(),
+        no_overlaps(s1.applied_mappings()),
+        no_overlaps_pmem(s1.applied_mappings()),
+        bounds(c, s1.applied_mappings()),
+        s1.mmu@.phys_mem.len() == c.common.range_mem.1,
+        s1.applied_mappings().contains_key(tlb_va),
+        s1.applied_mappings()[tlb_va].frame == pte.frame,
+        c.valid_core(core),
+        s1.mmu@.tlbs[core].contains_key(tlb_va as usize),
+        pte == s1.mmu@.tlbs[core][tlb_va as usize],
+        rl1::step_MemOpTLB(s1.mmu@, s2.mmu@, c.common, tlb_va as usize,
+            mmu::Lbl::MemOp(core, vaddr as usize, op)),
+        vaddr as int + op.op_size() as int <= tlb_va + pte.frame.size,
+        tlb_va + pte.frame.size <= s1.interp_vmem(c).len(),
+        pte.frame.base + pte.frame.size <= s1.mmu@.phys_mem.len(),
+    ensures
+        ({
+            let paddr = pte.frame.base + (vaddr - tlb_va);
+            &&& op is Store ==> {
+                let result = op->Store_result;
+                &&& (paddr < c.interp().phys_mem_size && !pte.flags.is_supervisor && pte.flags.is_writable
+                    ==> result is Ok
+                        && s2.interp(c).mem === update_range(s1.interp(c).mem, vaddr as int, op->Store_new_value))
+                &&& (!(paddr < c.interp().phys_mem_size && !pte.flags.is_supervisor && pte.flags.is_writable)
+                    ==> result is Pagefault && s2.interp(c).mem === s1.interp(c).mem)
+            }
+            &&& op is Load ==> {
+                let result = op->Load_result;
+                &&& s2.interp(c).mem === s1.interp(c).mem
+                &&& (paddr < c.interp().phys_mem_size && !pte.flags.is_supervisor
+                        && (op->Load_is_exec ==> !pte.flags.disable_execute)
+                    ==> result is Value
+                        && result->0 == s1.interp(c).mem.subrange(vaddr as int, vaddr + op.op_size() as int))
+                &&& (!(paddr < c.interp().phys_mem_size && !pte.flags.is_supervisor
+                        && (op->Load_is_exec ==> !pte.flags.disable_execute))
+                    ==> result is Pagefault)
+            }
+        }),
+{
+    let d = c.interp();
+    let paddr = pte.frame.base + (vaddr - tlb_va);
+    match op {
+        MemOp::Store { new_value, result } => {
+            if paddr < d.phys_mem_size && !pte.flags.is_supervisor && pte.flags.is_writable {
+                assert(result is Ok);
+                interp_vmem_update_range(c, s1, tlb_va, pte, vaddr as int, op.op_size() as int, new_value);
+                assert(s2.interp(c).mem === update_range(s1.interp(c).mem, vaddr as int, new_value));
+            } else {
+                assert(result is Pagefault);
+                assert(s2.interp(c).mem === s1.interp(c).mem);
+            }
+        },
+        MemOp::Load { is_exec, result, .. } => {
+            assert(s2.interp(c).mem === s1.interp(c).mem);
+            if paddr < d.phys_mem_size && !pte.flags.is_supervisor && (is_exec ==> !pte.flags.disable_execute) {
+                assert(result is Value);
+                interp_vmem_subrange(c, s1, tlb_va, pte, vaddr as int, op.op_size() as int);
+                assert(result->0 == s1.interp(c).mem.subrange(vaddr as int, vaddr + op.op_size() as int));
+            } else {
+                assert(result is Pagefault);
+            }
+        }
+    }
 }
 
 proof fn vaddr_distinct(c: os::Constants, s: os::State)

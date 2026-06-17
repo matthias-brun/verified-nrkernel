@@ -203,15 +203,14 @@ impl Arch {
             self.lemma_entry_sizes_aligned(i+1,j);
             assert(aligned(self.entry_size(i+1), self.entry_size(j)));
             assert(self.entry_size(i) % self.entry_size(i + 1) == 0) by {
-                // assert(self.inv());
-                // assert(self.entry_size_is_next_layer_size(i));
-                // assert(self.entry_size_is_next_layer_size(i + 1));
-                // assert(self.entry_size(i) == self.entry_size((i + 1) as nat) * self.num_entries((i + 1) as nat));
-                assert(self.entry_size(i) % self.entry_size(i + 1) == 0) by (nonlinear_arith)
-                    requires i != j, self.entry_size(i) > 0, self.entry_size(i + 1) > 0,
-                    self.entry_size(i) == self.entry_size((i + 1) as nat) * self.num_entries((i + 1) as nat),
-                { };
-
+                vstd::arithmetic::mul::lemma_mul_is_commutative(
+                    self.entry_size((i + 1) as nat) as int,
+                    self.num_entries((i + 1) as nat) as int,
+                );
+                vstd::arithmetic::div_mod::lemma_mod_multiples_basic(
+                    self.num_entries((i + 1) as nat) as int,
+                    self.entry_size((i + 1) as nat) as int,
+                );
             };
             assert(aligned(self.entry_size(i), self.entry_size(i+1)));
             crate::extra::aligned_transitive(self.entry_size(i), self.entry_size(i+1), self.entry_size(j));
