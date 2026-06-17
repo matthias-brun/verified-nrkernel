@@ -105,12 +105,17 @@ pub proof fn subtract_mod_eq_zero(a: nat, b: nat, c: nat)
     assert(0int % c == (b - a) % c);
 }
 
-pub proof fn leq_add_aligned_less(a: nat, b: nat, c: nat) by (nonlinear_arith)
+pub proof fn leq_add_aligned_less(a: nat, b: nat, c: nat)
     requires 0 < b, a < c, aligned(a, b), aligned(c, b),
     ensures a + b <= c,
 {
-    assert(a == b * (a / b) + a % b);
-    assert(c == b * (c / b) + c % b);
+    vstd::arithmetic::div_mod::lemma_fundamental_div_mod(a as int, b as int);
+    vstd::arithmetic::div_mod::lemma_fundamental_div_mod(c as int, b as int);
+    // a == b*(a/b), c == b*(c/b); from a < c we get a/b < c/b, hence c/b >= a/b + 1.
+    assert(a / b < c / b) by (nonlinear_arith)
+        requires 0 < b, a < c, a == b * (a / b), c == b * (c / b);
+    assert(a + b <= c) by (nonlinear_arith)
+        requires 0 < b, a / b < c / b, a == b * (a / b), c == b * (c / b);
 }
 
 pub proof fn aligned_transitive_auto()
