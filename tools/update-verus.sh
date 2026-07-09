@@ -9,7 +9,7 @@ VERUS_REPO="git@github.com:verus-lang/verus.git"
 VERUS_DIR=".verus"
 
 # the verus release to be used
-VERUS_RELEASE="release/0.2026.03.14.0ac935a"
+VERUS_RELEASE="release/0.2026.07.05.49b8806"
 
 # check if verus repo exists, clone it if needed
 if [ ! -d .verus ]; then
