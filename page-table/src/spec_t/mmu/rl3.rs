@@ -12,7 +12,7 @@ use vstd::prelude::*;
 use crate::extra::lemma_bits_misc;
 use crate::spec_t::mmu::*;
 use crate::spec_t::mmu::pt_mem::*;
-use crate::spec_t::mmu::defs::{ bit, Core, bitmask_inc, MemOp, LoadResult, PTE };
+use crate::spec_t::mmu::defs::{ bit, Core, bitmask_inc, MemOp, LoadResult, PTE, Vpn, Paddr, Vaddr, Pcid, Cr3 };
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::defs::{ aligned, update_range, MAX_BASE };
 use crate::spec_t::mmu::translation::{ l0_bits, l1_bits, l2_bits, l3_bits, MASK_DIRTY_ACCESS };
@@ -25,19 +25,271 @@ verus! {
 // Most of the definitions in this file are `closed`. We reason about the behavior of this state
 // machine exclusively in terms of the more abstract MMU models it refines.
 
+
+/// Represents the Per-Core State
+pub struct CoreState {
+    /// the CR3 register containing the pml4 pointer and pcid
+    pub cr3: Cr3,
+    /// the cores's TLB, this is a total map from PCID -> Map<Vaddr, PTE>
+    pub tlb: IMap<Pcid, IMap<Vaddr, PTE>>,
+    /// Paging Structure Caches (PSCs) of the core, this is a total map from PCID -> ISet<Walk>
+    pub psc: IMap<Pcid, ISet<Walk>>,
+    /// Ongoing walks of the core, this is a total
+    pub walks: ISet<Walk>,
+    /// Store Buffer of the core (for PTMem Updates)
+    pub stbuf: Seq<(Vaddr, usize)>
+}
+
+impl CoreState {
+    pub open spec fn new(cr3: Cr3) -> CoreState {
+        CoreState {
+            cr3,
+            tlb: IMap::total(|k| IMap::empty()),
+            psc: IMap::total(|k| iset![]),
+            walks: iset![],
+            stbuf:  seq![],
+        }
+    }
+
+    pub open spec fn init(&self, cr3: Cr3) -> bool {
+        &&& self.cr3   === cr3
+        &&& self.tlb   === IMap::total(|k| IMap::empty())
+        &&& self.psc === IMap::total(|k| iset![])
+        &&& self.walks === iset![]
+        &&& self.stbuf  === seq![]
+    }
+
+    /// Well-formedness Condition
+    #[verifier(inline)]
+    pub open spec fn wf(self) -> bool {
+        // the TLB is a full/total map from PCID -> Map<Vaddr, PTE> and its map with the TLB
+        // entries is finite
+        &&& self.tlb.is_full()
+        &&& forall |p| #[trigger]self.tlb.contains_key(p) ==> self.tlb[p].dom().finite()
+
+        // the PSC is a full/total map from PCID -> ISet<Walk> and its set with the cached
+        // partial walks is finite
+        &&& self.psc.is_full()    //
+        &&& forall |p| #[trigger]self.psc.contains_key(p) ==> self.psc[p].finite()
+
+        // there is a finite number of ongoing walks
+        &&& self.walks.finite()
+    }
+
+    pub open spec fn walk_valid(walk: Walk) -> bool {
+        &&& aligned(walk.vaddr as nat, 8)
+        &&& walk.path.len() <= 3
+        &&& !walk.complete
+    }
+
+    /// Invariant
+    pub open spec fn inv(self) -> bool {
+        &&& forall |walk| #[trigger]self.walks_contains(walk)
+            ==> Self::walk_valid(walk)
+        &&& forall |pcid, walk| self.psc_contains_pcid(pcid, walk)
+            ==> Self::walk_valid(walk)
+    }
+
+    // -------------------------------------- PCID -------------------------------------------------
+
+    /// obtains the current PCID
+    pub open spec fn pcid(&self) -> Pcid {
+        self.cr3.pcid
+    }
+
+    // -------------------------------------- TLB --------------------------------------------------
+
+
+    /// checks whether the TLB does not have an entry associated with the supplied pcid
+    #[verifier(inline)]
+    pub open spec fn tlb_empty_pcid(self, pcid: Pcid) -> bool {
+        self.tlb[pcid].is_empty()
+    }
+
+    /// checks whether the TLB does not have an entry associated with the current pcid
+    #[verifier(inline)]
+    pub open spec fn tlb_empty(self) -> bool {
+        self.tlb_empty_pcid(self.pcid())
+    }
+
+    /// checks whether the TLB does not have any entry
+    #[verifier(inline)]
+    pub open spec fn tlb_empty_all(self) -> bool {
+        forall |p| #[trigger]self.tlb[p].is_empty()
+    }
+
+    /// checks whether the TLB contains an entry with the supplied `pcid` and `vaddr`
+    #[verifier(inline)]
+    pub open spec fn tlb_contains_pcid(self, pcid: Pcid, va: Vaddr) -> bool {
+        self.tlb[pcid].contains_key(va)
+    }
+
+    /// checks whether the TLB contains a mapping for the Vaddr `va` with the current `pcid`
+    #[verifier(inline)]
+    pub open spec fn tlb_contains(self, va: Vaddr) -> bool {
+        self.tlb_contains_pcid(self.pcid(), va)
+    }
+
+    /// obtains the element from the TLB, which must contain the element
+    pub open spec fn tlb_lookup_pcid(self, pcid: Pcid, va: Vaddr) -> PTE
+        recommends self.tlb_contains_pcid(pcid, va)
+    {
+        self.tlb[pcid][va]
+    }
+
+    /// obtains the element by VA with the current PCID, which must contain the element
+    pub open spec fn tlb_lookup(self, va: Vaddr) -> PTE
+        recommends self.tlb_contains(va)
+    {
+        self.tlb_lookup_pcid(self.pcid(), va)
+    }
+
+    /// inserts an entry in the TLB. it will be associated with the current `pcid`
+    pub open spec fn tlb_fill(self, vbase: Vaddr, pte: PTE) -> CoreState
+        recommends !self.tlb[self.pcid()].contains_key(vbase)
+    {
+        CoreState {
+            tlb: self.tlb.insert(self.pcid(), self.tlb[self.pcid()].insert(vbase, pte)),
+            ..self
+        }
+    }
+
+    /// evicts an entry with the given `pcid` and `vaddr` from the TLB
+    pub open spec fn tlb_evict(self, pcid: Pcid, va: Vaddr) -> CoreState
+    {
+        CoreState {
+            tlb: self.tlb.insert(pcid, self.tlb[pcid].remove(va)),
+            ..self
+        }
+    }
+
+
+    // ---------------------------- Paging Structure Caches ----------------------------------------
+
+    /// checks whether the PSC does not contain an entry associated with the supplied pcid
+    #[verifier(inline)]
+    pub open spec fn psc_empty_pcid(&self, pcid: Pcid) -> bool {
+        self.psc[pcid].is_empty()
+    }
+
+    /// checks whether the PCS does not contain an entry associated with the current pcid
+    #[verifier(inline)]
+    pub open spec fn psc_empty(&self) -> bool {
+        self.psc_empty_pcid(self.pcid())
+    }
+
+    /// checks whether the PCS does not contain any entry
+    #[verifier(inline)]
+    pub open spec fn psc_empty_all(&self) -> bool {
+        forall |p| (#[trigger]self.psc[p]).is_empty()
+    }
+
+    /// checks whether the walk is part of the PSC and associated with the current PCID
+    #[verifier(inline)]
+    pub open spec fn psc_contains_pcid(&self, pcid: Pcid, walk: Walk) -> bool {
+        self.psc[pcid].contains(walk)
+    }
+
+    /// checks whether the walk is part of the PSC and associated with the current PCID
+    #[verifier(inline)]
+    pub open spec fn psc_contains(&self, walk: Walk) -> bool {
+        self.psc_contains_pcid(self.pcid(), walk)
+    }
+
+    /// inserts the current partial walk into the PSC and associates it with the current PCID
+    #[verifier(inline)]
+    pub open spec fn psc_fill(self, walk: Walk) -> CoreState {
+        CoreState {
+            psc: self.psc.insert(self.pcid(), self.psc[self.pcid()].insert(walk)),
+            ..self
+        }
+    }
+
+    /// evicts the walk from the PSC with the supplied pcid
+    pub open spec fn psc_evict(self, pcid: Pcid, walk: Walk) -> CoreState {
+      CoreState {
+            psc: self.psc.insert(pcid, self.psc[pcid].remove(walk)),
+            ..self
+        }
+    }
+
+    // -------------------------------------- Walks ------------------------------------------------
+
+    /// whether the current ongoing walks are empty
+    #[verifier(inline)]
+    pub open spec fn walks_empty(&self) -> bool {
+        self.walks.is_empty()
+    }
+
+    /// whether the supplied walk is ongoing
+    #[verifier(inline)]
+    pub open spec fn walks_contains(&self, walk: Walk) -> bool {
+        self.walks.contains(walk)
+    }
+
+    /// removes a walk from the core
+    #[verifier(inline)]
+    pub open spec fn walks_remove(self, walk: Walk) -> CoreState {
+        CoreState {
+            walks: self.walks.remove(walk),
+            ..self
+        }
+    }
+
+    #[verifier(inline)]
+    pub open spec fn walks_insert(self, walk: Walk) -> CoreState {
+        CoreState {
+            walks: self.walks.insert(walk),
+            ..self
+        }
+    }
+
+    #[verifier(inline)]
+    pub open spec fn walks_replace(self, walk: Walk, walk_next: Walk) -> CoreState {
+        CoreState {
+            walks: self.walks.remove(walk).insert(walk_next),
+            ..self
+        }
+    }
+
+    // ----------------------------------- Store Buffers--------------------------------------------
+
+    /// whether or not the store buffer is empty
+    pub open spec fn stbuf_empty(self) -> bool {
+        self.stbuf.len() == 0
+    }
+
+    pub open spec fn stbuf_push(self, addr: Paddr, value: usize) -> CoreState {
+        CoreState {
+            stbuf: self.stbuf.push((addr, value)),
+            ..self
+        }
+    }
+
+    pub open spec fn stbuf_drop(self) -> CoreState
+    {
+        CoreState {
+            stbuf: self.stbuf.drop_first(),
+            ..self
+        }
+    }
+
+    pub open spec fn stbuf_first(self) -> (Paddr, usize)
+    {
+        self.stbuf.first()
+    }
+
+}
+
+
+/// System State
 pub struct State {
     /// Byte-indexed physical (non-page-table) memory
     phys_mem: Seq<u8>,
     /// Page table memory
     pt_mem: PTMem,
-    /// Per-node state (TLBs)
-    tlbs: IMap<Core, IMap<usize, PTE>>,
-    /// In-progress page table walks
-    walks: IMap<Core, ISet<Walk>>,
-    /// Translation caches
-    cache: IMap<Core, ISet<Walk>>,
-    /// Store buffers
-    sbuf: IMap<Core, Seq<(usize, usize)>>,
+    /// the cores in the system
+    cores: IMap<Core, CoreState>,
     /// History variables. These do not influence the transitions in any way. Neither in enabling
     /// conditions nor in state updates. We only use these during the refinement.
     hist: History,
@@ -75,20 +327,22 @@ pub struct Writes {
 /// irrelevant for page table walks, so the read predicate only shows up in `step_Read`.
 pub enum Step {
     Invlpg,
+    InvPcid,
+    WriteCr3,
     // Faulting memory op due to failed translation
     MemOpNoTr { walk: Walk, r: usize },
     // Memory op using a translation from the TLB
-    MemOpTLB { tlb_va: usize },
+    MemOpTLB { tlb_va: Vaddr },
     // Translation caching
     CacheFill { core: Core, walk: Walk },
     CacheUse { core: Core, walk: Walk },
-    CacheEvict { core: Core, walk: Walk },
+    CacheEvict { core: Core, pcid: Pcid, walk: Walk },
     // Non-atomic page table walks
     WalkInit { core: Core, vaddr: usize },
     WalkStep { core: Core, walk: Walk, r: usize },
     WalkAbort { core: Core, walk: Walk },
     TLBFill { core: Core, walk: Walk, r: usize },
-    TLBEvict { core: Core, tlb_va: usize },
+    TLBEvict { core: Core, tlb_pcid: Pcid, tlb_va: Vaddr },
     // TSO, operations on page table memory
     Write,
     Writeback { core: Core },
@@ -106,7 +360,7 @@ impl State {
     /// The memory as seen by the given core. I.e. taking into consideration the core's store
     /// buffers.
     pub closed spec fn core_mem(self, core: Core) -> PTMem {
-        self.pt_mem.write_seq(self.sbuf[core])
+        self.pt_mem.write_seq(self.cores[core].stbuf)
     }
 
     /// The view of the memory from the writer core's perspective.
@@ -135,24 +389,71 @@ impl State {
 }
 
 
-
+//
 // State machine transitions
+//
+pub closed spec fn step_WriteCr3(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+    &&& lbl matches Lbl::WriteCr3(core, cr3, flush)
 
+    &&& c.valid_core(core)
+
+    // mov cr3 is a serializing instruction, ..
+    &&& pre.cores[core].stbuf_empty()
+    &&& pre.cores[core].walks_empty()
+
+    // If CR4.PCIDE = 1 and bit 63 of the instruction’s source operand is 1, the instruction is not
+    // required to invalidate any TLB entries or entries in paging-structure caches.
+    // If CR4.PCIDE = 1 and bit 63 of the instruction’s source operand is 0, the instruction
+    // invalidates all TLB entries associated with the PCID specified in bits 11:0 of the
+    // instruction’s source operand except those for global pages. It also invalidates all entries
+    // in all paging-structure caches associated with that PCID. It is not required to invalidate
+    // entries in the TLBs and paging-structure caches that are associated with other PCIDs.
+    &&& flush ==> {
+        &&& pre.cores[core].tlb_empty_pcid(cr3.pcid)
+        &&& pre.cores[core].psc_empty_pcid(cr3.pcid)
+    }
+
+    &&& post == State {
+        hist: History {
+            // we're happy when there weasn't a change (for now)
+            happy: pre.hist.happy && pre.cores[core].cr3 == cr3,
+            // if there was a flush, then we clear the walks since last invlpg
+            walks: if flush { pre.hist.walks.insert(core, iset![]) } else { pre.hist.walks },
+            // TODO: check this!
+            writes: Writes {
+                core: pre.hist.writes.core,
+                tso: if core == pre.hist.writes.core { iset![] } else { pre.hist.writes.tso },
+                nonpos:
+                    if post.hist.writes.tso === iset![] {
+                        pre.hist.writes.nonpos.remove(core)
+                    } else { pre.hist.writes.nonpos },
+            },
+            pending_maps: if core == pre.hist.writes.core { imap![] } else { pre.hist.pending_maps },
+            pending_unmaps: if post.hist.writes.nonpos === iset![] { imap![] } else { pre.hist.pending_unmaps },
+            pending_protects: if post.hist.writes.nonpos === iset![] { imap![] } else { pre.hist.pending_protects },
+            ..pre.hist
+        },
+        ..pre
+    }
+}
+
+
+/// Invlpg Instruction
 pub closed spec fn step_Invlpg(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
     &&& lbl matches Lbl::Invlpg(core, va)
 
     &&& c.valid_core(core)
     // Invlpg is a serializing instruction, ..
-    &&& pre.sbuf[core].len() == 0
+    &&& pre.cores[core].stbuf_empty()
     // .. evicts corresponding entries from the translation caches, ..
     // Note that per Intel Manual 3A, 4.10.4.1:
     // "INVLPG also invalidates all entries in all paging-structure caches associated with the
     // current PCID, regardless of the linear addresses to which they correspond."
-    &&& pre.cache[core].is_empty()
+    &&& pre.cores[core].psc_empty()
     // .. and waits for inflight walks to complete
-    &&& pre.walks[core].is_empty()
+    &&& pre.cores[core].walks_empty()
     // .. and evicts the corresponding TLB entry
-    &&& !pre.tlbs[core].contains_key(va)
+    &&& !pre.cores[core].tlb_contains(va)
 
     &&& post == State {
         hist: History {
@@ -174,6 +475,81 @@ pub closed spec fn step_Invlpg(pre: State, post: State, c: Constants, lbl: Lbl) 
     }
 }
 
+
+/// InvPcid Instruction
+pub closed spec fn step_InvPcid(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+    &&& lbl matches Lbl::InvPcid(core, typ)
+
+    &&& c.valid_core(core)
+    // InvPcid is a serializing instruction, ..
+    &&& pre.cores[core].stbuf_empty()
+    &&& pre.cores[core].walks_empty()
+
+
+    &&& match typ {
+        // Individual-address invalidation: If the INVPCID type is 0, the logical processor invalidates
+        // mappings—except global translations—for the linear address and PCID specified in the INVPCID
+        // descriptor. In some cases, the instruction may invalidate global translations or mappings
+        // for other linear addresses (or other PCIDs) as well.
+        InvPcidType::IndividualAddress(d) => {
+            &&& pre.cores[core].tlb_contains_pcid(d.pcid, d.vaddr)
+                    ==> pre.cores[core].tlb_lookup_pcid(d.pcid, d.vaddr).flags.global()
+            &&& pre.cores[core].psc_empty_pcid(d.pcid)
+        }
+        // Single-context invalidation: If the INVPCID type is 1, the logical processor invalidates
+        // all mappings—except global translations—associated with the PCID specified in the INVPCID
+        // descriptor. In some cases, the instruction may invalidate global translations or mappings
+        // for other PCIDs as well.
+        InvPcidType::SingleContext(d) => {
+            &&& forall |pcid, vaddr| #[trigger]pre.cores[core].tlb_contains_pcid(pcid, vaddr)
+                    ==> (pcid != d.pcid  || pre.cores[core].tlb_lookup_pcid(pcid, vaddr).flags.global())
+            &&& pre.cores[core].psc_empty_pcid(d.pcid)
+        }
+        // All-context invalidation, including global translations: If the INVPCID type is 2, the
+        // logical processor invalidates all mappings—including global translations—associated with any
+        // PCID.
+        InvPcidType::AllContextGlobal(d) => {
+            &&& pre.cores[core].tlb_empty_all()
+            &&& pre.cores[core].psc_empty_all()
+        }
+        // All-context invalidation: If the INVPCID type is 3, the logical processor invalidates all
+        // mappings—except global translations—associated with any PCID. In some case, the instruction
+        // may invalidate global translations as well.
+        InvPcidType::AllContext(d) => {
+            &&& forall |pcid, vaddr| #[trigger]pre.cores[core].tlb_contains_pcid(pcid, vaddr)
+                    ==> pre.cores[core].tlb_lookup_pcid(pcid, vaddr).flags.global()
+            &&& pre.cores[core].psc_empty_all()
+        }
+    }
+
+    &&& post == State {
+        hist: History {
+            happy: pre.hist.happy && match typ {
+                InvPcidType::IndividualAddress(d) => { pre.cores[core].pcid() == d.pcid }
+                InvPcidType::SingleContext(d) => { pre.cores[core].pcid() == d.pcid },
+                _ => pre.hist.happy
+            },
+            walks: pre.hist.walks.insert(core, iset![]),
+            writes: Writes {
+                core: pre.hist.writes.core,
+                tso: if core == pre.hist.writes.core { iset![] } else { pre.hist.writes.tso },
+                nonpos:
+                    if post.hist.writes.tso === iset![] {
+                        pre.hist.writes.nonpos.remove(core)
+                    } else { pre.hist.writes.nonpos },
+            },
+            pending_maps: if core == pre.hist.writes.core { imap![] } else { pre.hist.pending_maps },
+            pending_unmaps: if post.hist.writes.nonpos === iset![] { imap![] } else { pre.hist.pending_unmaps },
+            pending_protects: if post.hist.writes.nonpos === iset![] { imap![] } else { pre.hist.pending_protects },
+            ..pre.hist
+        },
+        ..pre
+    }
+}
+
+
+
+
 pub closed spec fn step_MemOpNoTr(
     pre: State,
     post: State,
@@ -189,7 +565,7 @@ pub closed spec fn step_MemOpNoTr(
     &&& c.valid_core(core)
     &&& aligned(memop_vaddr as nat, memop.op_size())
     &&& memop.valid_op_size()
-    &&& pre.walks[core].contains(walk)
+    &&& pre.cores[core].walks_contains(walk)
     &&& walk.vaddr == memop_vaddr
     &&& walk_next.complete
     &&& walk_next.result() is Invalid
@@ -197,7 +573,7 @@ pub closed spec fn step_MemOpNoTr(
     }
 
     &&& post == State {
-        walks: pre.walks.insert(core, pre.walks[core].remove(walk)),
+        cores: pre.cores.insert(core, pre.cores[core].walks_remove(walk)),
         ..pre
     }
 }
@@ -214,38 +590,35 @@ pub closed spec fn step_MemOpTLB(
     &&& c.valid_core(core)
     &&& aligned(memop_vaddr as nat, memop.op_size())
     &&& memop.valid_op_size()
-    &&& pre.tlbs[core].contains_key(tlb_va)
     &&& {
-    let pte = pre.tlbs[core][tlb_va];
-    let paddr = pte.frame.base + (memop_vaddr - tlb_va);
-    &&& tlb_va <= memop_vaddr < tlb_va + pte.frame.size
-    &&& match memop {
-        MemOp::Store { new_value, result } => {
-            if paddr < c.phys_mem_size && !pte.flags.is_supervisor && pte.flags.is_writable {
-                &&& result is Ok
-                &&& post.phys_mem === update_range(pre.phys_mem, paddr, new_value)
-            } else {
-                &&& result is Pagefault
-                &&& post.phys_mem === pre.phys_mem
-            }
-        },
-        MemOp::Load { is_exec, result, .. } => {
-            if paddr < c.phys_mem_size && !pte.flags.is_supervisor && (is_exec ==> !pte.flags.disable_execute) {
-                &&& result == LoadResult::Value(pre.phys_mem.subrange(paddr, paddr + memop.op_size()))
-                &&& post.phys_mem === pre.phys_mem
-            } else {
-                &&& result is Pagefault
-                &&& post.phys_mem === pre.phys_mem
-            }
-        },
-    }
+        &&& pre.cores[core].tlb_contains(tlb_va);
+        let pte = pre.cores[core].tlb_lookup(tlb_va);
+        let paddr = pte.frame.base + (memop_vaddr - tlb_va);
+        &&& tlb_va <= memop_vaddr < tlb_va + pte.frame.size
+        &&& match memop {
+            MemOp::Store { new_value, result } => {
+                if paddr < c.phys_mem_size && !pte.flags.is_supervisor && pte.flags.is_writable {
+                    &&& result is Ok
+                    &&& post.phys_mem === update_range(pre.phys_mem, paddr, new_value)
+                } else {
+                    &&& result is Pagefault
+                    &&& post.phys_mem === pre.phys_mem
+                }
+            },
+            MemOp::Load { is_exec, result, .. } => {
+                if paddr < c.phys_mem_size && !pte.flags.is_supervisor && (is_exec ==> !pte.flags.disable_execute) {
+                    &&& result == LoadResult::Value(pre.phys_mem.subrange(paddr, paddr + memop.op_size()))
+                    &&& post.phys_mem === pre.phys_mem
+                } else {
+                    &&& result is Pagefault
+                    &&& post.phys_mem === pre.phys_mem
+                }
+            },
+        }
     }
 
     &&& post.pt_mem == pre.pt_mem
-    &&& post.tlbs == pre.tlbs
-    &&& post.walks == pre.walks
-    &&& post.cache == pre.cache
-    &&& post.sbuf == pre.sbuf
+    &&& post.cores == pre.cores
     &&& post.hist == pre.hist
 }
 
@@ -257,10 +630,10 @@ pub closed spec fn step_CacheFill(pre: State, post: State, c: Constants, core: C
     &&& lbl is Tau
 
     &&& c.valid_core(core)
-    &&& pre.walks[core].contains(walk)
+    &&& pre.cores[core].walks_contains(walk)
 
     &&& post == State {
-        cache: pre.cache.insert(core, pre.walks[core].insert(walk)),
+        cores: pre.cores.insert(core, pre.cores[core].psc_fill(walk)),
         ..pre
     }
 }
@@ -269,22 +642,22 @@ pub closed spec fn step_CacheUse(pre: State, post: State, c: Constants, core: Co
     &&& lbl is Tau
 
     &&& c.valid_core(core)
-    &&& pre.cache[core].contains(walk)
+    &&& pre.cores[core].psc_contains(walk)
 
     &&& post == State {
-        walks: pre.walks.insert(core, pre.walks[core].insert(walk)),
+        cores: pre.cores.insert(core, pre.cores[core].walks_insert(walk)),
         ..pre
     }
 }
 
-pub closed spec fn step_CacheEvict(pre: State, post: State, c: Constants, core: Core, walk: Walk, lbl: Lbl) -> bool {
+pub closed spec fn step_CacheEvict(pre: State, post: State, c: Constants, core: Core, pcid: Pcid,  walk: Walk, lbl: Lbl) -> bool {
     &&& lbl is Tau
 
     &&& c.valid_core(core)
-    &&& pre.cache[core].contains(walk)
+    &&& pre.cores[core].psc_contains_pcid(pcid, walk)
 
     &&& post == State {
-        cache: pre.cache.insert(core, pre.cache[core].remove(walk)),
+        cores: pre.cores.insert(core, pre.cores[core].psc_evict(pcid, walk)),
         ..pre
     }
 }
@@ -301,7 +674,7 @@ pub closed spec fn step_WalkInit(pre: State, post: State, c: Constants, core: Co
     &&& vaddr < MAX_BASE
 
     &&& post == State {
-        walks: pre.walks.insert(core, pre.walks[core].insert(walk)),
+        cores: pre.cores.insert(core, pre.cores[core].walks_insert(walk)),
         hist: History {
             walks: pre.hist.walks.insert(core, pre.hist.walks[core].insert(walk)),
             ..pre.hist
@@ -346,11 +719,11 @@ pub closed spec fn step_WalkStep(
     &&& lbl is Tau
 
     &&& c.valid_core(core)
-    &&& pre.walks[core].contains(walk)
+    &&& pre.cores[core].walks.contains(walk)
     &&& !walk_next.complete
 
     &&& post == State {
-        walks: pre.walks.insert(core, pre.walks[core].remove(walk).insert(walk_next)),
+        cores: pre.cores.insert(core, pre.cores[core].walks_replace(walk, walk_next)),
         hist: History {
             walks: pre.hist.walks.insert(core, pre.hist.walks[core].insert(walk_next)),
             ..pre.hist
@@ -371,10 +744,10 @@ pub closed spec fn step_WalkAbort(
     &&& lbl is Tau
 
     &&& c.valid_core(core)
-    &&& pre.walks[core].contains(walk)
+    &&& pre.cores[core].walks_contains(walk)
 
     &&& post == State {
-        walks: pre.walks.insert(core, pre.walks[core].remove(walk)),
+        cores: pre.cores.insert(core, pre.cores[core].walks_remove(walk)),
         ..pre
     }
 }
@@ -387,26 +760,27 @@ pub closed spec fn step_TLBFill(pre: State, post: State, c: Constants, core: Cor
     let walk_next = walk_next(pre, core, walk, r);
     &&& lbl is Tau
 
+    // XXX: do we need to have a condition here that there cannot be an existing tlb entry?
+
     &&& c.valid_core(core)
-    &&& pre.walks[core].contains(walk)
+    &&& pre.cores[core].walks.contains(walk)
     &&& walk_next.complete
     &&& walk_next.result() matches WalkResult::Valid { vbase, pte }
 
     &&& post == State {
-        walks: pre.walks.insert(core, pre.walks[core].remove(walk)),
-        tlbs: pre.tlbs.insert(core, pre.tlbs[core].insert(vbase, pte)),
+        cores: pre.cores.insert(core, pre.cores[core].tlb_fill(vbase, pte).walks_remove(walk)),
         ..pre
     }
 }
 
-pub closed spec fn step_TLBEvict(pre: State, post: State, c: Constants, core: Core, tlb_va: usize, lbl: Lbl) -> bool {
+pub closed spec fn step_TLBEvict(pre: State, post: State, c: Constants, core: Core, tlb_pcid: Pcid, tlb_va: Vaddr, lbl: Lbl) -> bool {
     &&& lbl is Tau
 
     &&& c.valid_core(core)
-    &&& pre.tlbs[core].contains_key(tlb_va)
+    &&& pre.cores[core].tlb_contains_pcid(tlb_pcid, tlb_va)
 
     &&& post == State {
-        tlbs: pre.tlbs.insert(core, pre.tlbs[core].remove(tlb_va)),
+        cores: pre.cores.insert(core, pre.cores[core].tlb_evict(tlb_pcid, tlb_va)),
         ..pre
     }
 }
@@ -425,10 +799,7 @@ pub closed spec fn step_Write(pre: State, post: State, c: Constants, lbl: Lbl) -
 
     &&& post.phys_mem == pre.phys_mem
     &&& post.pt_mem == pre.pt_mem
-    &&& post.tlbs == pre.tlbs
-    &&& post.sbuf == pre.sbuf.insert(core, pre.sbuf[core].push((addr, value)))
-    &&& post.cache == pre.cache
-    &&& post.walks == pre.walks
+    &&& post.cores === pre.cores.insert(core, pre.cores[core].stbuf_push(addr, value))
 
     &&& post.hist.happy == pre.hist.happy
         && (pre.is_happy_writenonneg(core, addr, value)
@@ -473,15 +844,15 @@ pub closed spec fn step_Write(pre: State, post: State, c: Constants, lbl: Lbl) -
 }
 
 pub closed spec fn step_Writeback(pre: State, post: State, c: Constants, core: Core, lbl: Lbl) -> bool {
-    let (addr, value) = pre.sbuf[core][0];
+    let (addr, value) = pre.cores[core].stbuf_first();
     &&& lbl is Tau
 
     &&& c.valid_core(core)
-    &&& 0 < pre.sbuf[core].len()
+    &&& !pre.cores[core].stbuf_empty()
 
     &&& post == State {
         pt_mem: pre.pt_mem.write(addr, value),
-        sbuf: pre.sbuf.insert(core, pre.sbuf[core].drop_first()),
+        cores: pre.cores.insert(core, pre.cores[core].stbuf_drop()),
         ..pre
     }
 }
@@ -503,7 +874,7 @@ pub closed spec fn step_Barrier(pre: State, post: State, c: Constants, lbl: Lbl)
     &&& lbl matches Lbl::Barrier(core)
 
     &&& c.valid_core(core)
-    &&& pre.sbuf[core].len() == 0
+    &&& pre.cores[core].stbuf_empty()
 
     &&& post == State {
         hist: History {
@@ -527,16 +898,18 @@ pub open spec fn next_step(pre: State, post: State, c: Constants, step: Step, lb
     match step {
         //Step::ReadWrite { paddr, wr }    => step_ReadWrite(pre, post, c, paddr, wr, lbl),
         Step::Invlpg                       => step_Invlpg(pre, post, c, lbl),
+        Step::InvPcid                      => step_InvPcid(pre, post, c, lbl),
+        Step::WriteCr3                     => step_WriteCr3(pre, post, c, lbl),
         Step::MemOpNoTr { walk, r }        => step_MemOpNoTr(pre, post, c, walk, r, lbl),
         Step::MemOpTLB { tlb_va }          => step_MemOpTLB(pre, post, c, tlb_va, lbl),
         Step::CacheFill { core, walk }     => step_CacheFill(pre, post, c, core, walk, lbl),
         Step::CacheUse { core, walk }      => step_CacheUse(pre, post, c, core, walk, lbl),
-        Step::CacheEvict { core, walk }    => step_CacheEvict(pre, post, c, core, walk, lbl),
+        Step::CacheEvict { core, pcid, walk }    => step_CacheEvict(pre, post, c, core, pcid, walk, lbl),
         Step::WalkInit { core, vaddr }     => step_WalkInit(pre, post, c, core, vaddr, lbl),
         Step::WalkStep { core, walk, r }   => step_WalkStep(pre, post, c, core, walk, r, lbl),
         Step::WalkAbort { core, walk }     => step_WalkAbort(pre, post, c, core, walk, lbl),
         Step::TLBFill { core, walk, r }    => step_TLBFill(pre, post, c, core, walk, r, lbl),
-        Step::TLBEvict { core, tlb_va }    => step_TLBEvict(pre, post, c, core, tlb_va, lbl),
+        Step::TLBEvict { core, tlb_pcid,  tlb_va }    => step_TLBEvict(pre, post, c, core, tlb_pcid, tlb_va, lbl),
         //Step::WalkDone { core, walk, r } => step_WalkDone(pre, post, c, core, walk, r, lbl),
         Step::Write                        => step_Write(pre, post, c, lbl),
         Step::Writeback { core }           => step_Writeback(pre, post, c, core, lbl),
@@ -547,10 +920,8 @@ pub open spec fn next_step(pre: State, post: State, c: Constants, step: Step, lb
 }
 
 pub closed spec fn init(pre: State, c: Constants) -> bool {
-    &&& pre.tlbs  === IMap::new(|core| c.valid_core(core), |core| IMap::empty())
-    &&& pre.walks === IMap::new(|core| c.valid_core(core), |core| iset![])
-    &&& pre.cache === IMap::new(|core| c.valid_core(core), |core| iset![])
-    &&& pre.sbuf  === IMap::new(|core| c.valid_core(core), |core| seq![])
+    &&& pre.cores === IMap::new(|core| c.valid_core(core), |core| CoreState::new(c.cr3))
+
     &&& pre.hist.happy == true
     &&& pre.hist.walks === IMap::new(|core| c.valid_core(core), |core| iset![])
     //&&& pre.hist.writes.core == ..
@@ -581,23 +952,21 @@ pub open spec fn next(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
 
 impl State {
     pub closed spec fn wf(self, c: Constants) -> bool {
-        &&& forall|core| #[trigger] c.valid_core(core) <==> self.walks.contains_key(core)
-        &&& forall|core| #[trigger] c.valid_core(core) <==> self.cache.contains_key(core)
-        &&& forall|core| #[trigger] c.valid_core(core) <==> self.sbuf.contains_key(core)
+        &&& forall|core| #[trigger] c.valid_core(core) <==> self.cores.contains_key(core)
         &&& forall|core| #[trigger] c.valid_core(core) <==> self.hist.walks.contains_key(core)
-        &&& forall|core| #[trigger] c.valid_core(core) ==> self.walks[core].finite()
-        &&& forall|core| #[trigger] c.valid_core(core) ==> self.cache[core].finite()
+        // &&& forall|core| #[trigger] c.valid_core(core) ==> self.cores[core].wf()
+        &&& forall|core| #[trigger] self.cores.contains_key(core) ==> self.cores[core].wf()
         &&& forall|core| #[trigger] c.valid_core(core) ==> self.hist.walks[core].finite()
         //&&& self.hist.writes.nonpos.finite()
     }
 
     pub closed spec fn inv_inflight_walks(self, c: Constants) -> bool {
-        &&& forall|core, walk| c.valid_core(core) && #[trigger] self.walks[core].contains(walk) ==> {
+        &&& forall|core, walk| c.valid_core(core) && #[trigger](self.cores[core]).walks_contains(walk) ==> {
             &&& aligned(walk.vaddr as nat, 8)
             &&& walk.path.len() <= 3
             &&& !walk.complete
         }
-        &&& forall|core, walk| c.valid_core(core) && #[trigger] self.cache[core].contains(walk) ==> {
+        &&& forall|core, pcid, walk| c.valid_core(core) && self.cores[core].psc_contains_pcid(pcid, walk) ==> {
             &&& aligned(walk.vaddr as nat, 8)
             &&& walk.path.len() <= 3
             &&& !walk.complete
@@ -605,21 +974,22 @@ impl State {
     }
 
     pub closed spec fn inv_walks_subset_of_hist_walks(self, c: Constants) -> bool {
-        forall|core| #[trigger] c.valid_core(core) ==> self.walks[core].subset_of(self.hist.walks[core])
+        forall|core| #[trigger] c.valid_core(core) ==> self.cores[core].walks.subset_of(self.hist.walks[core])
     }
 
+    // phrase this only for the current pcid.
     pub closed spec fn inv_cache_subset_of_hist_walks(self, c: Constants) -> bool {
         forall|core, walk|
-            c.valid_core(core) && #[trigger] self.cache[core].contains(walk)
-            ==> self.hist.walks[core].contains(walk)
+            c.valid_core(core) &&  self.cores[core].psc_contains(walk)
+                ==> #[trigger] self.hist.walks[core].contains(walk)
     }
 
     pub closed spec fn inv(self, c: Constants) -> bool {
-        self.hist.happy ==> {
-        &&& self.wf(c)
-        &&& self.inv_inflight_walks(c)
-        &&& self.inv_walks_subset_of_hist_walks(c)
-        &&& self.inv_cache_subset_of_hist_walks(c)
+        &&& self.wf(c) // maybe outside of happy
+        &&& self.hist.happy ==> {
+             &&& forall|core| #[trigger] c.valid_core(core) ==> self.cores[core].inv()
+             &&& self.inv_walks_subset_of_hist_walks(c)
+             &&& self.inv_cache_subset_of_hist_walks(c)
         }
     }
 
@@ -642,18 +1012,14 @@ pub proof fn next_preserves_inv(pre: State, post: State, c: Constants, lbl: Lbl)
         next(pre, post, c, lbl),
     ensures post.inv(c)
 {
-    let step = choose|step| next_step(pre, post, c, step, lbl);
-    match step {
-        rl3::Step::Write => {
-            assert(post.inv(c));
-        },
-        _ => assert(post.inv(c)),
-    }
+    assert forall |c| #[trigger] pre.cores.contains_key(c) implies
+        pre.cores[c].wf() && post.cores[c].wf() by {
+            assert(pre.cores[c].tlb.dom() == post.cores[c].tlb.dom());
+            assert(pre.cores[c].psc.dom() == post.cores[c].psc.dom());
+        }
 }
 
 // $line_count$}$
-
-
 
 
 pub mod refinement {
@@ -666,15 +1032,24 @@ pub mod refinement {
     use crate::spec_t::mmu::rl3::bit;
     use crate::spec_t::mmu::translation::{ MASK_DIRTY_ACCESS, MASK_NEG_DIRTY_ACCESS };
 
+    impl rl3::CoreState {
+        pub open spec fn interp(self) -> rl2::CoreState {
+            rl2::CoreState {
+                cr3: self.cr3,
+                tlb: self.tlb,
+                walks: self.walks,
+                stbuf: self.stbuf
+            }
+        }
+    }
+
     impl rl3::State {
         pub closed spec fn interp(self) -> rl2::State {
             rl2::State {
                 happy: self.hist.happy,
                 phys_mem: self.phys_mem,
                 pt_mem: self.pt_mem,
-                tlbs: self.tlbs,
-                walks: self.hist.walks,
-                sbuf: self.sbuf,
+                cores: self.cores.map_entries(|k, v:rl3::CoreState| v.interp()),
                 writes: self.hist.writes,
                 polarity: self.hist.polarity,
                 hist: rl2::History {
@@ -705,16 +1080,18 @@ pub mod refinement {
             if pre.hist.happy {
                 match self {
                     rl3::Step::Invlpg                     => rl2::Step::Invlpg,
+                    rl3::Step::InvPcid                    => rl2::Step::InvPcid,
+                    rl3::Step::WriteCr3                   => rl2::Step::WriteCr3,
                     rl3::Step::MemOpNoTr { walk, r }      => rl2::Step::MemOpNoTr { walk },
                     rl3::Step::MemOpTLB { tlb_va }        => rl2::Step::MemOpTLB { tlb_va },
                     rl3::Step::CacheFill { core, walk }   => rl2::Step::Stutter,
                     rl3::Step::CacheUse { core, walk }    => rl2::Step::Stutter,
-                    rl3::Step::CacheEvict { core, walk }  => rl2::Step::Stutter,
+                    rl3::Step::CacheEvict { core, pcid, walk }  => rl2::Step::Stutter,
                     rl3::Step::WalkInit { core, vaddr }   => rl2::Step::WalkInit { core, vaddr },
                     rl3::Step::WalkStep { core, walk, r } => rl2::Step::WalkStep { core, walk },
                     rl3::Step::WalkAbort { core, walk }   => rl2::Step::Stutter,
                     rl3::Step::TLBFill { core, walk, r }  => rl2::Step::TLBFill { core, walk },
-                    rl3::Step::TLBEvict { core, tlb_va }  => rl2::Step::TLBEvict { core, tlb_va },
+                    rl3::Step::TLBEvict { core, tlb_pcid, tlb_va }  => rl2::Step::TLBEvict { core, tlb_pcid, tlb_va },
                     rl3::Step::Write                      => {
                         let (core, addr, value) =
                             if let Lbl::Write(core, addr, value) = lbl {
@@ -758,7 +1135,7 @@ pub mod refinement {
                 == rl2::walk_next(state.interp().core_mem(core), walk)
     {
         reveal(rl2::walk_next);
-        state.pt_mem.lemma_write_seq(state.interp().sbuf[core]);
+        state.pt_mem.lemma_write_seq(state.interp().cores[core].stbuf);
         broadcast use
             lemma_mask_dirty_access_after_xor,
             PDE::lemma_view_unchanged_dirty_access;
@@ -776,6 +1153,14 @@ pub mod refinement {
                 rl3::Step::Invlpg => {
                     assert(rl2::step_Invlpg(pre.interp(), post.interp(), c, lbl));
                 },
+                rl3::Step::InvPcid => {
+                    // TODO
+                    assert(rl2::step_Stutter(pre.interp(), post.interp(), c, lbl));
+                }
+                rl3::Step::WriteCr3 => {
+                    // TODO
+                    assert(rl2::step_Stutter(pre.interp(), post.interp(), c, lbl));
+                }
                 rl3::Step::MemOpNoTr { walk, r } => {
                     let core = lbl->MemOp_0;
                     rl3_walk_next_is_rl2_walk_next(pre, core, walk, r);
@@ -790,7 +1175,7 @@ pub mod refinement {
                 rl3::Step::CacheUse { core, walk } => {
                     assert(rl2::step_Stutter(pre.interp(), post.interp(), c, lbl));
                 },
-                rl3::Step::CacheEvict { core, walk } => {
+                rl3::Step::CacheEvict { core, pcid, walk } => {
                     assert(rl2::step_Stutter(pre.interp(), post.interp(), c, lbl));
                 },
                 rl3::Step::WalkInit { core, vaddr } => {
@@ -807,8 +1192,8 @@ pub mod refinement {
                     rl3_walk_next_is_rl2_walk_next(pre, core, walk, r);
                     assert(rl2::step_TLBFill(pre.interp(), post.interp(), c, core, walk, lbl));
                 },
-                rl3::Step::TLBEvict { core, tlb_va } => {
-                    assert(rl2::step_TLBEvict(pre.interp(), post.interp(), c, core, tlb_va, lbl));
+                rl3::Step::TLBEvict { core, tlb_pcid, tlb_va } => {
+                    assert(rl2::step_TLBEvict(pre.interp(), post.interp(), c, core, tlb_pcid, tlb_va, lbl));
                 },
                 rl3::Step::Write => {
                     let (core, addr, value) =

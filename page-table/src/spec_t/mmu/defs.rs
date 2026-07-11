@@ -26,6 +26,66 @@ macro_rules! bit {
 
 pub(crate) use bit;
 
+/// represents a virtual page number.
+pub type Vpn = usize;
+
+/// represents a process context identifier. Note:
+pub type Pcid = usize;
+
+/// the maximumn PCID value
+pub const MAX_PCID : usize = 0xfff;
+
+/// represents a virtual address
+pub type Vaddr = usize;
+
+
+/// represents a virtual address
+pub type Paddr = usize;
+
+/// represents a InvPcid Descriptor
+pub struct InvPcidDescriptor {
+    pub pcid: Pcid,
+    pub vaddr: Vaddr,
+}
+
+pub type Cr3 = InvPcidDescriptor;
+
+
+pub enum InvPcidType {
+    ///
+    /// Individual-address invalidation: If the INVPCID type is 0, the logical processor invalidates
+    /// mappings—except global translations—for the linear address and PCID specified in the INVPCID
+    /// descriptor. In some cases, the instruction may invalidate global translations or mappings
+    /// for other linear addresses (or other PCIDs) as well.
+    IndividualAddress(InvPcidDescriptor),
+    /// Single-context invalidation: If the INVPCID type is 1, the logical processor invalidates
+    /// all mappings—except global translations—associated with the PCID specified in the INVPCID
+    /// descriptor. In some cases, the instruction may invalidate global translations or mappings
+    /// for other PCIDs as well.
+    SingleContext(InvPcidDescriptor),
+    /// All-context invalidation, including global translations: If the INVPCID type is 2, the
+    /// logical processor invalidates all mappings—including global translations—associated with any
+    /// PCID.
+    AllContextGlobal(InvPcidDescriptor),
+    /// All-context invalidation: If the INVPCID type is 3, the logical processor invalidates all
+    /// mappings—except global translations—associated with any PCID. In some case, the instruction
+    /// may invalidate global translations as well.
+    AllContext(InvPcidDescriptor),
+}
+
+impl InvPcidType {
+    pub open spec fn pcid(self) -> Pcid {
+        match self {
+            InvPcidType::IndividualAddress(d) => d.pcid,
+            InvPcidType::SingleContext(d) => d.pcid,
+            InvPcidType::AllContextGlobal(d) => d.pcid,
+            InvPcidType::AllContext(d) => d.pcid,
+        }
+    }
+}
+
+
+
 pub const X86_NUM_LAYERS: usize = 4;
 
 pub const X86_NUM_ENTRIES: usize = 512;
@@ -244,6 +304,12 @@ pub struct Flags {
     pub is_writable: bool,
     pub is_supervisor: bool,
     pub disable_execute: bool,
+}
+
+impl Flags {
+    pub open spec fn global(&self) -> bool {
+        false
+    }
 }
 
 pub struct PTE {
