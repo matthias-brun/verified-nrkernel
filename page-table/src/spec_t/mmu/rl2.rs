@@ -5,7 +5,7 @@ use crate::spec_t::mmu::pt_mem::*;
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::defs::{
     aligned, bit, WORD_SIZE, MAX_PHYADDR_WIDTH, axiom_max_phyaddr_width_facts, MemOp,
-    LoadResult, update_range, MAX_BASE
+    LoadResult, update_range, MAX_BASE, Paddr, Vaddr, Vpn, Pcid, Cr3
 };
 use crate::spec_t::mmu::defs::{ Core, PTE };
 use crate::spec_t::mmu::rl3::{ Writes };
@@ -20,18 +20,212 @@ verus! {
 // caching and non-atomic walks as a single concept, and replaces the explicit havoc-ing of
 // dirty/accessed bits with underspecified reads.
 
+/// Represents the Per-Core State
+pub struct CoreState {
+/// the CR3 register containing the pml4 pointer and pcid
+    pub cr3: Cr3,
+    /// the cores's TLB, this is a total map from PCID -> Map<Vaddr, PTE>
+    pub tlb: IMap<Pcid, IMap<Vaddr, PTE>>,
+    /// Ongoing walks of the core, this is a total
+    pub walks: ISet<Walk>,
+    /// Store Buffer of the core (for PTMem Updates)
+    pub stbuf: Seq<(Vaddr, usize)>
+}
+
+impl CoreState {
+    pub open spec fn new(cr3: Cr3) -> CoreState {
+        CoreState {
+            cr3,
+            tlb: IMap::total(|k| IMap::empty()),
+            walks: iset![],
+            stbuf:  seq![],
+        }
+    }
+
+    pub open spec fn init(&self, cr3: Cr3) -> bool {
+        &&& self.cr3   === cr3
+        &&& self.tlb   === IMap::total(|k| IMap::empty())
+        &&& self.walks === iset![]
+        &&& self.stbuf  === seq![]
+    }
+
+    /// Well-formedness Condition
+    pub open spec fn wf(self) -> bool {
+        // the TLB is a full/total map from PCID -> Map<Vaddr, PTE> and its map with the TLB
+        // entries is finite
+        &&& self.tlb.is_full()
+        &&& forall |p| #[trigger]self.tlb.contains_key(p) ==> self.tlb[p].dom().finite()
+
+        // there is a finite number of ongoing walks
+        &&& self.walks.finite()
+    }
+
+    /// Invariant
+    pub open spec fn inv(self) -> bool {
+        &&& true
+    }
+
+    // -------------------------------------- PCID -------------------------------------------------
+
+    /// obtains the current PCID
+    pub open spec fn pcid(&self) -> Pcid {
+        self.cr3.pcid
+    }
+
+    // -------------------------------------- TLB --------------------------------------------------
+
+
+    /// checks whether the TLB does not have an entry associated with the supplied pcid
+    #[verifier(inline)]
+    pub open spec fn tlb_empty_pcid(self, pcid: Pcid) -> bool {
+        self.tlb[pcid].is_empty()
+    }
+
+    /// checks whether the TLB does not have an entry associated with the current pcid
+    #[verifier(inline)]
+    pub open spec fn tlb_empty(self) -> bool {
+        self.tlb_empty_pcid(self.pcid())
+    }
+
+    /// checks whether the TLB does not have any entry
+    #[verifier(inline)]
+    pub open spec fn tlb_empty_all(self) -> bool {
+        forall |p| #[trigger]self.tlb[p].is_empty()
+    }
+
+    /// checks whether the TLB contains an entry with the supplied `pcid` and `vaddr`
+    #[verifier(inline)]
+    pub open spec fn tlb_contains_pcid(self, pcid: Pcid, va: Vaddr) -> bool {
+        self.tlb[pcid].contains_key(va)
+    }
+
+    /// checks whether the TLB contains a mapping for the Vaddr `va` with the current `pcid`
+    #[verifier(inline)]
+    pub open spec fn tlb_contains(self, va: Vaddr) -> bool {
+        self.tlb_contains_pcid(self.pcid(), va)
+    }
+
+    /// obtains the element from the TLB, which must contain the element
+    pub open spec fn tlb_lookup_pcid(self, pcid: Pcid, va: Vaddr) -> PTE
+        recommends self.tlb_contains_pcid(pcid, va)
+    {
+        self.tlb[pcid][va]
+    }
+
+    /// obtains the element by VA with the current PCID, which must contain the element
+    pub open spec fn tlb_lookup(self, va: Vaddr) -> PTE
+        recommends self.tlb_contains(va)
+    {
+        self.tlb_lookup_pcid(self.pcid(), va)
+    }
+
+    /// inserts an entry in the TLB. it will be associated with the current `pcid`
+    pub open spec fn tlb_fill(self, vbase: Vaddr, pte: PTE) -> CoreState
+        recommends !self.tlb[self.pcid()].contains_key(vbase)
+    {
+        CoreState {
+            tlb: self.tlb.insert(self.pcid(), self.tlb[self.pcid()].insert(vbase, pte)),
+            ..self
+        }
+    }
+
+    /// evicts an entry with the given `pcid` and `vaddr` from the TLB
+    pub open spec fn tlb_evict(self, pcid: Pcid, va: Vaddr) -> CoreState
+    {
+        CoreState {
+            tlb: self.tlb.insert(pcid, self.tlb[pcid].remove(va)),
+            ..self
+        }
+    }
+
+
+
+    // -------------------------------------- Walks ------------------------------------------------
+
+    /// whether the current ongoing walks are empty
+    #[verifier(inline)]
+    pub open spec fn walks_empty(&self) -> bool {
+        self.walks.is_empty()
+    }
+
+    /// whether the supplied walk is ongoing
+    #[verifier(inline)]
+    pub open spec fn walks_contains(&self, walk: Walk) -> bool {
+        self.walks.contains(walk)
+    }
+
+    /// removes a walk from the core
+    #[verifier(inline)]
+    pub open spec fn walks_clear(self) -> CoreState {
+        CoreState {
+            walks: iset![],
+            ..self
+        }
+    }
+
+    /// removes a walk from the core
+    #[verifier(inline)]
+    pub open spec fn walks_remove(self, walk: Walk) -> CoreState {
+        CoreState {
+            walks: self.walks.remove(walk),
+            ..self
+        }
+    }
+
+    #[verifier(inline)]
+    pub open spec fn walks_insert(self, walk: Walk) -> CoreState {
+        CoreState {
+            walks: self.walks.insert(walk),
+            ..self
+        }
+    }
+
+    #[verifier(inline)]
+    pub open spec fn walks_replace(self, walk: Walk, walk_next: Walk) -> CoreState {
+        CoreState {
+            walks: self.walks.remove(walk).insert(walk_next),
+            ..self
+        }
+    }
+
+    // ----------------------------------- Store Buffers--------------------------------------------
+
+    /// whether or not the store buffer is empty
+    pub open spec fn stbuf_empty(self) -> bool {
+        self.stbuf.len() == 0
+    }
+
+    pub open spec fn stbuf_push(self, addr: Paddr, value: usize) -> CoreState {
+        CoreState {
+            stbuf: self.stbuf.push((addr, value)),
+            ..self
+        }
+    }
+
+    pub open spec fn stbuf_drop(self) -> CoreState
+    {
+        CoreState {
+            stbuf: self.stbuf.drop_first(),
+            ..self
+        }
+    }
+
+    pub open spec fn stbuf_first(self) -> (Paddr, usize)
+    {
+        self.stbuf.first()
+    }
+
+}
+
+
+
 pub ghost struct State {
     pub happy: bool,
     /// Byte-indexed physical (non-page-table) memory
     pub phys_mem: Seq<u8>,
     /// Page table memory
     pub pt_mem: PTMem,
-    /// Per-node state (TLBs)
-    pub tlbs: IMap<Core, IMap<usize, PTE>>,
-    /// In-progress page table walks
-    pub walks: IMap<Core, ISet<Walk>>,
-    /// Store buffers
-    pub sbuf: IMap<Core, Seq<(usize, usize)>>,
+    pub cores: IMap<Core, CoreState>,
     pub writes: Writes,
     pub polarity: Polarity,
     pub hist: History,
@@ -45,6 +239,8 @@ pub struct History {
 
 pub ghost enum Step {
     Invlpg,
+    InvPcid,
+    WriteCr3,
     // Faulting memory op due to failed translation
     MemOpNoTr { walk: Walk },
     // Memory op using a translation from the TLB
@@ -53,7 +249,7 @@ pub ghost enum Step {
     WalkInit { core: Core, vaddr: usize },
     WalkStep { core: Core, walk: Walk },
     TLBFill { core: Core, walk: Walk },
-    TLBEvict { core: Core, tlb_va: usize },
+    TLBEvict { core: Core, tlb_pcid: Pcid, tlb_va: usize },
     // TSO
     WriteNonneg,
     WriteNonpos,
@@ -74,13 +270,13 @@ impl State {
 
     #[verifier(inline)]
     pub open spec fn writer_sbuf(self) -> Seq<(usize, usize)> {
-        self.sbuf[self.writes.core]
+        self.cores[self.writes.core].stbuf
     }
 
     /// The memory as seen by the given core. I.e. taking into consideration the core's store
     /// buffers.
     pub open spec fn core_mem(self, core: Core) -> PTMem {
-        self.pt_mem.write_seq(self.sbuf[core])
+        self.pt_mem.write_seq(self.cores[core].stbuf)
     }
 
     /// The view of the memory from the writer core's perspective.
@@ -135,8 +331,50 @@ impl State {
 }
 
 
-
+//
 // State machine transitions
+//
+pub closed spec fn step_WriteCr3(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+    &&& lbl matches Lbl::WriteCr3(core, cr3, flush)
+
+    &&& pre.happy
+    &&& c.valid_core(core)
+
+    // mov cr3 is a serializing instruction, ..
+    &&& pre.cores[core].stbuf_empty()
+
+    // If CR4.PCIDE = 1 and bit 63 of the instruction’s source operand is 1, the instruction is not
+    // required to invalidate any TLB entries or entries in paging-structure caches.
+    // If CR4.PCIDE = 1 and bit 63 of the instruction’s source operand is 0, the instruction
+    // invalidates all TLB entries associated with the PCID specified in bits 11:0 of the
+    // instruction’s source operand except those for global pages. It also invalidates all entries
+    // in all paging-structure caches associated with that PCID. It is not required to invalidate
+    // entries in the TLBs and paging-structure caches that are associated with other PCIDs.
+    &&& flush ==> {
+        &&& pre.cores[core].tlb_empty_pcid(cr3.pcid)
+    }
+
+    &&& post == State {
+        happy: pre.cores[core].cr3 == cr3, // we only consider writes with the same cr3 values
+        cores: pre.cores.insert(core, pre.cores[core].walks_clear()),
+        writes: Writes {
+            core: pre.writes.core,
+            tso: if core == pre.writes.core { iset![] } else { pre.writes.tso },
+            nonpos:
+                if post.writes.tso === iset![] {
+                    pre.writes.nonpos.remove(core)
+                } else { pre.writes.nonpos },
+        },
+        hist: History {
+            pending_maps: if core == pre.writes.core { imap![] } else { pre.hist.pending_maps },
+            pending_unmaps: if post.writes.nonpos === iset![] { imap![] } else { pre.hist.pending_unmaps },
+            pending_protects: if post.writes.nonpos === iset![] { imap![] } else { pre.hist.pending_protects },
+            ..pre.hist
+        },
+        ..pre
+    }
+}
+
 
 pub open spec fn step_Invlpg(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
     &&& lbl matches Lbl::Invlpg(core, va)
@@ -144,11 +382,77 @@ pub open spec fn step_Invlpg(pre: State, post: State, c: Constants, lbl: Lbl) ->
 
     &&& c.valid_core(core)
     // Invlpg is a serializing instruction
-    &&& pre.sbuf[core].len() == 0
-    &&& !pre.tlbs[core].contains_key(va)
+    &&& pre.cores[core].stbuf_empty()
+    &&& !pre.cores[core].tlb_contains(va)
 
     &&& post == State {
-        walks: pre.walks.insert(core, iset![]),
+        cores: pre.cores.insert(core, pre.cores[core].walks_clear()),
+        writes: Writes {
+            core: pre.writes.core,
+            tso: if core == pre.writes.core { iset![] } else { pre.writes.tso },
+            nonpos:
+                if post.writes.tso === iset![] {
+                    pre.writes.nonpos.remove(core)
+                } else { pre.writes.nonpos },
+        },
+        hist: History {
+            pending_maps: if core == pre.writes.core { imap![] } else { pre.hist.pending_maps },
+            pending_unmaps: if post.writes.nonpos === iset![] { imap![] } else { pre.hist.pending_unmaps },
+            pending_protects: if post.writes.nonpos === iset![] { imap![] } else { pre.hist.pending_protects },
+            ..pre.hist
+        },
+        ..pre
+    }
+}
+
+
+pub closed spec fn step_InvPcid(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+    &&& lbl matches Lbl::InvPcid(core, typ)
+    &&& pre.happy
+
+    &&& c.valid_core(core)
+    // InvPcid is a serializing instruction, ..
+    &&& pre.cores[core].stbuf_empty()
+
+    &&& match typ {
+        // Individual-address invalidation: If the INVPCID type is 0, the logical processor invalidates
+        // mappings—except global translations—for the linear address and PCID specified in the INVPCID
+        // descriptor. In some cases, the instruction may invalidate global translations or mappings
+        // for other linear addresses (or other PCIDs) as well.
+        InvPcidType::IndividualAddress(d) => {
+            &&& pre.cores[core].tlb_contains_pcid(d.pcid, d.vaddr)
+                    ==> pre.cores[core].tlb_lookup_pcid(d.pcid, d.vaddr).flags.global()
+        }
+        // Single-context invalidation: If the INVPCID type is 1, the logical processor invalidates
+        // all mappings—except global translations—associated with the PCID specified in the INVPCID
+        // descriptor. In some cases, the instruction may invalidate global translations or mappings
+        // for other PCIDs as well.
+        InvPcidType::SingleContext(d) => {
+            &&& forall |pcid, vaddr| #[trigger]pre.cores[core].tlb_contains_pcid(pcid, vaddr)
+                    ==> (pcid != d.pcid  || pre.cores[core].tlb_lookup_pcid(pcid, vaddr).flags.global())
+        }
+        // All-context invalidation, including global translations: If the INVPCID type is 2, the
+        // logical processor invalidates all mappings—including global translations—associated with any
+        // PCID.
+        InvPcidType::AllContextGlobal(d) => {
+            &&& pre.cores[core].tlb_empty_all()
+        }
+        // All-context invalidation: If the INVPCID type is 3, the logical processor invalidates all
+        // mappings—except global translations—associated with any PCID. In some case, the instruction
+        // may invalidate global translations as well.
+        InvPcidType::AllContext(d) => {
+            &&& forall |pcid, vaddr| #[trigger]pre.cores[core].tlb_contains_pcid(pcid, vaddr)
+                    ==> pre.cores[core].tlb_lookup_pcid(pcid, vaddr).flags.global()
+        }
+    }
+
+    &&& post == State {
+        happy: match typ {
+            InvPcidType::IndividualAddress(d) => { pre.cores[core].pcid() == d.pcid }
+            InvPcidType::SingleContext(d) => { pre.cores[core].pcid() == d.pcid },
+            _ => pre.happy
+        },
+        cores: pre.cores.insert(core, pre.cores[core].walks_clear()),
         writes: Writes {
             core: pre.writes.core,
             tso: if core == pre.writes.core { iset![] } else { pre.writes.tso },
@@ -182,7 +486,7 @@ pub open spec fn step_MemOpNoTr(
     &&& c.valid_core(core)
     &&& aligned(memop_vaddr as nat, memop.op_size())
     &&& memop.valid_op_size()
-    &&& pre.walks[core].contains(walk)
+    &&& pre.cores[core].walks_contains(walk)
     &&& walk.vaddr == memop_vaddr
     &&& walk_next.complete
     &&& walk_next.result() is Invalid
@@ -205,9 +509,9 @@ pub open spec fn step_MemOpTLB(
     &&& c.valid_core(core)
     &&& aligned(memop_vaddr as nat, memop.op_size())
     &&& memop.valid_op_size()
-    &&& pre.tlbs[core].contains_key(tlb_va)
+    &&& pre.cores[core].tlb_contains(tlb_va)
     &&& {
-    let pte = pre.tlbs[core][tlb_va];
+    let pte = pre.cores[core].tlb_lookup(tlb_va);
     let paddr = pte.frame.base + (memop_vaddr - tlb_va);
     &&& tlb_va <= memop_vaddr < tlb_va + pte.frame.size
     &&& match memop {
@@ -234,9 +538,7 @@ pub open spec fn step_MemOpTLB(
 
     &&& post.happy == pre.happy
     &&& post.pt_mem == pre.pt_mem
-    &&& post.tlbs == pre.tlbs
-    &&& post.walks == pre.walks
-    &&& post.sbuf == pre.sbuf
+    &&& post.cores == pre.cores
     &&& post.writes == pre.writes
     &&& post.polarity == pre.polarity
     &&& post.hist == pre.hist
@@ -257,9 +559,7 @@ pub open spec fn step_WalkInit(pre: State, post: State, c: Constants, core: Core
     &&& post.happy == pre.happy
     &&& post.phys_mem == pre.phys_mem
     &&& post.pt_mem == pre.pt_mem
-    &&& post.tlbs == pre.tlbs
-    &&& post.sbuf == pre.sbuf
-    &&& post.walks == pre.walks.insert(core, pre.walks[core].insert(walk))
+    &&& post.cores == pre.cores.insert(core, pre.cores[core].walks_insert(walk))
     &&& post.writes == pre.writes
     &&& post.polarity == pre.polarity
     &&& post.hist.pending_maps == pre.hist.pending_maps
@@ -281,15 +581,13 @@ pub open spec fn step_WalkStep(
     &&& pre.happy
 
     &&& c.valid_core(core)
-    &&& pre.walks[core].contains(walk)
+    &&& pre.cores[core].walks_contains(walk)
     &&& !walk_next.complete
 
     &&& post.happy == pre.happy
     &&& post.phys_mem == pre.phys_mem
     &&& post.pt_mem == pre.pt_mem
-    &&& post.tlbs == pre.tlbs
-    &&& post.sbuf == pre.sbuf
-    &&& post.walks == pre.walks.insert(core, pre.walks[core].insert(walk_next))
+    &&& post.cores == pre.cores.insert(core, pre.cores[core].walks_insert(walk_next))
     &&& post.writes == pre.writes
     &&& post.polarity == pre.polarity
     &&& post.hist.pending_maps == pre.hist.pending_maps
@@ -303,25 +601,25 @@ pub open spec fn step_TLBFill(pre: State, post: State, c: Constants, core: Core,
     &&& pre.happy
 
     &&& c.valid_core(core)
-    &&& pre.walks[core].contains(walk)
+    &&& pre.cores[core].walks_contains(walk)
     &&& walk_next.complete
     &&& walk_next.result() matches WalkResult::Valid { vbase, pte }
 
     &&& post == State {
-        tlbs: pre.tlbs.insert(core, pre.tlbs[core].insert(vbase, pte)),
+        cores: pre.cores.insert(core, pre.cores[core].tlb_fill(vbase, pte).walks_remove(walk)),
         ..pre
     }
 }
 
-pub open spec fn step_TLBEvict(pre: State, post: State, c: Constants, core: Core, tlb_va: usize, lbl: Lbl) -> bool {
+pub open spec fn step_TLBEvict(pre: State, post: State, c: Constants, core: Core, tlb_pcid: Pcid, tlb_va: usize, lbl: Lbl) -> bool {
     &&& lbl is Tau
     &&& pre.happy
 
     &&& c.valid_core(core)
-    &&& pre.tlbs[core].contains_key(tlb_va)
+    &&& pre.cores[core].tlb_contains_pcid(tlb_pcid, tlb_va)
 
     &&& post == State {
-        tlbs: pre.tlbs.insert(core, pre.tlbs[core].remove(tlb_va)),
+        cores: pre.cores.insert(core, pre.cores[core].tlb_evict(tlb_pcid, tlb_va)),
         ..pre
     }
 }
@@ -344,9 +642,8 @@ pub open spec fn step_WriteNonneg(pre: State, post: State, c: Constants, lbl: Lb
     &&& post.happy == pre.happy
     &&& post.phys_mem == pre.phys_mem
     &&& post.pt_mem == pre.pt_mem
-    &&& post.tlbs == pre.tlbs
-    &&& post.sbuf == pre.sbuf.insert(core, pre.sbuf[core].push((addr, value)))
-    &&& post.walks == pre.walks
+    &&& post.cores == pre.cores.insert(core, pre.cores[core].stbuf_push(addr, value))
+
     &&& post.writes.tso === pre.writes.tso.insert(addr)
     &&& post.writes.nonpos === pre.writes.nonpos
     &&& post.writes.core == core
@@ -374,9 +671,7 @@ pub open spec fn step_WriteNonpos(pre: State, post: State, c: Constants, lbl: Lb
     &&& post.happy == pre.happy
     &&& post.phys_mem == pre.phys_mem
     &&& post.pt_mem == pre.pt_mem
-    &&& post.tlbs == pre.tlbs
-    &&& post.sbuf == pre.sbuf.insert(core, pre.sbuf[core].push((addr, value)))
-    &&& post.walks == pre.walks
+    &&& post.cores == pre.cores.insert(core, pre.cores[core].stbuf_push(addr, value))
     &&& post.writes.tso === pre.writes.tso.insert(addr)
     &&& post.writes.nonpos == ISet::new(|core| c.valid_core(core))
     &&& post.writes.core == core
@@ -403,9 +698,7 @@ pub open spec fn step_WriteProtect(pre: State, post: State, c: Constants, lbl: L
     &&& post.happy == pre.happy
     &&& post.phys_mem == pre.phys_mem
     &&& post.pt_mem == pre.pt_mem
-    &&& post.tlbs == pre.tlbs
-    &&& post.sbuf == pre.sbuf.insert(core, pre.sbuf[core].push((addr, value)))
-    &&& post.walks == pre.walks
+    &&& post.cores == pre.cores.insert(core, pre.cores[core].stbuf_push(addr, value))
     &&& post.writes.tso === pre.writes.tso.insert(addr)
     &&& post.writes.nonpos == ISet::new(|core| c.valid_core(core))
     &&& post.writes.core == core
@@ -424,19 +717,17 @@ pub open spec fn step_WriteProtect(pre: State, post: State, c: Constants, lbl: L
 }
 
 pub open spec fn step_Writeback(pre: State, post: State, c: Constants, core: Core, lbl: Lbl) -> bool {
-    let (addr, value) = pre.sbuf[core][0];
+    let (addr, value) = pre.cores[core].stbuf[0];
     &&& lbl is Tau
     &&& pre.happy
 
     &&& c.valid_core(core)
-    &&& 0 < pre.sbuf[core].len()
+    &&& !pre.cores[core].stbuf_empty()
 
     &&& post.happy == pre.happy
     &&& post.phys_mem == pre.phys_mem
     &&& post.pt_mem == pre.pt_mem.write(addr, value)
-    &&& post.tlbs == pre.tlbs
-    &&& post.sbuf == pre.sbuf.insert(core, pre.sbuf[core].drop_first())
-    &&& post.walks == pre.walks
+    &&& post.cores == pre.cores.insert(core, pre.cores[core].stbuf_drop())
     &&& post.writes == pre.writes
     &&& post.polarity == pre.polarity
     &&& post.hist.pending_maps == pre.hist.pending_maps
@@ -463,7 +754,7 @@ pub open spec fn step_Barrier(pre: State, post: State, c: Constants, lbl: Lbl) -
     &&& pre.happy
 
     &&& c.valid_core(core)
-    &&& pre.sbuf[core].len() == 0
+    &&& pre.cores[core].stbuf_empty()
 
     &&& post == State {
         writes: Writes {
@@ -499,12 +790,14 @@ pub open spec fn step_Stutter(pre: State, post: State, c: Constants, lbl: Lbl) -
 pub open spec fn next_step(pre: State, post: State, c: Constants, step: Step, lbl: Lbl) -> bool {
     match step {
         Step::Invlpg                    => step_Invlpg(pre, post, c, lbl),
+        Step::InvPcid                   => step_InvPcid(pre, post, c,lbl),
+        Step::WriteCr3                  => step_WriteCr3(pre, post, c, lbl),
         Step::MemOpNoTr { walk }        => step_MemOpNoTr(pre, post, c, walk, lbl),
         Step::MemOpTLB { tlb_va }       => step_MemOpTLB(pre, post, c, tlb_va, lbl),
         Step::WalkInit { core, vaddr }  => step_WalkInit(pre, post, c, core, vaddr, lbl),
         Step::WalkStep { core, walk }   => step_WalkStep(pre, post, c, core, walk, lbl),
         Step::TLBFill { core, walk }    => step_TLBFill(pre, post, c, core, walk, lbl),
-        Step::TLBEvict { core, tlb_va } => step_TLBEvict(pre, post, c, core, tlb_va, lbl),
+        Step::TLBEvict { core, tlb_pcid, tlb_va } => step_TLBEvict(pre, post, c, core, tlb_pcid, tlb_va, lbl),
         Step::WriteNonneg               => step_WriteNonneg(pre, post, c, lbl),
         Step::WriteNonpos               => step_WriteNonpos(pre, post, c, lbl),
         Step::WriteProtect              => step_WriteProtect(pre, post, c, lbl),
@@ -522,9 +815,7 @@ pub open spec fn next(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
 }
 
 pub open spec fn init(pre: State, c: Constants) -> bool {
-    &&& pre.tlbs  === IMap::new(|core| c.valid_core(core), |core| IMap::empty())
-    &&& pre.walks === IMap::new(|core| c.valid_core(core), |core| iset![])
-    &&& pre.sbuf  === IMap::new(|core| c.valid_core(core), |core| seq![])
+    &&& pre.cores === IMap::new(|core| c.valid_core(core), |core| CoreState::new(c.cr3))
     &&& pre.happy == true
     &&& pre.writes.tso === iset![]
     &&& pre.writes.nonpos === iset![]
@@ -552,9 +843,8 @@ impl State {
     pub open spec fn wf(self, c: Constants) -> bool {
         &&& c.valid_core(self.writes.core)
         &&& self.writes.tso.finite()
-        &&& forall|core| #[trigger] c.valid_core(core) <==> self.walks.contains_key(core)
-        &&& forall|core| #[trigger] c.valid_core(core) <==> self.sbuf.contains_key(core)
-        &&& forall|core| #[trigger] self.walks.contains_key(core) ==> self.walks[core].finite()
+        &&& forall|core| #[trigger] c.valid_core(core) <==> self.cores.contains_key(core)
+        &&& forall|core| #[trigger] self.cores.contains_key(core) ==> self.cores[core].wf()
 
         &&& aligned(self.pt_mem.pml4 as nat, 4096)
         &&& c.in_ptmem_range(self.pt_mem.pml4 as nat, 4096)
@@ -577,7 +867,7 @@ impl State {
 
     pub open spec fn non_writer_sbufs_are_empty(self, c: Constants) -> bool {
         forall|core| #[trigger] c.valid_core(core) && core != self.writes.core
-            ==> self.sbuf[core] === seq![]
+            ==> self.cores[core].stbuf === seq![]
     }
 
     pub open spec fn writer_sbuf_entries_are_unique(self) -> bool {
@@ -622,7 +912,7 @@ impl State {
     }
 
     pub open spec fn inv_unmapping__inflight_walks(self, c: Constants) -> bool {
-        forall|core, walk| c.valid_core(core) && #[trigger] self.walks[core].contains(walk) ==> {
+        forall|core, walk| c.valid_core(core) && #[trigger] self.cores[core].walks_contains(walk) ==> {
             let walk_na = finish_iter_walk(self.core_mem(core), walk);
             let walk_a  = self.core_mem(core).pt_walk(walk.vaddr);
             &&& walk.vaddr < MAX_BASE
@@ -662,7 +952,7 @@ impl State {
         forall|core, walk|
             c.valid_core(core)
             && !self.writes.nonpos.contains(core)
-            && #[trigger] self.walks[core].contains(walk)
+            && #[trigger] self.cores[core].walks_contains(walk)
         ==> {
             &&& aligned(walk.vaddr as nat, 8)
             &&& walk.path.len() <= 3
@@ -672,7 +962,7 @@ impl State {
     }
 
     pub open spec fn inv_inflight_walks_are_prefixes(self, c: Constants) -> bool {
-        forall|core, walk| c.valid_core(core) && #[trigger] self.walks[core].contains(walk) ==> {
+        forall|core, walk| c.valid_core(core) && #[trigger] self.cores[core].walks_contains(walk) ==> {
             &&& walk.vaddr < MAX_BASE
             &&& aligned(walk.vaddr as nat, 8)
             &&& walk.path.len() <= 3
@@ -729,9 +1019,9 @@ impl State {
     }
 
     pub open spec fn inv_protect__sbuf_implies_bit7(self, c: Constants) -> bool {
-        forall|core, i: int| #![trigger c.valid_core(core), self.sbuf[self.writes.core][i]]
-            c.valid_core(core) && 0 <= i < self.sbuf[self.writes.core].len()
-            ==> self.core_mem(core).read(self.sbuf[self.writes.core][i].0) & bit!(7) == bit!(7usize)
+        forall|core, i: int| #![trigger c.valid_core(core), self.cores[self.writes.core].stbuf[i]]
+            c.valid_core(core) && 0 <= i < self.cores[self.writes.core].stbuf.len()
+            ==> self.core_mem(core).read(self.cores[self.writes.core].stbuf[i].0) & bit!(7) == bit!(7usize)
     }
 
     pub open spec fn inv_protect__core_walks(self, c: Constants) -> bool {
@@ -971,7 +1261,7 @@ proof fn next_step_preserves_inv_unmapping__valid_walk(pre: State, post: State, 
             lemma_step_Writeback_preserves_writer_mem(pre, post, c, core, lbl);
             assert(post.inv_unmapping__valid_walk(c));
         },
-        Step::Invlpg => {
+        Step::Invlpg | Step::WriteCr3 | Step::InvPcid=> {
             broadcast use lemma_writes_tso_empty_implies_sbuf_empty;
             assert(post.inv_unmapping__valid_walk(c));
         },
@@ -1143,6 +1433,38 @@ proof fn next_step_preserves_inv_protect__core_walks(pre: State, post: State, c:
                 assert(post.inv_protect__core_walks(c));
             }
         },
+        Step::WriteCr3 => {
+            let core = lbl->WriteCr3_0;
+            if pre.writes.nonpos.contains(core) {
+                if post.writes.nonpos === iset![] {
+                    assert(pre.writer_sbuf() =~= seq![]) by {
+                        broadcast use lemma_writes_tso_empty_implies_sbuf_empty;
+                    };
+                    assert(post.inv_protect__core_walks(c));
+                } else {
+                    assert(post.inv_protect__core_walks(c));
+                }
+            } else {
+                assert(post.writes.nonpos =~= pre.writes.nonpos);
+                assert(post.inv_protect__core_walks(c));
+            }
+        }
+        Step::InvPcid => {
+            let core = lbl->InvPcid_0;
+            if pre.writes.nonpos.contains(core) {
+                if post.writes.nonpos === iset![] {
+                    assert(pre.writer_sbuf() =~= seq![]) by {
+                        broadcast use lemma_writes_tso_empty_implies_sbuf_empty;
+                    };
+                    assert(post.inv_protect__core_walks(c));
+                } else {
+                    assert(post.inv_protect__core_walks(c));
+                }
+            } else {
+                assert(post.writes.nonpos =~= pre.writes.nonpos);
+                assert(post.inv_protect__core_walks(c));
+            }
+         }
         _ => {
             assert(post.inv_protect__core_walks(c));
         },
@@ -1285,7 +1607,7 @@ proof fn next_step_preserves_inv_unmapping__inflight_walks(pre: State, post: Sta
                 lemma_iter_walk_equals_pt_walk;
             assert(post.inv_unmapping__inflight_walks(c));
         },
-        Step::Invlpg => {
+        Step::Invlpg | Step::WriteCr3 | Step::InvPcid => {
             reveal(State::inv_notin_nonpos);
             if !pre.can_flip_polarity(c) && post.can_flip_polarity(c) {
                 assert(forall|core| #[trigger] c.valid_core(core) ==> !post.writes.nonpos.contains(core));
@@ -1334,7 +1656,7 @@ proof fn step_WriteNonpos_preserves_inv_unmapping__inflight_walks(pre: State, po
         assert(post.writer_mem()@.submap_of(pre.writer_mem()@));
     };
     assert forall|core, walk|
-        c.valid_core(core) && #[trigger] post.walks[core].contains(walk) implies {
+        c.valid_core(core) && #[trigger] post.cores[core].walks_contains(walk) implies {
             let walk_na = finish_iter_walk(post.core_mem(core), walk);
             let walk_a  = post.core_mem(core).pt_walk(walk.vaddr);
             &&& aligned(walk.vaddr as nat, 8)
@@ -1354,14 +1676,14 @@ proof fn step_WriteNonpos_preserves_inv_unmapping__inflight_walks(pre: State, po
         //lemma_iter_walk_equals_pt_walk(pre.core_mem(core), walk.vaddr);
         //lemma_iter_walk_equals_pt_walk(post.core_mem(core), walk.vaddr);
         if wrcore == core {
-            assert(pre.walks[core].contains(walk));
+            assert(pre.cores[core].walks_contains(walk));
             lemma_mem_view_after_step_write(pre, post, c, lbl);
             pt_mem::PTMem::lemma_pt_walk(pre.writer_mem(), walk.vaddr);
             assert(post.core_mem(core) == post.writer_mem());
             assert(pre.core_mem(core) == pre.writer_mem()) by {
                 if post.writes.core == pre.writes.core {
                 } else {
-                    assert(pre.sbuf[pre.writes.core] =~= seq![]);
+                    assert(pre.cores[pre.writes.core].stbuf =~= seq![]);
                 }
             };
 
@@ -1483,7 +1805,7 @@ proof fn lemma_step_Writeback_post_valid_pt_walk_not_wraddr_in_path(pre: State, 
         step_Writeback(pre, post, c, pre.writes.core, lbl),
     ensures
         forall|i:nat| 0 <= i < pre.core_mem(core).pt_walk(vaddr).path.len()
-            ==> #[trigger] pre.core_mem(core).pt_walk(vaddr).path[i as int].0 != pre.sbuf[pre.writes.core][0].0
+            ==> #[trigger] pre.core_mem(core).pt_walk(vaddr).path[i as int].0 != pre.cores[pre.writes.core].stbuf[0].0
 {
     assert(bit!(0usize) == 1) by (bit_vector);
     lemma_step_Writeback_post_valid_walk_unchanged(pre, post, c, lbl, pre.writes.core, core, vaddr);
@@ -1567,7 +1889,7 @@ proof fn step_Writeback_preserves_inv_unmapping__inflight_walks(pre: State, post
     assert(wrcore == pre.writes.core);
     assert(wrcore == post.writes.core);
     assert forall|core, walk|
-        c.valid_core(core) && #[trigger] post.walks[core].contains(walk) implies {
+        c.valid_core(core) && #[trigger] post.cores[core].walks_contains(walk) implies {
             let walk_na = finish_iter_walk(post.core_mem(core), walk);
             let walk_a  = post.core_mem(core).pt_walk(walk.vaddr);
             &&& aligned(walk.vaddr as nat, 8)
@@ -1793,6 +2115,9 @@ proof fn next_step_preserves_wf(pre: State, post: State, c: Constants, step: Ste
     ensures post.wf(c)
 {
     reveal(State::wf_ptmem_range);
+    assert forall |c| #[trigger]post.cores.contains_key(c) implies post.cores[c].wf() by {
+        assert(pre.cores[c].tlb.dom() =~= post.cores[c].tlb.dom());
+    }
     assert(post.pt_mem.mem.dom() =~= pre.pt_mem.mem.dom());
 }
 
@@ -1825,7 +2150,7 @@ proof fn next_step_preserves_inv_inflight_walks_are_prefixes(pre: State, post: S
                 } else { arbitrary() };
             assert(post.inv_inflight_walks_are_prefixes(c)) by {
                 assert forall|core, walk|
-                    c.valid_core(core) && #[trigger] post.walks[core].contains(walk)
+                    c.valid_core(core) && #[trigger] post.cores[core].walks_contains(walk)
                 implies is_iter_walk_prefix(post.core_mem(core), walk) by {
                     if wrcore == core {
                         // TODO: can probably extract some of these things into a lemma that
@@ -1850,7 +2175,7 @@ proof fn next_step_preserves_inv_inflight_walks_are_prefixes(pre: State, post: S
             assert(wrcore == post.writes.core);
             assert(post.inv_inflight_walks_are_prefixes(c)) by {
                 assert forall|core, walk|
-                    c.valid_core(core) && #[trigger] post.walks[core].contains(walk)
+                    c.valid_core(core) && #[trigger] post.cores[core].walks_contains(walk)
                 implies is_iter_walk_prefix(post.core_mem(core), walk) by {
                     if wrcore == core {
                         lemma_step_Writeback_preserves_writer_mem(pre, post, c, core, lbl);
@@ -2027,7 +2352,7 @@ broadcast proof fn lemma_core_mem_pml4(state: State, c: Constants, core: Core)
     ensures
         (#[trigger] state.core_mem(core)).pml4 == state.pt_mem.pml4,
 {
-    state.pt_mem.lemma_write_seq(state.sbuf[core])
+    state.pt_mem.lemma_write_seq(state.cores[core].stbuf)
 }
 
 proof fn next_step_preserves_inv_mapping__pending_map_is_base_walk(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
@@ -2193,6 +2518,7 @@ proof fn lemma_step_writenonneg_path_addrs_match(pre: State, post: State, c: Con
                 ==> post.writer_mem().pt_walk(va).path[i].0
                   == pre.writer_mem().pt_walk(va).path[i].0
 {
+    assert(!step_WriteCr3(pre, post, c, lbl));
     lemma_mem_view_after_step_write(pre, post, c, lbl);
     pt_mem::PTMem::lemma_pt_walk(pre.writer_mem(), va);
     pre.pt_mem.lemma_write_seq(pre.writer_sbuf());
@@ -2338,19 +2664,19 @@ proof fn next_step_preserves_inv_mapping__valid_is_not_in_sbuf(pre: State, post:
             assert forall|core2, addr: usize| c.valid_core(core2) && aligned(addr as nat, 8)
                     && core2 != core
                     && #[trigger] post.core_mem(core2).read(addr) & 1 == 1
-                implies !post.sbuf[core].contains_fst(addr)
+                implies !post.cores[core].stbuf.contains_fst(addr)
             by {
                 assert(core != core2);
                 assert(forall|b:u64| b & 1 == 0 || b & 1 == 1) by (bit_vector);
                 assert(pre.writer_mem().read(wraddr) & 1 == 0);
                 if core == pre.writes.core {
                     if addr == wraddr {
-                        assert_by_contradiction!(!pre.sbuf[core].contains_fst(addr), {
-                            let i = choose|i| 0 <= i < pre.sbuf[core].len() && #[trigger] pre.sbuf[core][i] == (addr, pre.sbuf[core][i].1);
-                            let (addr2, value2) = pre.sbuf[core][i];
-                            assert(post.sbuf[core][i] == (addr2, value2));
-                            let j = pre.sbuf[core].len() as int;
-                            assert(post.sbuf[core][pre.sbuf[core].len() as int] == (addr, value));
+                        assert_by_contradiction!(!pre.cores[core].stbuf.contains_fst(addr), {
+                            let i = choose|i| 0 <= i < pre.cores[core].stbuf.len() && #[trigger] pre.cores[core].stbuf[i] == (addr, pre.cores[core].stbuf[i].1);
+                            let (addr2, value2) = pre.cores[core].stbuf[i];
+                            assert(post.cores[core].stbuf[i] == (addr2, value2));
+                            let j = pre.cores[core].stbuf.len() as int;
+                            assert(post.cores[core].stbuf[pre.cores[core].stbuf.len() as int] == (addr, value));
                         });
                         assert(pre.writer_mem().read(wraddr) & 1 != 1);
 
@@ -2358,24 +2684,24 @@ proof fn next_step_preserves_inv_mapping__valid_is_not_in_sbuf(pre: State, post:
                             assert(pre.core_mem(core2) == pre.pt_mem);
                             assert(pre.pt_mem.read(addr) & 1 == 1);
                             assert(pre.writer_mem().read(addr) & 1 != 1);
-                            assert(!pre.sbuf[core].contains_fst(addr));
+                            assert(!pre.cores[core].stbuf.contains_fst(addr));
                             broadcast use pt_mem::PTMem::lemma_write_seq_idle;
                             assert(pre.writer_mem().read(addr) == pre.pt_mem.read(addr));
                         };
                     } else {
                         assert(pre.core_mem(core2).read(addr) & 1 == 1);
-                        assert(!post.sbuf[core].contains_fst(addr));
+                        assert(!post.cores[core].stbuf.contains_fst(addr));
                     }
                 } else {
                     assert(post.writer_sbuf_entries_are_unique());
-                    assert(!post.sbuf[core].contains_fst(addr));
+                    assert(!post.cores[core].stbuf.contains_fst(addr));
                 }
             };
             assert(post.inv_mapping__valid_is_not_in_sbuf(c));
         },
         Step::WriteNonpos => {},
         Step::Writeback { core } => {
-            let (wraddr, value) = pre.sbuf[core][0];
+            let (wraddr, value) = pre.cores[core].stbuf[0];
             assert(core == post.writes.core);
             assert(post.writes.core == pre.writes.core);
             assert forall|core2, addr: usize| c.valid_core(core2) && aligned(addr as nat, 8)
@@ -2386,12 +2712,12 @@ proof fn next_step_preserves_inv_mapping__valid_is_not_in_sbuf(pre: State, post:
                 assert(core2 != core);
                 if addr == wraddr {
                     assert(post.writer_sbuf_entries_are_unique());
-                    assert(pre.sbuf[core].contains_fst(addr));
-                    assert(pre.sbuf[core][0] == (addr, value));
-                    assert(!post.sbuf[core].contains_fst(addr));
+                    // assert(pre.cores[core].stbuf.contains_fst(addr));
+                    assert(pre.cores[core].stbuf_first() == (addr, value));
+                    assert(!post.cores[core].stbuf.contains_fst(addr));
                 } else { // addr != wraddr
-                    assert(pre.sbuf[core2] === seq![]);
-                    assert(post.sbuf[core2] === seq![]);
+                    assert(pre.cores[core2].stbuf_empty());
+                    assert(post.cores[core2].stbuf_empty());
                     assert(post.pt_mem.read(addr) == pre.pt_mem.read(addr));
                     assert(pre.core_mem(core2).read(addr) & 1 == 1);
                 }
@@ -2488,7 +2814,7 @@ proof fn lemma_step_Writeback_preserves_writer_mem(pre: State, post: State, c: C
     ensures post.writer_mem() == pre.writer_mem()
 {
     assert(post.writes.core == core);
-    pt_mem::PTMem::lemma_write_seq_first(pre.pt_mem, pre.sbuf[core]);
+    pt_mem::PTMem::lemma_write_seq_first(pre.pt_mem, pre.cores[core].stbuf);
 }
 
 broadcast proof fn lemma_writes_tso_empty_implies_sbuf_empty(pre: State, c: Constants, core: Core)
@@ -2497,14 +2823,14 @@ broadcast proof fn lemma_writes_tso_empty_implies_sbuf_empty(pre: State, c: Cons
         pre.writes.tso === iset![],
         #[trigger] c.valid_core(core),
     ensures
-        #[trigger] pre.sbuf[core] === seq![]
+        #[trigger] pre.cores[core].stbuf === seq![]
 {
     if core == pre.writes.core {
-        assert forall|a| pre.sbuf[core].contains(a) implies false by {
+        assert forall|a| pre.cores[core].stbuf.contains(a) implies false by {
             assert(pre.writes.tso.contains(a.0));
         };
-        assert_by_contradiction!(pre.sbuf[core] =~= seq![], {
-            assert(pre.sbuf[core].contains(pre.sbuf[core][0]));
+        assert_by_contradiction!(pre.cores[core].stbuf =~= seq![], {
+            assert(pre.cores[core].stbuf.contains(pre.cores[core].stbuf[0]));
         });
     }
 }
@@ -2522,7 +2848,7 @@ proof fn lemma_writeback_other_core_preserves_walk_prefix(
         pre.inv_mapping__valid_is_not_in_sbuf(c),
         pre.inv_inflight_walks_are_prefixes(c),
         c.valid_core(core),
-        pre.walks[core].contains(walk),
+        pre.cores[core].walks_contains(walk),
         next_step(pre, post, c, step, lbl),
         step == (Step::Writeback { core: wrcore }),
         core != wrcore,
@@ -2541,7 +2867,7 @@ proof fn lemma_writeback_other_core_preserves_walk_prefix(
         broadcast use PDE::lemma_view_addr_aligned;
         crate::spec_t::mmu::translation::lemma_bit_indices_less_512(walk.vaddr);
     };
-    let wraddr = pre.sbuf[wrcore][0].0;
+    let wraddr = pre.cores[wrcore].stbuf_first().0;
     assert(pre.writer_sbuf().contains_fst(wraddr));
     assert(forall|i| #![auto] 0 <= i < walk.path.len() ==> walk.path[i].0 != wraddr) by {
         assert forall|i| 0 <= i < walk.path.len() implies #[trigger] walk.path[i].0 != wraddr by {
@@ -2873,8 +3199,17 @@ pub mod refinement {
     use crate::spec_t::mmu::rl1;
     use crate::spec_t::mmu::rl2;
     #[cfg(verus_keep_ghost)]
-    use crate::spec_t::mmu::defs::MAX_BASE;
+    use crate::spec_t::mmu::defs::{MAX_BASE, Pcid, Vaddr};
     use crate::extra;
+
+    impl rl2::CoreState {
+        pub open spec fn interp(self) -> rl1::CoreState {
+            rl1::CoreState {
+                cr3: self.cr3,
+                tlb: self.tlb[self.pcid()],
+            }
+        }
+    }
 
     impl rl2::State {
         pub open spec fn interp(self) -> rl1::State {
@@ -2882,7 +3217,7 @@ pub mod refinement {
                 happy: self.happy,
                 pt_mem: self.writer_mem(),
                 phys_mem: self.phys_mem,
-                tlbs: self.tlbs,
+                cores: self.cores.map_values(|e: rl2::CoreState| e.interp()),
                 writes: self.writes,
                 pending_maps: self.hist.pending_maps,
                 pending_unmaps: self.hist.pending_unmaps,
@@ -2896,6 +3231,8 @@ pub mod refinement {
         pub open spec fn interp(self, pre: rl2::State, lbl: Lbl) -> rl1::Step {
             match self {
                 rl2::Step::Invlpg => rl1::Step::Invlpg,
+                rl2::Step::InvPcid  => rl1::Step::Invlpg,
+                rl2::Step::WriteCr3 => rl1::Step::Stutter,
                 rl2::Step::WalkInit { core, vaddr } => rl1::Step::Stutter,
                 rl2::Step::WalkStep { core, walk } => rl1::Step::Stutter,
                 rl2::Step::MemOpNoTr { walk } => {
@@ -2931,7 +3268,7 @@ pub mod refinement {
                         rl1::Step::TLBFill { core, vaddr: vbase }
                     }
                 },
-                rl2::Step::TLBEvict { core, tlb_va } => rl1::Step::TLBEvict { core, tlb_va },
+                rl2::Step::TLBEvict { core, tlb_pcid, tlb_va } => rl1::Step::TLBEvict { core, tlb_va },
                 rl2::Step::WriteNonneg => rl1::Step::WriteNonneg,
                 rl2::Step::WriteNonpos => rl1::Step::WriteNonpos,
                 rl2::Step::WriteProtect => rl1::Step::WriteProtect,
@@ -2955,6 +3292,12 @@ pub mod refinement {
             rl2::Step::Invlpg => {
                 assert(rl1::step_Invlpg(pre.interp(), post.interp(), c, lbl));
             },
+            rl2::Step::InvPcid => {
+                assert(rl1::step_Invlpg(pre.interp(), post.interp(), c, lbl));
+            }
+            rl2::Step::WriteCr3 => {
+                assert(rl1::step_Stutter(pre.interp(), post.interp(), c, lbl));
+            }
             rl2::Step::MemOpNoTr { walk } => {
                 next_step_MemOpNoTr_refines(pre, post, c, step, lbl);
                 assert(rl1::next_step(pre.interp(), post.interp(), c, step.interp(pre, lbl), lbl));
@@ -3016,7 +3359,7 @@ pub mod refinement {
                     }
                 }
             },
-            rl2::Step::TLBEvict { core, tlb_va } => {
+            rl2::Step::TLBEvict { core, tlb_pcid, tlb_va } => {
                 assert(rl1::step_TLBEvict(pre.interp(), post.interp(), c, core, tlb_va, lbl));
             },
             rl2::Step::WriteNonneg => {
