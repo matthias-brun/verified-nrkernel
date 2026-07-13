@@ -550,10 +550,10 @@ pub proof fn next_step_preserves_inv_mmu(c: os::Constants, s1: os::State, s2: os
             assert(mmu::rl1::next_step(s1.mmu@, s2.mmu@, c.common, mmu_step, mmu::Lbl::MemOp(core, vaddr as usize, op)));
             if mmu_step is MemOpTLB {
                 let tlb_va = mmu_step->MemOpTLB_tlb_va;
-                let pte = s1.mmu@.tlbs[core][tlb_va];
+                let pte = s1.mmu@.cores[core].tlb[tlb_va];
                 let paddr = pte.frame.base + (vaddr - tlb_va);
                 assert(s2.inv_mapped_pte_wf(c));
-                assert(s1.mmu@.tlbs[core].dom().map(|v| v as nat).contains(tlb_va as nat));
+                assert(s1.mmu@.cores[core].tlb.dom().map(|v| v as nat).contains(tlb_va as nat));
                 assert(c.valid_core(core));
                 assert(candidate_mapping_in_bounds_pmem(c.common, pte));
                 assert(pte.frame.size == L1_ENTRY_SIZE
@@ -869,7 +869,7 @@ pub proof fn next_step_mmu_preserves_inv_tlb(
                 && s2.core_states[dispatcher] is UnmapShootdownWaiting
                 && !(#[trigger] s2.mmu@.writes.nonpos.contains(handler))
                     implies
-                !s2.mmu@.tlbs[handler].contains_key((s2.core_states[dispatcher]->UnmapShootdownWaiting_vaddr) as usize)
+                !s2.mmu@.cores[handler].tlb.contains_key((s2.core_states[dispatcher]->UnmapShootdownWaiting_vaddr) as usize)
             by {
                 // assert(!s2.os_ext.shootdown_vec.open_requests.contains(handler));
                 let shootdown_vaddr = s2.core_states[dispatcher]->UnmapShootdownWaiting_vaddr;
@@ -880,14 +880,14 @@ pub proof fn next_step_mmu_preserves_inv_tlb(
                     assert(!s2.interp_pt_mem().contains_key(shootdown_vaddr));
                     assert(shootdown_vaddr < MAX_BASE);
                     assert(!s2.mmu@.pt_mem@.contains_key(shootdown_vaddr as usize));
-                    assert(!s1.mmu@.tlbs[handler].contains_key(shootdown_vaddr as usize));
+                    assert(!s1.mmu@.cores[handler].tlb.contains_key(shootdown_vaddr as usize));
                     if vbase == shootdown_vaddr {
                         reveal(crate::spec_t::mmu::pt_mem::PTMem::view);
                         assert(!s2.mmu@.pt_mem.is_base_pt_walk(shootdown_vaddr as usize));
                         assert(!s1.mmu@.pt_mem.is_base_pt_walk(shootdown_vaddr as usize));
                         assert(s1.mmu@.pt_mem.is_base_pt_walk(shootdown_vaddr as usize));
                     } else {
-                        assert(!s2.mmu@.tlbs[handler].contains_key(shootdown_vaddr as usize));
+                        assert(!s2.mmu@.cores[handler].tlb.contains_key(shootdown_vaddr as usize));
                     }
                 }
             };
@@ -898,7 +898,7 @@ pub proof fn next_step_mmu_preserves_inv_tlb(
             assert(s2.successful_IPI(c));
             assert forall|tlb_core: Core, tlb_va: nat| #![auto]
                 c.valid_core(tlb_core)
-                && s2.mmu@.tlbs[tlb_core].dom().map(|v| v as nat).contains(tlb_va)
+                && s2.mmu@.cores[tlb_core].tlb.dom().map(|v| v as nat).contains(tlb_va)
                     implies
                 s2.interp_pt_mem().dom().union(s2.unmap_vaddr_set()).contains(tlb_va)
             by {
@@ -907,7 +907,7 @@ pub proof fn next_step_mmu_preserves_inv_tlb(
                         reveal(crate::spec_t::mmu::pt_mem::PTMem::view);
                         assert(s1.interp_pt_mem().contains_key(tlb_va));
                     } else {
-                        assert(s1.mmu@.tlbs[tlb_core].dom().map(|v| v as nat).contains(tlb_va));
+                        assert(s1.mmu@.cores[tlb_core].tlb.dom().map(|v| v as nat).contains(tlb_va));
                         assert(s2.interp_pt_mem().dom().union(s2.unmap_vaddr_set()).contains(tlb_va)
                             =~= s1.interp_pt_mem().dom().union(s1.unmap_vaddr_set()).contains(tlb_va));
                     }
@@ -944,7 +944,7 @@ pub proof fn next_step_mmu_preserves_inv_tlb(
             assert(s2.inv_tlb(c));
         }
         _ => {
-            assert(forall|core| #![auto] s2.mmu@.tlbs[core].submap_of(s1.mmu@.tlbs[core]));
+            assert(forall|core| #![auto] s2.mmu@.cores[core].tlb.submap_of(s1.mmu@.cores[core].tlb));
             assert(s2.TLB_interp_pt_mem_agree(c)) by {
                 assert(forall |v, core2| s1.is_inflight_critical_protect_vaddr_core(v,core2)
                     ==> s2.is_inflight_critical_protect_vaddr_core(v,core2));
@@ -1135,13 +1135,13 @@ proof fn lemma_map_op_change_tlb_agree(
 
     assert forall|tlb_core: Core, v: usize|
         #[trigger] c.valid_core(tlb_core)
-        && #[trigger] s2.mmu@.tlbs[tlb_core].contains_key(v)
+        && #[trigger] s2.mmu@.cores[tlb_core].tlb.contains_key(v)
         && s2.interp_pt_mem().contains_key(v as nat)
         && !s2.is_inflight_critical_protect_vaddr(v as nat)
             implies
-        s2.mmu@.tlbs[tlb_core][v] == s2.interp_pt_mem()[v as nat]
+        s2.mmu@.cores[tlb_core].tlb[v] == s2.interp_pt_mem()[v as nat]
     by {
-        assert(s1.mmu@.tlbs[tlb_core].contains_key(v));
+        assert(s1.mmu@.cores[tlb_core].tlb.contains_key(v));
         assert(s1.interp_pt_mem().dom().union(s1.unmap_vaddr_set()).contains(v as nat));
         assert_by_contradiction!(!s1.unmap_vaddr_set().contains(v as nat), {
             let uc = choose|c2: Core| s1.is_unmap_vaddr_core(c2, v as nat);
@@ -1307,18 +1307,18 @@ pub proof fn next_step_preserves_inv_tlb_2(
         os::Step::UnmapEnd { core } => {
             let vaddr = s1.core_states[core].vaddr();
             assert forall|tlb_core: Core| #[trigger] c.valid_core(tlb_core)
-                implies !s1.mmu@.tlbs[tlb_core].contains_key(vaddr as usize)
+                implies !s1.mmu@.cores[tlb_core].tlb.contains_key(vaddr as usize)
             by {
                 if s1.core_states[core] is UnmapOpDone {
                     let tlb_set = s1.interp_pt_mem().dom().union(s1.unmap_vaddr_set());
                     assert(!tlb_set.contains(vaddr));
-                    assert(s1.mmu@.tlbs[tlb_core].dom().map(|v| v as nat).subset_of(tlb_set));
-                    assert(!s1.mmu@.tlbs[tlb_core].dom().map(|v| v as nat).contains(vaddr));
+                    assert(s1.mmu@.cores[tlb_core].tlb.dom().map(|v| v as nat).subset_of(tlb_set));
+                    assert(!s1.mmu@.cores[tlb_core].tlb.dom().map(|v| v as nat).contains(vaddr));
                     assert(vaddr <= usize::MAX);
-                    assert(!s1.mmu@.tlbs[tlb_core].contains_key(vaddr as usize));
+                    assert(!s1.mmu@.cores[tlb_core].tlb.contains_key(vaddr as usize));
                 } else {
                     assert(!s1.os_ext.shootdown_vec.open_requests.contains(tlb_core));
-                    assert(!s1.mmu@.tlbs[tlb_core].contains_key(vaddr as usize));
+                    assert(!s1.mmu@.cores[tlb_core].tlb.contains_key(vaddr as usize));
                 }
             }
             assert(forall|va, core| s2.is_inflight_protect_vaddr_core(va, core)
@@ -1425,10 +1425,10 @@ pub proof fn next_step_preserves_inv_tlb_3(
             assert(s2.TLB_interp_pt_mem_agree(c)) by {
                 assert forall|core2: Core, v: usize|
                     #[trigger] c.valid_core(core2)
-                    && #[trigger] s2.mmu@.tlbs[core2].contains_key(v)
+                    && #[trigger] s2.mmu@.cores[core2].tlb.contains_key(v)
                     && s2.interp_pt_mem().contains_key(v as nat)
                     && !s2.is_inflight_critical_protect_vaddr(v as nat)
-                implies s2.mmu@.tlbs[core2][v] == s2.interp_pt_mem()[v as nat] by {
+                implies s2.mmu@.cores[core2].tlb[v] == s2.interp_pt_mem()[v as nat] by {
                     assert(s2.core_states[core].vaddr() == s1.core_states[core].vaddr());
                     if v == s2.core_states[core].vaddr() {
                         assert(s2.is_inflight_critical_protect_vaddr_core(v as nat, core));

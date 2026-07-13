@@ -525,7 +525,7 @@ pub mod code {
     #[verifier(external_body)]
     unsafe fn pt_memory_free(pa: u64, sz: usize, level: u8) {
         let layout = std::alloc::Layout::from_size_align_unchecked(sz, PAGE_SIZE);
-        std::alloc::dealloc(std::mem::transmute(pa), layout);
+        std::alloc::dealloc(std::ptr::with_exposed_provenance_mut::<u8>(pa as usize), layout);
     }
 
     /// Allocates memory for a page table node

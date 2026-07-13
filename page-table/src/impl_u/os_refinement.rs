@@ -590,9 +590,9 @@ proof fn step_MemOp_refines(c: os::Constants, s1: os::State, s2: os::State, step
         rl1::Step::MemOpTLB { tlb_va } => {
             let tlb_va = tlb_va as nat;
             assert forall|core, va|
-                c.valid_core(core) && #[trigger] s1.mmu@.tlbs[core].contains_key(va)
+                c.valid_core(core) && #[trigger] s1.mmu@.cores[core].tlb.contains_key(va)
                 && s1.interp_pt_mem().contains_key(va as nat)
-                implies s1.mmu@.tlbs[core][va].frame == s1.interp_pt_mem()[va as nat].frame
+                implies s1.mmu@.cores[core].tlb[va].frame == s1.interp_pt_mem()[va as nat].frame
             by {
                 if s1.is_inflight_protect_vaddr(va as nat) {
                     let prot_core = s1.choose_inflight_protect_vaddr_core(va as nat);
@@ -601,31 +601,31 @@ proof fn step_MemOp_refines(c: os::Constants, s1: os::State, s2: os::State, step
                 }
             };
 
-            assert(s1.mmu@.tlbs[core].contains_key(tlb_va as usize));
+            assert(s1.mmu@.cores[core].tlb.contains_key(tlb_va as usize));
             assert(s1.interp_pt_mem().dom().union(s1.unmap_vaddr_set()).contains(tlb_va));
             unmap_vaddr_set_le_extra_mappings_dom(c, s1);
             assert(s1.applied_mappings().contains_key(tlb_va));
-            assert(s1.applied_mappings()[tlb_va].frame == s1.mmu@.tlbs[core][tlb_va as usize].frame) by {
+            assert(s1.applied_mappings()[tlb_va].frame == s1.mmu@.cores[core].tlb[tlb_va as usize].frame) by {
                 reveal(os::State::extra_mappings);
                 if s1.interp_pt_mem().contains_key(tlb_va) {
-                    // assert(s1.interp_pt_mem()[tlb_va] == s1.mmu@.tlbs[core][tlb_va]);
-                    // assert(s1.applied_mappings()[tlb_va] == s1.mmu@.tlbs[core][tlb_va]);
+                    // assert(s1.interp_pt_mem()[tlb_va] == s1.mmu@.cores[core].tlb[tlb_va]);
+                    // assert(s1.applied_mappings()[tlb_va] == s1.mmu@.cores[core].tlb[tlb_va]);
                 } else {
                     assert(s1.unmap_vaddr_set().contains(tlb_va));
                     let core1 = choose|core: Core| s1.is_unmap_vaddr_core(core, tlb_va);
                     assert(c.valid_core(core1));
                     assert(s1.is_unmap_vaddr_core(core1, tlb_va));
-                    assert(s1.core_states[core1].PTE() == s1.mmu@.tlbs[core][tlb_va as usize]);
+                    assert(s1.core_states[core1].PTE() == s1.mmu@.cores[core].tlb[tlb_va as usize]);
                     vaddr_distinct(c, s1);
                     assert(s1.core_states[core1].PTE() == s1.extra_mapping_for_vaddr(tlb_va));
                     assert(s1.extra_mapping_for_vaddr(tlb_va) == s1.extra_mappings()[tlb_va]);
-                    assert(s1.applied_mappings()[tlb_va] == s1.mmu@.tlbs[core][tlb_va as usize]);
+                    assert(s1.applied_mappings()[tlb_va] == s1.mmu@.cores[core].tlb[tlb_va as usize]);
                 }
             }
 
 
             let d = c.interp();
-            let pte = s1.mmu@.tlbs[core][tlb_va as usize];
+            let pte = s1.mmu@.cores[core].tlb[tlb_va as usize];
             let hl_pte = Some((tlb_va, pte));
 
             let paddr = pte.frame.base + (vaddr - tlb_va);
@@ -783,8 +783,8 @@ proof fn step_MemOp_refines(c: os::Constants, s1: os::State, s2: os::State, step
                     assert(s1.extra_mappings().contains_key(tlb_va)
                         || s1.inflight_mapunmap_vaddr().contains(tlb_va));
                     assert(c.valid_core(core));
-                    assert(s1.mmu@.tlbs[core].contains_key(tlb_va as usize));
-                    assert(between(vaddr, tlb_va, tlb_va + s1.mmu@.tlbs[core][tlb_va as usize].frame.size));
+                    assert(s1.mmu@.cores[core].tlb.contains_key(tlb_va as usize));
+                    assert(between(vaddr, tlb_va, tlb_va + s1.mmu@.cores[core].tlb[tlb_va as usize].frame.size));
                     vaddr_mapping_is_being_modified_from_vaddr_unmap(c, s1, core, tlb_va as usize, vaddr);
                     assert(s1.interp(c).vaddr_mapping_is_being_modified(d, vaddr));
                     assert((tlb_va, pte) == s1.interp(c).vaddr_mapping_is_being_modified_choose(d, vaddr));
@@ -802,7 +802,7 @@ proof fn vaddr_distinct(c: os::Constants, s: os::State)
     requires
         s.inv(c),
         s.sound,
-    ensures 
+    ensures
         forall |core1, core2| #![all_triggers]
             s.core_states.contains_key(core1) && s.core_states.contains_key(core2)
             && !(s.core_states[core1] is Idle) && !(s.core_states[core2] is Idle)
@@ -949,7 +949,7 @@ proof fn extra_mappings_preserved_effective_mapping_inserted(
 
                 match s2.core_states[s2.get_extra_vaddr_core(vaddr)] {
                     CoreState::MapWaiting { vaddr: vaddr1, pte, .. }
-                    | CoreState::MapExecuting { vaddr: vaddr1, pte, .. } => 
+                    | CoreState::MapExecuting { vaddr: vaddr1, pte, .. } =>
                     {
                         let mappings = s2.effective_mappings();
                         assert(vaddr1 == vaddr);
@@ -1071,7 +1071,7 @@ proof fn extra_mappings_preserved_effective_mapping_inserted_protect(
 
                 match s2.core_states[s2.get_extra_vaddr_core(vaddr)] {
                     CoreState::MapWaiting { vaddr: vaddr1, pte, .. }
-                    | CoreState::MapExecuting { vaddr: vaddr1, pte, .. } => 
+                    | CoreState::MapExecuting { vaddr: vaddr1, pte, .. } =>
                     {
                         assert(!candidate_mapping_overlaps_existing_vmem(s2.effective_mappings(), vaddr, pte));
                         let mappings = s2.effective_mappings();
@@ -1489,7 +1489,7 @@ proof fn extra_mappings_removed(
         //    _ => false,
         //},
         s2.core_states == s1.core_states.insert(this_core, CoreState::MapDone { ult_id, vaddr: this_vaddr, pte, result: Ok(()) }),
-            
+
         s1.effective_mappings() == s2.effective_mappings(),
     ensures
         s2.extra_mappings() == s1.extra_mappings().remove(this_vaddr),
@@ -1567,9 +1567,9 @@ proof fn extra_mappings_inserted(
         s1.core_states.contains_key(this_core),
         s1.core_states[this_core] matches CoreState::UnmapExecuting { ult_id, vaddr, result: None },
 
-        s2.core_states == s1.core_states.insert(this_core, 
+        s2.core_states == s1.core_states.insert(this_core,
             CoreState::UnmapExecuting { ult_id, vaddr: this_vaddr, result: Some(Ok(s1.interp_pt_mem()[this_vaddr])) }),
-            
+
         s1.effective_mappings() == s2.effective_mappings(),
     ensures
         !s1.extra_mappings().contains_key(this_vaddr),
@@ -1619,14 +1619,14 @@ proof fn vaddr_mapping_is_being_modified_from_vaddr_unmap(
         s.extra_mappings().contains_key(tlb_va as nat)
            || s.inflight_mapunmap_vaddr().contains(tlb_va as nat),
         c.valid_core(core),
-        s.mmu@.tlbs[core].contains_key(tlb_va),
-        between(vaddr, tlb_va as nat, tlb_va as nat + s.mmu@.tlbs[core][tlb_va].frame.size),
+        s.mmu@.cores[core].tlb.contains_key(tlb_va),
+        between(vaddr, tlb_va as nat, tlb_va as nat + s.mmu@.cores[core].tlb[tlb_va].frame.size),
         //c.valid_ult(thread_id),
         //core == c.ult2core[thread_id],
     ensures
         s.interp(c).vaddr_mapping_is_being_modified(c.interp(), vaddr),
         s.interp(c).vaddr_mapping_is_being_modified_choose(c.interp(), vaddr)
-            == (tlb_va as nat, s.mmu@.tlbs[core][tlb_va])
+            == (tlb_va as nat, s.mmu@.cores[core].tlb[tlb_va])
 {
     assert(s.TLB_dom_subset_of_pt_and_inflight_unmap_vaddr(c));
 
@@ -1643,7 +1643,7 @@ proof fn vaddr_mapping_is_being_modified_from_vaddr_unmap(
         // assert(s.core_states[core1].vaddr() == tlb_va);
         assert(c.valid_core(core1));
 
-        assert(s.core_states[core1].PTE() == s.mmu@.tlbs[core][tlb_va]);
+        assert(s.core_states[core1].PTE() == s.mmu@.cores[core].tlb[tlb_va]);
 
         let thread1 = s.core_states[core1].ult_id();
         assert(c.interp().valid_thread(thread1));
@@ -1673,9 +1673,9 @@ proof fn vaddr_mapping_is_being_modified_from_vaddr_unmap(
         }
 
         assert(s.interp(c).vaddr_mapping_is_being_modified_choose(c.interp(), vaddr)
-            == (tlb_va as nat, s.mmu@.tlbs[core][tlb_va]));
+            == (tlb_va as nat, s.mmu@.cores[core].tlb[tlb_va]));
     } else {
-        assert(s.mmu@.tlbs[core].dom().map(|v| v as nat).contains(tlb_va as nat));
+        assert(s.mmu@.cores[core].tlb.dom().map(|v| v as nat).contains(tlb_va as nat));
         assert(s.interp_pt_mem().contains_key(tlb_va as nat));
 
         let core1 = choose|core1: Core|
@@ -1692,7 +1692,7 @@ proof fn vaddr_mapping_is_being_modified_from_vaddr_unmap(
         // Trigger in candidate_mapping_overlaps_existing_vmem
         let _ = s.effective_mappings().contains_key(tlb_va as nat);
 
-        assert(s.interp_pt_mem()[tlb_va as nat] == s.mmu@.tlbs[core][tlb_va]);
+        assert(s.interp_pt_mem()[tlb_va as nat] == s.mmu@.cores[core].tlb[tlb_va]);
         assert(s.interp(c).vaddr_mapping_is_being_modified(c.interp(), vaddr));
 
         let t = s.interp(c);
@@ -1718,7 +1718,7 @@ proof fn vaddr_mapping_is_being_modified_from_vaddr_unmap(
         }
 
         assert(s.interp(c).vaddr_mapping_is_being_modified_choose(c.interp(), vaddr)
-            == (tlb_va as nat, s.mmu@.tlbs[core][tlb_va]));
+            == (tlb_va as nat, s.mmu@.cores[core].tlb[tlb_va]));
     }
 }
 

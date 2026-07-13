@@ -249,7 +249,7 @@ impl HandlerVC for PTImpl {
             assert(state3.mmu@.writes.nonpos === state2.mmu@.writes.nonpos.remove(core));
             assert(!state3.mmu@.writes.nonpos.contains(core));
             assert(!tok.st().mmu@.writes.nonpos.contains(core));
-            assert(!state3.mmu@.tlbs[core].contains_key(vaddr));
+            assert(!state3.mmu@.cores[core].tlb.contains_key(vaddr));
             assert(tok.consts().valid_core(state2.os_ext.lock->Some_0));
             assert(tok.consts().valid_core(core));
             assert(tok.st().core_states[state2.os_ext.lock->Some_0].is_in_shootdown());

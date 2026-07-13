@@ -593,8 +593,8 @@ pub open spec fn step_AckShootdownIPI(c: Constants, s1: State, s2: State, core: 
     // enabling conditions
     &&& c.valid_core(core)
     &&& !s1.mmu@.writes.nonpos.contains(core)
-    &&& s1.mmu@.tlbs[core].contains_key(va)
-        ==> s1.mmu@.pt_mem@.contains_key(va) && s1.mmu@.tlbs[core][va] == s1.mmu@.pt_mem@[va]
+    &&& s1.mmu@.cores[core].tlb.contains_key(va)
+        ==> s1.mmu@.pt_mem@.contains_key(va) && s1.mmu@.cores[core].tlb[va] == s1.mmu@.pt_mem@[va]
     // mmu statemachine steps
     &&& s2.mmu == s1.mmu
     &&& os_ext::next(s1.os_ext, s2.os_ext, c.common, os_ext::Lbl::AckShootdown { core })
@@ -1629,7 +1629,7 @@ impl State {
             && c.valid_core(handler)
             && self.core_states[dispatcher] is UnmapShootdownWaiting
             && !(#[trigger] self.mmu@.writes.nonpos.contains(handler))
-                ==> !self.mmu@.tlbs[handler].contains_key(
+                ==> !self.mmu@.cores[handler].tlb.contains_key(
                         (self.core_states[dispatcher]->UnmapShootdownWaiting_vaddr) as usize)
     }
 
@@ -1640,8 +1640,8 @@ impl State {
             && c.valid_core(handler)
             && self.core_states[dispatcher] is ProtectShootdownWaiting
             && !#[trigger] self.mmu@.writes.nonpos.contains(handler)
-            && self.mmu@.tlbs[handler].contains_key(vaddr as usize)
-                ==> self.mmu@.tlbs[handler][vaddr as usize]
+            && self.mmu@.cores[handler].tlb.contains_key(vaddr as usize)
+                ==> self.mmu@.cores[handler].tlb[vaddr as usize]
                             == self.interp_pt_mem()[vaddr]
         }
     }
@@ -1658,36 +1658,36 @@ impl State {
 
     pub open spec fn TLB_dom_subset_of_pt_and_inflight_unmap_vaddr(self, c: Constants) -> bool {
         forall|core: Core| #[trigger] c.valid_core(core)
-            ==> self.mmu@.tlbs[core].dom().map(|v| v as nat).subset_of(
+            ==> self.mmu@.cores[core].tlb.dom().map(|v| v as nat).subset_of(
                 self.interp_pt_mem().dom().union(self.unmap_vaddr_set()))
     }
 
     pub open spec fn TLB_interp_pt_mem_agree(self, c: Constants) -> bool {
         forall|core: Core, v: usize|
             #[trigger] c.valid_core(core)
-            && #[trigger] self.mmu@.tlbs[core].contains_key(v)
+            && #[trigger] self.mmu@.cores[core].tlb.contains_key(v)
             && self.interp_pt_mem().contains_key(v as nat)
             && !self.is_inflight_critical_protect_vaddr(v as nat)
-            ==> self.mmu@.tlbs[core][v] == self.interp_pt_mem()[v as nat]
+            ==> self.mmu@.cores[core].tlb[v] == self.interp_pt_mem()[v as nat]
     }
 
     pub open spec fn TLB_protect_agree(self, c: Constants) -> bool {
         forall|core: Core, core2: Core, v: usize|
             #[trigger] c.valid_core(core)
-            && #[trigger] self.mmu@.tlbs[core].contains_key(v)
+            && #[trigger] self.mmu@.cores[core].tlb.contains_key(v)
             && #[trigger] c.valid_core(core2)
             &&  self.is_inflight_critical_protect_vaddr_core(v as nat, core2)
-            ==> self.mmu@.tlbs[core][v] == self.interp_pt_mem()[v as nat] 
-                    || self.mmu@.tlbs[core][v] == self.core_states[core2].PTE()
+            ==> self.mmu@.cores[core].tlb[v] == self.interp_pt_mem()[v as nat]
+                    || self.mmu@.cores[core].tlb[v] == self.core_states[core2].PTE()
     }
 
     pub open spec fn TLB_unmap_agree(self, c: Constants) -> bool {
         forall|core: Core, core2: Core, v: usize|
             #[trigger] c.valid_core(core)
-            && #[trigger] self.mmu@.tlbs[core].contains_key(v)
+            && #[trigger] self.mmu@.cores[core].tlb.contains_key(v)
             && #[trigger] c.valid_core(core2)
             && self.is_unmap_vaddr_core(core2, v as nat)
-            ==> self.mmu@.tlbs[core][v] == self.core_states[core2].PTE()
+            ==> self.mmu@.cores[core].tlb[v] == self.core_states[core2].PTE()
     }
 
     pub open spec fn shootdown_exists(self, c: Constants) -> bool {
@@ -1864,7 +1864,7 @@ impl Step {
                     rl1::Step::MemOpNoTr => hlspec::Step::MemOp { pte: None },
                     rl1::Step::MemOpNoTrNA { .. } => hlspec::Step::MemOp { pte: None },
                     rl1::Step::MemOpTLB { tlb_va } => {
-                        let pte = pre.mmu@.tlbs[core][tlb_va];
+                        let pte = pre.mmu@.cores[core].tlb[tlb_va];
                         if pre.effective_mappings().contains_key(tlb_va as nat)
                             && pre.effective_mappings()[tlb_va as nat] == pte
                         {
