@@ -90,9 +90,19 @@ impl CoreState {
             ==> Self::walk_valid(walk)
     }
 
-    // -------------------------------------- PCID -------------------------------------------------
+    // -------------------------------------- CR3 -------------------------------------------------
+
+    #[verifier(inline)]
+    pub open spec fn cr3_set(self, cr3: Cr3) -> CoreState
+    {
+        CoreState {
+            cr3,
+            ..self
+        }
+    }
 
     /// obtains the current PCID
+    #[verifier(inline)]
     pub open spec fn pcid(&self) -> Pcid {
         self.cr3.pcid
     }
@@ -131,6 +141,7 @@ impl CoreState {
     }
 
     /// obtains the element from the TLB, which must contain the element
+    #[verifier(inline)]
     pub open spec fn tlb_lookup_pcid(self, pcid: Pcid, va: Vaddr) -> PTE
         recommends self.tlb_contains_pcid(pcid, va)
     {
@@ -138,6 +149,7 @@ impl CoreState {
     }
 
     /// obtains the element by VA with the current PCID, which must contain the element
+    #[verifier(inline)]
     pub open spec fn tlb_lookup(self, va: Vaddr) -> PTE
         recommends self.tlb_contains(va)
     {
@@ -145,6 +157,7 @@ impl CoreState {
     }
 
     /// inserts an entry in the TLB. it will be associated with the current `pcid`
+    #[verifier(inline)]
     pub open spec fn tlb_fill(self, vbase: Vaddr, pte: PTE) -> CoreState
         recommends !self.tlb[self.pcid()].contains_key(vbase)
     {
@@ -155,6 +168,7 @@ impl CoreState {
     }
 
     /// evicts an entry with the given `pcid` and `vaddr` from the TLB
+    #[verifier(inline)]
     pub open spec fn tlb_evict(self, pcid: Pcid, va: Vaddr) -> CoreState
     {
         CoreState {
@@ -206,6 +220,7 @@ impl CoreState {
     }
 
     /// evicts the walk from the PSC with the supplied pcid
+    #[verifier(inline)]
     pub open spec fn psc_evict(self, pcid: Pcid, walk: Walk) -> CoreState {
       CoreState {
             psc: self.psc.insert(pcid, self.psc[pcid].remove(walk)),
@@ -297,6 +312,7 @@ pub struct State {
 
 pub struct History {
     pub happy: bool,
+    pub cr3: Cr3,
     /// All partial walks since the last invlpg
     pub walks: IMap<Core, ISet<Walk>>,
     pub writes: Writes,
@@ -414,8 +430,8 @@ pub closed spec fn step_WriteCr3(pre: State, post: State, c: Constants, lbl: Lbl
     }
 
     &&& post == State {
+        cores: pre.cores.insert(core, pre.cores[core].cr3_set(cr3)),
         hist: History {
-            // we're happy when there weasn't a change (for now)
             happy: pre.hist.happy && pre.cores[core].cr3 == cr3,
             // if there was a flush, then we clear the walks since last invlpg
             walks: if flush { pre.hist.walks.insert(core, iset![]) } else { pre.hist.walks },
@@ -525,8 +541,8 @@ pub closed spec fn step_InvPcid(pre: State, post: State, c: Constants, lbl: Lbl)
     &&& post == State {
         hist: History {
             happy: pre.hist.happy && match typ {
-                InvPcidType::IndividualAddress(d) => { pre.cores[core].pcid() == d.pcid }
-                InvPcidType::SingleContext(d) => { pre.cores[core].pcid() == d.pcid },
+                InvPcidType::IndividualAddress(d) => { pre.cores[core].cr3.pcid == d.pcid }
+                InvPcidType::SingleContext(d) => { pre.cores[core].cr3.pcid == d.pcid },
                 _ => pre.hist.happy
             },
             walks: pre.hist.walks.insert(core, iset![]),
@@ -546,8 +562,6 @@ pub closed spec fn step_InvPcid(pre: State, post: State, c: Constants, lbl: Lbl)
         ..pre
     }
 }
-
-
 
 
 pub closed spec fn step_MemOpNoTr(
@@ -801,6 +815,7 @@ pub closed spec fn step_Write(pre: State, post: State, c: Constants, lbl: Lbl) -
     &&& post.pt_mem == pre.pt_mem
     &&& post.cores === pre.cores.insert(core, pre.cores[core].stbuf_push(addr, value))
 
+    &&& post.hist.cr3 == pre.hist.cr3
     &&& post.hist.happy == pre.hist.happy
         && (pre.is_happy_writenonneg(core, addr, value)
             || pre.is_happy_writenonpos(core, addr, value)
@@ -922,8 +937,10 @@ pub open spec fn next_step(pre: State, post: State, c: Constants, step: Step, lb
 pub closed spec fn init(pre: State, c: Constants) -> bool {
     &&& pre.cores === IMap::new(|core| c.valid_core(core), |core| CoreState::new(c.cr3))
 
+    // the PMl4 must match
     &&& pre.hist.happy == true
     &&& pre.hist.walks === IMap::new(|core| c.valid_core(core), |core| iset![])
+    &&& pre.hist.cr3 == c.cr3
     //&&& pre.hist.writes.core == ..
     &&& pre.hist.writes.tso === iset![]
     &&& pre.hist.writes.nonpos === iset![]
@@ -934,6 +951,7 @@ pub closed spec fn init(pre: State, c: Constants) -> bool {
 
     &&& c.valid_core(pre.hist.writes.core)
     &&& pre.pt_mem.mem === IMap::new(|va| aligned(va as nat, 8) && c.in_ptmem_range(va as nat, 8), |va| 0)
+    &&& pre.pt_mem.pml4 == c.cr3.pml4
     &&& aligned(pre.pt_mem.pml4 as nat, 4096)
     &&& c.memories_disjoint()
     &&& pre.phys_mem.len() == c.range_mem.1
@@ -980,7 +998,7 @@ impl State {
     // phrase this only for the current pcid.
     pub closed spec fn inv_cache_subset_of_hist_walks(self, c: Constants) -> bool {
         forall|core, walk|
-            c.valid_core(core) &&  self.cores[core].psc_contains(walk)
+            c.valid_core(core) &&   #[trigger] self.cores[core].psc_contains(walk)
                 ==> #[trigger] self.hist.walks[core].contains(walk)
     }
 
@@ -1017,12 +1035,43 @@ pub proof fn next_preserves_inv(pre: State, post: State, c: Constants, lbl: Lbl)
             assert(pre.cores[c].tlb.dom() == post.cores[c].tlb.dom());
             assert(pre.cores[c].psc.dom() == post.cores[c].psc.dom());
         }
+    assert(post.hist.cr3 == pre.hist.cr3);
+
+    // let step = choose|step| next_step(pre, post, c, step, lbl);
+    // match step {
+    //     // Step::Invlpg                       => { assert(post.inv_cache_subset_of_hist_walks(c)); }
+    //     // Step::InvPcid                      => {
+    //     //     // assert(post.inv_cache_subset_of_hist_walks(c));
+    //     // }
+    //     // Step::WriteCr3                     => { }
+    //     // Step::MemOpNoTr { walk, r }        => { assert(post.inv_cache_subset_of_hist_walks(c)); }
+    //     // Step::MemOpTLB { tlb_va }          => { assert(post.inv_cache_subset_of_hist_walks(c)); }
+    //     // Step::CacheFill { core, walk }     => { assert(post.inv_cache_subset_of_hist_walks(c)); }
+    //     // Step::CacheUse { core, walk }      => { assert(post.inv_cache_subset_of_hist_walks(c)); }
+    //     // Step::CacheEvict { core, pcid, walk }    => { assert(post.inv_cache_subset_of_hist_walks(c)); }
+    //     // Step::WalkInit { core, vaddr }     => { assert(post.inv_cache_subset_of_hist_walks(c)); }
+    //     // Step::WalkStep { core, walk, r }   => { assert(post.inv_cache_subset_of_hist_walks(c)); }
+    //     // Step::WalkAbort { core, walk }     => { assert(post.inv_cache_subset_of_hist_walks(c)); }
+    //     // Step::TLBFill { core, walk, r }    => { assert(post.inv_cache_subset_of_hist_walks(c)); }
+    //     // Step::TLBEvict { core, tlb_pcid,  tlb_va }    =>{ assert(post.inv_cache_subset_of_hist_walks(c)); }
+    //     // //Step::WalkDone { core, walk, r } => step_WalkDone(pre, post, c, core, walk, r, lbl),
+    //     // Step::Write                        => { assert(post.inv_cache_subset_of_hist_walks(c)); }
+    //     // Step::Writeback { core }           => { assert(post.inv_cache_subset_of_hist_walks(c)); }
+    //     // Step::Read { r }                   => { assert(post.inv_cache_subset_of_hist_walks(c)); }
+    //     // Step::Barrier                      => { assert(post.inv_cache_subset_of_hist_walks(c)); }
+    //     // Step::Stutter                      => {
+    //     //     assert(post.inv_cache_subset_of_hist_walks(c));
+    //     // }
+    //     // _ => ()
+    // }
 }
 
 // $line_count$}$
 
 
 pub mod refinement {
+    use vstd::pervasive::arbitrary;
+
     #[cfg(verus_keep_ghost)]
     use crate::extra::lemma_bits_misc;
     use crate::spec_t::mmu::*;
@@ -1053,6 +1102,7 @@ pub mod refinement {
                 writes: self.hist.writes,
                 polarity: self.hist.polarity,
                 hist: rl2::History {
+                    cr3: self.hist.cr3,
                     pending_maps: self.hist.pending_maps,
                     pending_unmaps: self.hist.pending_unmaps,
                     pending_protects: self.hist.pending_protects,
@@ -1080,8 +1130,20 @@ pub mod refinement {
             if pre.hist.happy {
                 match self {
                     rl3::Step::Invlpg                     => rl2::Step::Invlpg,
-                    rl3::Step::InvPcid                    => rl2::Step::InvPcid,
-                    rl3::Step::WriteCr3                   => rl2::Step::WriteCr3,
+                    rl3::Step::InvPcid                    => {
+                        if let Lbl::InvPcid(core, tpyp) = lbl {
+                            rl2::Step::InvPcid
+                        } else {
+                            arbitrary()
+                        }
+                    }
+                    rl3::Step::WriteCr3                   => {
+                        if let Lbl::WriteCr3(core, Cr3, flush) = lbl {
+                            rl2::Step::WriteCr3
+                        } else {
+                            arbitrary()
+                        }
+                    }
                     rl3::Step::MemOpNoTr { walk, r }      => rl2::Step::MemOpNoTr { walk },
                     rl3::Step::MemOpTLB { tlb_va }        => rl2::Step::MemOpTLB { tlb_va },
                     rl3::Step::CacheFill { core, walk }   => rl2::Step::Stutter,
