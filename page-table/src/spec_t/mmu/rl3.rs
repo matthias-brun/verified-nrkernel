@@ -1214,12 +1214,13 @@ pub mod refinement {
 
     /// The value of r is irrelevant, so we can just ignore it.
     broadcast proof fn rl3_walk_next_is_rl2_walk_next(state: rl3::State, core: Core, walk: Walk, r: usize)
-        requires walk.path.len() <= 3
+        requires walk.path.len() <= 3,
+            state.cores.contains_key(core)
         ensures
         #[trigger] rl3::walk_next(state, core, walk, r)
                 == rl2::walk_next(state.interp().core_mem(core), walk)
     {
-        admit();
+
         reveal(rl2::walk_next);
         state.pt_mem.lemma_write_seq(state.interp().cores[core].stbuf);
         broadcast use
@@ -1348,12 +1349,11 @@ pub mod refinement {
                 },
                 rl3::Step::TLBFill { core, walk, r } => {
                     rl3_walk_next_is_rl2_walk_next(pre, core, walk, r);
-                    admit();
-
-                    if let WalkResult::Valid { vbase, pte } = crate::spec_t::mmu::rl3::walk_next(pre, core, walk, r).result() {
-                        assert(post.interp().cores == pre.interp().cores.insert(core,
-                            pre.interp().cores[core].tlb_fill(vbase, pte)));
-                    }
+                    let wnext = crate::spec_t::mmu::rl3::walk_next(pre, core, walk, r);
+                    let vbase = wnext.result()->Valid_vbase;
+                    let pte = wnext.result()->Valid_pte;
+                    assert(post.interp().cores == pre.interp().cores.insert(core,
+                            pre.interp().cores[core].tlb_fill( vbase, pte)));
                     assert(rl2::step_TLBFill(pre.interp(), post.interp(), c, core, walk, lbl));
                 },
                 rl3::Step::TLBEvict { core, tlb_pcid, tlb_va } => {
@@ -1361,19 +1361,25 @@ pub mod refinement {
                     assert(rl2::step_TLBEvict(pre.interp(), post.interp(), c, core, tlb_pcid, tlb_va, lbl));
                 },
                 rl3::Step::Write => {
-                    admit();
+
                     let (core, addr, value) =
                         if let Lbl::Write(core, addr, value) = lbl {
                             (core, addr, value)
                         } else { arbitrary() };
+
+                    assert(post.interp().cores == pre.interp().cores.insert(core, pre.interp().cores[core].stbuf_push(addr, value)));
+
                     if pre.is_happy_writenonneg(core, addr, value) {
                         lemma_bits_misc();
                         assert(!pre.writer_mem().is_prot_write(addr, value));
+                        admit();
                         assert(rl2::step_WriteNonneg(pre.interp(), post.interp(), c, lbl));
                     } else if pre.is_happy_writenonpos(core, addr, value) {
+                        admit();
                         assert(rl2::step_WriteNonpos(pre.interp(), post.interp(), c, lbl));
                     } else if pre.is_happy_writeprotect(core, addr, value) {
                         pre.lemma_prot_write_not_nonpos_or_nonneg(addr, value);
+                        admit();
                         assert(rl2::step_WriteProtect(pre.interp(), post.interp(), c, lbl));
                     } else {
                         assert(rl2::step_SadWrite(pre.interp(), post.interp(), c, lbl));
