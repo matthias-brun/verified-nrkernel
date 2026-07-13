@@ -432,7 +432,7 @@ pub closed spec fn step_WriteCr3(pre: State, post: State, c: Constants, lbl: Lbl
     &&& post == State {
         cores: pre.cores.insert(core, pre.cores[core].cr3_set(cr3)),
         hist: History {
-            happy: pre.hist.happy && pre.cores[core].cr3 == cr3,
+            happy: pre.hist.happy && cr3 == pre.hist.cr3,
             // if there was a flush, then we clear the walks since last invlpg
             walks: if flush { pre.hist.walks.insert(core, iset![]) } else { pre.hist.walks },
             // TODO: check this!
@@ -541,8 +541,8 @@ pub closed spec fn step_InvPcid(pre: State, post: State, c: Constants, lbl: Lbl)
     &&& post == State {
         hist: History {
             happy: pre.hist.happy && match typ {
-                InvPcidType::IndividualAddress(d) => { pre.cores[core].cr3.pcid == d.pcid }
-                InvPcidType::SingleContext(d) => { pre.cores[core].cr3.pcid == d.pcid },
+                InvPcidType::IndividualAddress(d) => { pre.hist.cr3.pcid == d.pcid }
+                InvPcidType::SingleContext(d) => { pre.hist.cr3.pcid == d.pcid },
                 _ => pre.hist.happy
             },
             walks: pre.hist.walks.insert(core, iset![]),
@@ -604,8 +604,8 @@ pub closed spec fn step_MemOpTLB(
     &&& c.valid_core(core)
     &&& aligned(memop_vaddr as nat, memop.op_size())
     &&& memop.valid_op_size()
+    &&& pre.cores[core].tlb_contains(tlb_va)
     &&& {
-        &&& pre.cores[core].tlb_contains(tlb_va);
         let pte = pre.cores[core].tlb_lookup(tlb_va);
         let paddr = pte.frame.base + (memop_vaddr - tlb_va);
         &&& tlb_va <= memop_vaddr < tlb_va + pte.frame.size
@@ -1006,6 +1006,7 @@ impl State {
         &&& self.wf(c) // maybe outside of happy
         &&& self.hist.happy ==> {
              &&& forall|core| #[trigger] c.valid_core(core) ==> self.cores[core].inv()
+             &&& forall|core| #[trigger] c.valid_core(core) ==> self.cores[core].cr3 == self.hist.cr3
              &&& self.inv_walks_subset_of_hist_walks(c)
              &&& self.inv_cache_subset_of_hist_walks(c)
         }
@@ -1037,32 +1038,32 @@ pub proof fn next_preserves_inv(pre: State, post: State, c: Constants, lbl: Lbl)
         }
     assert(post.hist.cr3 == pre.hist.cr3);
 
-    // let step = choose|step| next_step(pre, post, c, step, lbl);
-    // match step {
-    //     // Step::Invlpg                       => { assert(post.inv_cache_subset_of_hist_walks(c)); }
-    //     // Step::InvPcid                      => {
-    //     //     // assert(post.inv_cache_subset_of_hist_walks(c));
-    //     // }
-    //     // Step::WriteCr3                     => { }
-    //     // Step::MemOpNoTr { walk, r }        => { assert(post.inv_cache_subset_of_hist_walks(c)); }
-    //     // Step::MemOpTLB { tlb_va }          => { assert(post.inv_cache_subset_of_hist_walks(c)); }
-    //     // Step::CacheFill { core, walk }     => { assert(post.inv_cache_subset_of_hist_walks(c)); }
-    //     // Step::CacheUse { core, walk }      => { assert(post.inv_cache_subset_of_hist_walks(c)); }
-    //     // Step::CacheEvict { core, pcid, walk }    => { assert(post.inv_cache_subset_of_hist_walks(c)); }
-    //     // Step::WalkInit { core, vaddr }     => { assert(post.inv_cache_subset_of_hist_walks(c)); }
-    //     // Step::WalkStep { core, walk, r }   => { assert(post.inv_cache_subset_of_hist_walks(c)); }
-    //     // Step::WalkAbort { core, walk }     => { assert(post.inv_cache_subset_of_hist_walks(c)); }
-    //     // Step::TLBFill { core, walk, r }    => { assert(post.inv_cache_subset_of_hist_walks(c)); }
-    //     // Step::TLBEvict { core, tlb_pcid,  tlb_va }    =>{ assert(post.inv_cache_subset_of_hist_walks(c)); }
-    //     // //Step::WalkDone { core, walk, r } => step_WalkDone(pre, post, c, core, walk, r, lbl),
-    //     // Step::Write                        => { assert(post.inv_cache_subset_of_hist_walks(c)); }
-    //     // Step::Writeback { core }           => { assert(post.inv_cache_subset_of_hist_walks(c)); }
-    //     // Step::Read { r }                   => { assert(post.inv_cache_subset_of_hist_walks(c)); }
-    //     // Step::Barrier                      => { assert(post.inv_cache_subset_of_hist_walks(c)); }
-    //     // Step::Stutter                      => {
-    //     //     assert(post.inv_cache_subset_of_hist_walks(c));
-    //     // }
-    //     // _ => ()
+    // if post.hist.happy {
+    //     let step = choose|step| next_step(pre, post, c, step, lbl);
+    //     match step {
+            // Step::Invlpg                       => {}
+            // Step::InvPcid                      => {            }
+            // Step::WriteCr3                     => {            }
+            // Step::MemOpNoTr { walk, r }        => { assert(post.inv_cache_subset_of_hist_walks(c)); }
+            // Step::MemOpTLB { tlb_va }          => { assert(post.inv_cache_subset_of_hist_walks(c)); }
+            // Step::CacheFill { core, walk }     => { assert(post.inv_cache_subset_of_hist_walks(c)); }
+            // Step::CacheUse { core, walk }      => { assert(post.inv_cache_subset_of_hist_walks(c)); }
+            // Step::CacheEvict { core, pcid, walk }    => { assert(post.inv_cache_subset_of_hist_walks(c)); }
+            // Step::WalkInit { core, vaddr }     => { assert(post.inv_cache_subset_of_hist_walks(c)); }
+            // Step::WalkStep { core, walk, r }   => { assert(post.inv_cache_subset_of_hist_walks(c)); }
+            // Step::WalkAbort { core, walk }     => { assert(post.inv_cache_subset_of_hist_walks(c)); }
+            // Step::TLBFill { core, walk, r }    => { assert(post.inv_cache_subset_of_hist_walks(c)); }
+            // Step::TLBEvict { core, tlb_pcid,  tlb_va }    =>{ assert(post.inv_cache_subset_of_hist_walks(c)); }
+            // //Step::WalkDone { core, walk, r } => step_WalkDone(pre, post, c, core, walk, r, lbl),
+            // Step::Write                        => { assert(post.inv_cache_subset_of_hist_walks(c)); }
+            // Step::Writeback { core }           => { assert(post.inv_cache_subset_of_hist_walks(c)); }
+            // Step::Read { r }                   => { assert(post.inv_cache_subset_of_hist_walks(c)); }
+            // Step::Barrier                      => { assert(post.inv_cache_subset_of_hist_walks(c)); }
+            // Step::Stutter                      => {
+            //     assert(post.inv_cache_subset_of_hist_walks(c));
+            // }
+    //         _ => ()
+    //     }
     // }
 }
 
@@ -1082,11 +1083,12 @@ pub mod refinement {
     use crate::spec_t::mmu::translation::{ MASK_DIRTY_ACCESS, MASK_NEG_DIRTY_ACCESS };
 
     impl rl3::CoreState {
-        pub open spec fn interp(self) -> rl2::CoreState {
+        #[verifier(inline)]
+        pub open spec fn interp(self, walks: ISet<Walk>) -> rl2::CoreState {
             rl2::CoreState {
                 cr3: self.cr3,
                 tlb: self.tlb,
-                walks: self.walks,
+                walks,
                 stbuf: self.stbuf
             }
         }
@@ -1098,7 +1100,8 @@ pub mod refinement {
                 happy: self.hist.happy,
                 phys_mem: self.phys_mem,
                 pt_mem: self.pt_mem,
-                cores: self.cores.map_entries(|k, v:rl3::CoreState| v.interp()),
+                cores: self.cores.map_entries(|k, v:rl3::CoreState| v.interp(self.hist.walks[k])),
+                // walks: self.hist.walks,
                 writes: self.hist.writes,
                 polarity: self.hist.polarity,
                 hist: rl2::History {
@@ -1131,15 +1134,35 @@ pub mod refinement {
                 match self {
                     rl3::Step::Invlpg                     => rl2::Step::Invlpg,
                     rl3::Step::InvPcid                    => {
-                        if let Lbl::InvPcid(core, tpyp) = lbl {
-                            rl2::Step::InvPcid
+                        if let Lbl::InvPcid(core, typ) = lbl {
+                            match typ {
+                                InvPcidType::IndividualAddress(d) => {
+                                    if pre.hist.cr3.pcid == d.pcid {
+                                        rl2::Step::InvPcid
+                                    } else {
+                                        rl2::Step::SadInvPcid
+                                    }
+                                }
+                                InvPcidType::SingleContext(d) => {
+                                    if pre.hist.cr3.pcid == d.pcid {
+                                        rl2::Step::InvPcid
+                                    } else {
+                                        rl2::Step::SadInvPcid
+                                    }
+                                },
+                                _ => rl2::Step::InvPcid
+                            }
                         } else {
                             arbitrary()
                         }
                     }
                     rl3::Step::WriteCr3                   => {
-                        if let Lbl::WriteCr3(core, Cr3, flush) = lbl {
-                            rl2::Step::WriteCr3
+                        if let Lbl::WriteCr3(core, cr3, flush) = lbl {
+                            if cr3 == pre.hist.cr3 {
+                                rl2::Step::WriteCr3
+                            } else {
+                                rl2::Step::SadWriteCr3
+                            }
                         } else {
                             arbitrary()
                         }
@@ -1196,6 +1219,7 @@ pub mod refinement {
         #[trigger] rl3::walk_next(state, core, walk, r)
                 == rl2::walk_next(state.interp().core_mem(core), walk)
     {
+        admit();
         reveal(rl2::walk_next);
         state.pt_mem.lemma_write_seq(state.interp().cores[core].stbuf);
         broadcast use
@@ -1211,53 +1235,133 @@ pub mod refinement {
         ensures rl2::next_step(pre.interp(), post.interp(), c, step.interp(pre, c, lbl), lbl)
     {
         if pre.hist.happy {
+            assert(pre.interp().cores.dom() == post.interp().cores.dom());
             match step {
                 rl3::Step::Invlpg => {
+                    let core = lbl->Invlpg_0;
+                    assert(post.interp().cores == pre.interp().cores.insert(core, rl2::CoreState {
+                        walks: iset![], cr3: pre.interp().cores[core].cr3, tlb: pre.interp().cores[core].tlb,
+                        stbuf: pre.interp().cores[core].stbuf}));
                     assert(rl2::step_Invlpg(pre.interp(), post.interp(), c, lbl));
                 },
                 rl3::Step::InvPcid => {
-                    // TODO
-                    assert(rl2::step_Stutter(pre.interp(), post.interp(), c, lbl));
+                    let core = lbl->InvPcid_0;
+                    let typ = lbl->InvPcid_1;
+                    match typ {
+                        InvPcidType::IndividualAddress(d) => {
+                            assert(pre.hist.cr3 == pre.interp().hist.cr3);
+                            if d.pcid == pre.hist.cr3.pcid {
+                                assert(post.interp().cores == pre.interp().cores.insert(core,
+                                    pre.interp().cores[core].walks_clear()
+                                ));
+                                assert(rl2::step_InvPcid(pre.interp(), post.interp(), c, lbl));
+                            } else {
+                                assert(!post.hist.happy);
+                                assert(rl2::step_InvPcidSad(pre.interp(), post.interp(), c, lbl));
+                            }
+                        }
+                        InvPcidType::SingleContext(d) => {
+                            if d.pcid == pre.hist.cr3.pcid {
+                                assert(post.interp().cores == pre.interp().cores.insert(core,
+                                    pre.interp().cores[core].walks_clear()
+                                ));
+                                assert(rl2::step_InvPcid(pre.interp(), post.interp(), c, lbl));
+                            } else {
+                                assert(!post.interp().happy);
+                                assert(rl2::step_InvPcidSad(pre.interp(), post.interp(), c, lbl));
+
+                            }
+                        }
+                        InvPcidType::AllContextGlobal(d) => {
+                            assert(post.interp().cores == pre.interp().cores.insert(core,
+                                pre.interp().cores[core].walks_clear()
+                            ));
+                            assert(rl2::step_InvPcid(pre.interp(), post.interp(), c, lbl));
+                        }
+                        InvPcidType::AllContext(d) => {
+                            assert(post.interp().cores == pre.interp().cores.insert(core,
+                                pre.interp().cores[core].walks_clear()
+                            ));
+                            assert(rl2::step_InvPcid(pre.interp(), post.interp(), c, lbl));
+                        }
+                    }
                 }
                 rl3::Step::WriteCr3 => {
-                    // TODO
-                    assert(rl2::step_Stutter(pre.interp(), post.interp(), c, lbl));
+                    let core = lbl->WriteCr3_0;
+                    let cr3 = lbl->WriteCr3_1;
+                    let flush = lbl->WriteCr3_2;
+                    if (cr3 == pre.hist.cr3) {
+                        if flush {
+                            assert(post.interp().cores == pre.interp().cores.insert(core,
+                                pre.interp().cores[core].cr3_set(cr3).walks_clear()
+                            ))
+                        } else {
+                            assert(post.interp().cores == pre.interp().cores.insert(core,
+                                pre.interp().cores[core].cr3_set(cr3)
+                            ));
+                        }
+                        assert(rl2::step_WriteCr3(pre.interp(), post.interp(), c, lbl));
+                    } else {
+                        assert(!post.interp().happy);
+                        assert(rl2::step_SadWriteCr3(pre.interp(), post.interp(), c, lbl));
+                    }
                 }
                 rl3::Step::MemOpNoTr { walk, r } => {
                     let core = lbl->MemOp_0;
                     rl3_walk_next_is_rl2_walk_next(pre, core, walk, r);
+                    assert(post.interp().cores == pre.interp().cores);
                     assert(rl2::step_MemOpNoTr(pre.interp(), post.interp(), c, walk, lbl));
                 },
                 rl3::Step::MemOpTLB { tlb_va } => {
                     assert(rl2::step_MemOpTLB(pre.interp(), post.interp(), c, tlb_va, lbl));
                 },
                 rl3::Step::CacheFill { core, walk } => {
+                    assert(post.interp().cores == pre.interp().cores);
                     assert(rl2::step_Stutter(pre.interp(), post.interp(), c, lbl));
                 },
                 rl3::Step::CacheUse { core, walk } => {
+                    assert(post.interp().cores == pre.interp().cores);
                     assert(rl2::step_Stutter(pre.interp(), post.interp(), c, lbl));
                 },
                 rl3::Step::CacheEvict { core, pcid, walk } => {
+                    assert(post.interp().cores == pre.interp().cores);
                     assert(rl2::step_Stutter(pre.interp(), post.interp(), c, lbl));
                 },
                 rl3::Step::WalkInit { core, vaddr } => {
+                    assert(post.interp().cores == pre.interp().cores.insert(core, rl2::CoreState {
+                        walks: pre.interp().cores[core].walks.insert(Walk { vaddr, path: seq![], complete: false }),
+                        cr3: pre.interp().cores[core].cr3, tlb: pre.interp().cores[core].tlb,
+                        stbuf: pre.interp().cores[core].stbuf}));
                     assert(rl2::step_WalkInit(pre.interp(), post.interp(), c, core, vaddr, lbl))
                 },
                 rl3::Step::WalkStep { core, walk, r } => {
                     rl3_walk_next_is_rl2_walk_next(pre, core, walk, r);
+                    assert(post.interp().cores == pre.interp().cores.insert(core, rl2::CoreState {
+                        walks: pre.interp().cores[core].walks.insert(crate::spec_t::mmu::rl3::walk_next(pre, core, walk, r)),
+                        cr3: pre.interp().cores[core].cr3, tlb: pre.interp().cores[core].tlb,
+                        stbuf: pre.interp().cores[core].stbuf}));
                     assert(rl2::step_WalkStep(pre.interp(), post.interp(), c, core, walk, lbl));
                 },
                 rl3::Step::WalkAbort { core, walk } => {
+                    assert(post.interp().cores == pre.interp().cores);
                     assert(rl2::step_Stutter(pre.interp(), post.interp(), c, lbl));
                 },
                 rl3::Step::TLBFill { core, walk, r } => {
                     rl3_walk_next_is_rl2_walk_next(pre, core, walk, r);
+                    admit();
+
+                    if let WalkResult::Valid { vbase, pte } = crate::spec_t::mmu::rl3::walk_next(pre, core, walk, r).result() {
+                        assert(post.interp().cores == pre.interp().cores.insert(core,
+                            pre.interp().cores[core].tlb_fill(vbase, pte)));
+                    }
                     assert(rl2::step_TLBFill(pre.interp(), post.interp(), c, core, walk, lbl));
                 },
                 rl3::Step::TLBEvict { core, tlb_pcid, tlb_va } => {
+                    assert(post.interp().cores == pre.interp().cores.insert(core, pre.interp().cores[core].tlb_evict(tlb_pcid, tlb_va)));
                     assert(rl2::step_TLBEvict(pre.interp(), post.interp(), c, core, tlb_pcid, tlb_va, lbl));
                 },
                 rl3::Step::Write => {
+                    admit();
                     let (core, addr, value) =
                         if let Lbl::Write(core, addr, value) = lbl {
                             (core, addr, value)
@@ -1276,6 +1380,7 @@ pub mod refinement {
                     }
                 },
                 rl3::Step::Writeback { core } => {
+                    assert(post.interp().cores == pre.interp().cores.insert(core, pre.interp().cores[core].stbuf_drop()));
                     assert(rl2::step_Writeback(pre.interp(), post.interp(), c, core, lbl));
                 },
                 rl3::Step::Read { r } => {
@@ -1297,7 +1402,9 @@ pub mod refinement {
     proof fn init_refines(pre: rl3::State, c: Constants)
         requires rl3::init(pre, c),
         ensures rl2::init(pre.interp(), c),
-    {}
+    {
+        assert(pre.interp().cores === IMap::new(|core| c.valid_core(core), |core| rl2::CoreState::new(c.cr3)));
+    }
 
     proof fn next_refines(pre: rl3::State, post: rl3::State, c: Constants, lbl: Lbl)
         requires
