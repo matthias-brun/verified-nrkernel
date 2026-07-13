@@ -3,7 +3,7 @@ use crate::spec_t::mmu::*;
 use crate::spec_t::mmu::pt_mem::*;
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::defs::{ aligned, LoadResult, update_range, MAX_BASE };
-use crate::spec_t::mmu::defs::{ PTE, Core };
+use crate::spec_t::mmu::defs::{ PTE, Core, Paddr, Vaddr, Vpn };
 use crate::spec_t::mmu::rl3::{ Writes };
 use crate::spec_t::mmu::translation::{ MASK_NEG_DIRTY_ACCESS };
 
@@ -13,6 +13,70 @@ verus! {
 // and defines an atomic semantics to page table walks. This is the most abstract version of the
 // MMU model.
 
+/// Represents the Per-Core State.
+///
+pub ghost struct CoreState {
+    /// the CR3 register containing the pml4 pointer (we abstract away the PCID here)
+    pub cr3: Paddr,
+    /// the cores's TLB. Note: technically it's the VPN there, but we're using the full Vaddr
+    pub tlb: IMap<Vaddr, PTE>,
+}
+
+/// Represents the Per-Core State
+impl CoreState {
+    #[verifier(inline)]
+    pub open spec fn new(cr3: Paddr) -> CoreState {
+        CoreState {
+            cr3,
+            tlb: imap![]
+        }
+    }
+
+    pub open spec fn init(self) -> bool {
+        self.tlb == imap![]
+    }
+
+    pub open spec fn cr3_set(self, cr3: Paddr) -> CoreState
+    {
+        CoreState {
+            cr3,
+            ..self
+        }
+    }
+
+    /// checks whether the TLB contains a mapping for the Vaddr `va` with the current `pcid`
+    #[verifier(inline)]
+    pub open spec fn tlb_contains(self, va: Vaddr) -> bool {
+        self.tlb.contains_key(va)
+    }
+
+    /// checks whether the TLB does not have an entry associated with the current pcid
+    #[verifier(inline)]
+    pub open spec fn tlb_empty(self) -> bool {
+        self.tlb.is_empty()
+    }
+
+    #[verifier(inline)]
+    pub open spec fn tlb_fill(self, vbase: Vaddr, pte: PTE) -> CoreState
+        recommends !self.tlb.contains_key(vbase)
+    {
+        CoreState {
+            tlb: self.tlb.insert(vbase, pte),
+            ..self
+        }
+    }
+
+    #[verifier(inline)]
+    pub open spec fn tlb_evict(self, va: Vaddr) -> CoreState
+    {
+        CoreState {
+            tlb: self.tlb.remove(va),
+            ..self
+        }
+    }
+}
+
+
 pub ghost struct State {
     pub happy: bool,
     /// Byte-indexed physical (non-page-table) memory
@@ -20,7 +84,7 @@ pub ghost struct State {
     /// Page table memory
     pub pt_mem: PTMem,
     /// Per-node state (TLBs)
-    pub tlbs: IMap<Core, IMap<usize, PTE>>,
+    pub cores: IMap<Core, CoreState>,
     pub writes: Writes,
     /// Tracks the virtual addresses and entries for which we may see non-atomic results.
     /// If polarity is positive, translations may non-atomically fail.
@@ -35,6 +99,10 @@ pub ghost struct State {
 pub ghost enum Step {
     // Mixed
     Invlpg,
+    InvPcid,
+    SadInvPcid,
+    WriteCr3,
+    SadWriteCr3,
     // Faulting memory op due to failed translation
     // (atomic walk)
     MemOpNoTr,
@@ -104,12 +172,15 @@ impl State {
 
 // ---- Mixed (relevant to multiple of TSO/Cache/Non-Atomic) ----
 
-pub open spec fn step_Invlpg(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
-    &&& lbl matches Lbl::Invlpg(core, va)
+pub open spec fn step_WriteCr3(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+    &&& lbl matches Lbl::WriteCr3(core, cr3, flush)
 
     &&& pre.happy
     &&& c.valid_core(core)
-    &&& !pre.tlbs[core].contains_key(va)
+
+    &&& flush ==> pre.cores[core].tlb_empty()
+
+    &&& pre.cores[core].cr3 == cr3.pml4
 
     &&& post == State {
         writes: Writes {
@@ -125,6 +196,81 @@ pub open spec fn step_Invlpg(pre: State, post: State, c: Constants, lbl: Lbl) ->
         pending_protects: if post.writes.nonpos === iset![] { imap![] } else { pre.pending_protects },
         ..pre
     }
+}
+
+pub open spec fn step_SadWriteCr3(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+    // If we do a write without fulfilling the right conditions, we set happy to false.
+    &&& lbl matches Lbl::WriteCr3(core, cr3, flush)
+
+    &&& !post.happy
+}
+
+
+pub open spec fn step_Invlpg(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+    &&& lbl matches Lbl::Invlpg(core, va)
+
+    &&& pre.happy
+    &&& c.valid_core(core)
+    &&& !pre.cores[core].tlb.contains_key(va)
+
+    &&& post == State {
+        writes: Writes {
+            core: pre.writes.core,
+            tso: if core == pre.writes.core { iset![] } else { pre.writes.tso },
+            nonpos:
+                if post.writes.tso === iset![] {
+                    pre.writes.nonpos.remove(core)
+                } else { pre.writes.nonpos },
+        },
+        pending_maps: if core == pre.writes.core { imap![] } else { pre.pending_maps },
+        pending_unmaps: if post.writes.nonpos === iset![] { imap![] } else { pre.pending_unmaps },
+        pending_protects: if post.writes.nonpos === iset![] { imap![] } else { pre.pending_protects },
+        ..pre
+    }
+}
+
+pub open spec fn step_Invpcid(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+    &&& lbl matches Lbl::InvPcid(core, typ)
+
+    &&& pre.happy
+    &&& c.valid_core(core)
+
+    &&& match typ {
+        // Individual-address invalidation: If the INVPCID type is 0, the logical processor invalidates
+        // mappings—except global translations—for the linear address and PCID specified in the INVPCID
+        // descriptor. In some cases, the instruction may invalidate global translations or mappings
+        // for other linear addresses (or other PCIDs) as well.
+        InvPcidType::IndividualAddress(d) => {
+            &&& !pre.cores[core].tlb.contains_key(d.vaddr)
+        }
+        _ => {
+            &&& pre.cores[core].tlb.is_empty()
+        }
+    }
+
+    // Individual-address inv
+
+    &&& post == State {
+        writes: Writes {
+            core: pre.writes.core,
+            tso: if core == pre.writes.core { iset![] } else { pre.writes.tso },
+            nonpos:
+                if post.writes.tso === iset![] {
+                    pre.writes.nonpos.remove(core)
+                } else { pre.writes.nonpos },
+        },
+        pending_maps: if core == pre.writes.core { imap![] } else { pre.pending_maps },
+        pending_unmaps: if post.writes.nonpos === iset![] { imap![] } else { pre.pending_unmaps },
+        pending_protects: if post.writes.nonpos === iset![] { imap![] } else { pre.pending_protects },
+        ..pre
+    }
+}
+
+pub open spec fn step_SadInvpcid(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+    // If we do a write without fulfilling the right conditions, we set happy to false.
+    &&& lbl matches Lbl::InvPcid(core, typ)
+
+    &&& !post.happy
 }
 
 pub open spec fn step_MemOpNoTr(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
@@ -168,9 +314,9 @@ pub open spec fn step_MemOpTLB(
     &&& c.valid_core(core)
     &&& aligned(memop_vaddr as nat, memop.op_size())
     &&& memop.valid_op_size()
-    &&& pre.tlbs[core].contains_key(tlb_va)
+    &&& pre.cores[core].tlb.contains_key(tlb_va)
     &&& {
-    let pte = pre.tlbs[core][tlb_va];
+    let pte = pre.cores[core].tlb[tlb_va];
     let paddr = pte.frame.base + (memop_vaddr - tlb_va);
     &&& tlb_va <= memop_vaddr < tlb_va + pte.frame.size
     &&& match memop {
@@ -197,7 +343,7 @@ pub open spec fn step_MemOpTLB(
 
     &&& post.happy == pre.happy
     &&& post.pt_mem == pre.pt_mem
-    &&& post.tlbs == pre.tlbs
+    &&& post.cores == pre.cores
     &&& post.writes == pre.writes
     &&& post.pending_maps == pre.pending_maps
     &&& post.pending_unmaps == pre.pending_unmaps
@@ -216,7 +362,7 @@ pub open spec fn step_TLBFill(pre: State, post: State, c: Constants, core: Core,
     &&& pre.pt_mem.pt_walk(vaddr).result() matches WalkResult::Valid { vbase, pte }
 
     &&& post == State {
-        tlbs: pre.tlbs.insert(core, pre.tlbs[core].insert(vbase, pte)),
+        cores: pre.cores.insert(core, pre.cores[core].tlb_fill(vbase, pte)),
         ..pre
     }
 }
@@ -226,10 +372,10 @@ pub open spec fn step_TLBEvict(pre: State, post: State, c: Constants, core: Core
     &&& pre.happy
 
     &&& c.valid_core(core)
-    &&& pre.tlbs[core].contains_key(tlb_va)
+    &&& pre.cores[core].tlb.contains_key(tlb_va)
 
     &&& post == State {
-        tlbs: pre.tlbs.insert(core, pre.tlbs[core].remove(tlb_va)),
+        cores: pre.cores.insert(core, pre.cores[core].tlb_evict(tlb_va)),
         ..pre
     }
 }
@@ -246,7 +392,7 @@ pub open spec fn step_TLBFillNA1(pre: State, post: State, c: Constants, core: Co
     &&& pre.pending_unmaps.contains_key(vaddr)
 
     &&& post == State {
-        tlbs: pre.tlbs.insert(core, pre.tlbs[core].insert(vaddr, pte)),
+        cores: pre.cores.insert(core, pre.cores[core].tlb_fill(vaddr, pte)),
         ..pre
     }
 }
@@ -263,7 +409,7 @@ pub open spec fn step_TLBFillNA2(pre: State, post: State, c: Constants, core: Co
     &&& pre.pending_protects.contains_key(vaddr)
 
     &&& post == State {
-        tlbs: pre.tlbs.insert(core, pre.tlbs[core].insert(vaddr, pte)),
+        cores: pre.cores.insert(core, pre.cores[core].tlb_fill(vaddr, pte)),
         ..pre
     }
 }
@@ -285,7 +431,7 @@ pub open spec fn step_WriteNonneg(pre: State, post: State, c: Constants, lbl: Lb
     &&& post.happy      == pre.happy
     &&& post.phys_mem   == pre.phys_mem
     &&& post.pt_mem     == pre.pt_mem.write(addr, value)
-    &&& post.tlbs       == pre.tlbs
+    &&& post.cores      == pre.cores
     &&& post.writes.tso == pre.writes.tso.insert(addr)
     &&& post.writes.core == core
     &&& post.polarity == Polarity::Mapping
@@ -312,7 +458,7 @@ pub open spec fn step_WriteNonpos(pre: State, post: State, c: Constants, lbl: Lb
     &&& post.happy      == pre.happy
     &&& post.phys_mem   == pre.phys_mem
     &&& post.pt_mem     == pre.pt_mem.write(addr, value)
-    &&& post.tlbs       == pre.tlbs
+    &&& post.cores      == pre.cores
     &&& post.writes.tso == pre.writes.tso.insert(addr)
     &&& post.writes.core == core
     &&& post.polarity == Polarity::Unmapping
@@ -339,7 +485,7 @@ pub open spec fn step_WriteProtect(pre: State, post: State, c: Constants, lbl: L
     &&& post.happy      == pre.happy
     &&& post.phys_mem   == pre.phys_mem
     &&& post.pt_mem     == pre.pt_mem.write(addr, value)
-    &&& post.tlbs       == pre.tlbs
+    &&& post.cores      == pre.cores
     &&& post.writes.tso == pre.writes.tso.insert(addr)
     &&& post.writes.core == core
     &&& post.polarity == Polarity::Protect
@@ -409,6 +555,10 @@ pub open spec fn step_Sadness(pre: State, post: State, c: Constants, lbl: Lbl) -
 pub open spec fn next_step(pre: State, post: State, c: Constants, step: Step, lbl: Lbl) -> bool {
     match step {
         Step::Invlpg                     => step_Invlpg(pre, post, c, lbl),
+        Step::InvPcid                    => step_Invpcid(pre,post, c, lbl),
+        Step::SadInvPcid                 => step_SadInvpcid(pre, post, c, lbl),
+        Step::WriteCr3                   => step_WriteCr3(pre, post, c, lbl),
+        Step::SadWriteCr3                => step_SadWriteCr3(pre, post, c, lbl),
         Step::MemOpNoTr                  => step_MemOpNoTr(pre, post, c, lbl),
         Step::MemOpNoTrNA { vbase }      => step_MemOpNoTrNA(pre, post, c, vbase, lbl),
         Step::MemOpTLB { tlb_va }        => step_MemOpTLB(pre, post, c, tlb_va, lbl),
@@ -432,8 +582,8 @@ pub open spec fn next(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
 }
 
 pub open spec fn init(pre: State, c: Constants) -> bool {
-    &&& pre.happy
-    &&& pre.tlbs === IMap::new(|core| c.valid_core(core), |core| imap![])
+    &&& pre.happy == (pre.pt_mem.pml4 == c.cr3.pml4)
+    &&& pre.cores === IMap::new(|core| c.valid_core(core), |core| CoreState::new(c.cr3.pml4))
     &&& pre.writes.tso === iset![]
     &&& pre.writes.nonpos === iset![]
     &&& pre.pending_maps === imap![]

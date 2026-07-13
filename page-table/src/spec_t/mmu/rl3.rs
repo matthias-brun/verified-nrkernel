@@ -1270,16 +1270,9 @@ pub mod refinement {
                             } else {
                                 assert(!post.interp().happy);
                                 assert(rl2::step_InvPcidSad(pre.interp(), post.interp(), c, lbl));
-
                             }
                         }
-                        InvPcidType::AllContextGlobal(d) => {
-                            assert(post.interp().cores == pre.interp().cores.insert(core,
-                                pre.interp().cores[core].walks_clear()
-                            ));
-                            assert(rl2::step_InvPcid(pre.interp(), post.interp(), c, lbl));
-                        }
-                        InvPcidType::AllContext(d) => {
+                        _ => {
                             assert(post.interp().cores == pre.interp().cores.insert(core,
                                 pre.interp().cores[core].walks_clear()
                             ));

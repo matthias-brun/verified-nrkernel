@@ -48,7 +48,11 @@ pub struct InvPcidDescriptor {
     pub vaddr: Vaddr,
 }
 
-pub type Cr3 = InvPcidDescriptor;
+/// represents a InvPcid Descriptor
+pub struct Cr3 {
+    pub pcid: Pcid,
+    pub pml4: Paddr,
+}
 
 
 pub enum InvPcidType {
