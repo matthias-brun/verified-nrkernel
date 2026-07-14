@@ -3322,6 +3322,7 @@ pub mod refinement {
         pub open spec fn interp(self) -> rl1::State {
             rl1::State {
                 happy: self.happy,
+                cr3: self.hist.cr3,
                 pt_mem: self.writer_mem(),
                 phys_mem: self.phys_mem,
                 cores: self.cores.map_values(|e: rl2::CoreState| e.interp()),

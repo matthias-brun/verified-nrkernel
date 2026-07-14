@@ -79,6 +79,7 @@ impl CoreState {
 
 pub ghost struct State {
     pub happy: bool,
+    pub cr3: Cr3,
     /// Byte-indexed physical (non-page-table) memory
     pub phys_mem: Seq<u8>,
     /// Page table memory
@@ -241,7 +242,12 @@ pub open spec fn step_Invpcid(pre: State, post: State, c: Constants, lbl: Lbl) -
         // descriptor. In some cases, the instruction may invalidate global translations or mappings
         // for other linear addresses (or other PCIDs) as well.
         InvPcidType::IndividualAddress(d) => {
+            &&& pre.cr3.pcid == d.pcid
             &&& !pre.cores[core].tlb.contains_key(d.vaddr)
+        }
+        InvPcidType::SingleContext(d) => {
+            &&& pre.cr3.pcid == d.pcid
+            &&& pre.cores[core].tlb.is_empty()
         }
         _ => {
             &&& pre.cores[core].tlb.is_empty()

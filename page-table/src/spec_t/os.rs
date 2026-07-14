@@ -7,7 +7,8 @@ use vstd::prelude::*;
 use crate::spec_t::mmu::{ rl3, rl1 };
 use crate::spec_t::{ hlspec, mmu };
 use crate::spec_t::mmu::defs::{
-    MemRegion, PTE, L1_ENTRY_SIZE, L2_ENTRY_SIZE, L3_ENTRY_SIZE, MAX_PHYADDR, Core, Flags
+    MemRegion, PTE, L1_ENTRY_SIZE, L2_ENTRY_SIZE, L3_ENTRY_SIZE, MAX_PHYADDR, Core, Flags,
+    Cr3, InvPcidType
 };
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::defs::{
@@ -18,6 +19,8 @@ use crate::spec_t::mmu::defs::{
 use crate::theorem::RLbl;
 use crate::spec_t::os_ext;
 use crate::impl_u::{ wrapped_token, l2_impl::PT };
+
+use super::mmu::defs::InvPcidDescriptor;
 
 verus! {
 
@@ -62,6 +65,8 @@ pub ghost enum Step {
     ReadPTMem { core: Core, paddr: usize, value: usize },
     Barrier { core: Core },
     Invlpg { core: Core },
+    InvPcid { core: Core },
+    // ReloadCr3 { core: Core },
     // Map
     MapStart { core: Core },
     MapOpStart { core: Core },
@@ -285,6 +290,32 @@ pub open spec fn step_Invlpg(c: Constants, s1: State, s2: State, core: Core, lbl
     &&& s2.core_states == s1.core_states
     &&& s2.sound == s1.sound
 }
+
+pub open spec fn step_InvPcid(c: Constants, s1: State, s2: State, core: Core, lbl: RLbl) -> bool {
+    &&& lbl is Tau
+    &&& s1.os_ext.shootdown_vec.open_requests.contains(core)
+
+    // mmu statemachine steps
+    &&& rl3::next(s1.mmu, s2.mmu, c.common, mmu::Lbl::InvPcid(core, InvPcidType::IndividualAddress(InvPcidDescriptor{ pcid: s1.mmu@.cr3.pcid, vaddr: s1.os_ext.shootdown_vec.vaddr as usize})))
+    &&& s2.mmu@.happy == s1.mmu@.happy
+
+    &&& s2.os_ext == s1.os_ext
+    // // new state
+    &&& s2.core_states == s1.core_states
+    &&& s2.sound == s1.sound
+}
+
+// pub open spec fn step_ReloadCr3(c: Constants, s1: State, s2: State, core: Core, lbl: RLbl) -> bool {
+//     &&& lbl is Tau
+//     &&& s1.os_ext.shootdown_vec.open_requests.contains(core)
+//     //mmu statemachine steps
+//     &&& rl3::next(s1.mmu, s2.mmu, c.common, mmu::Lbl::WriteCr3(core, s1.cr3, true))
+//     &&& s2.os_ext == s1.os_ext
+//     // new state
+//     &&& s2.core_states == s1.core_states
+//     &&& s2.sound == s1.sound
+// }
+
 
 ///////////////////////////////////////////////////////////////////////////////////////////////
 // Map
@@ -790,6 +821,8 @@ pub open spec fn next_step(c: Constants, s1: State, s2: State, step: Step, lbl: 
         Step::ReadPTMem { core, paddr, value }        => step_ReadPTMem(c, s1, s2, core, paddr, value, lbl),
         Step::Barrier { core }                        => step_Barrier(c, s1, s2, core, lbl),
         Step::Invlpg { core }                         => step_Invlpg(c, s1, s2, core, lbl),
+        Step::InvPcid { core }                        => step_InvPcid(c, s1, s2, core, lbl),
+        // Step::ReloadCr3 { core}                       => step_ReloadCr3(c, s1, s2, core, lbl),
         // Map steps
         Step::MapStart { core }                       => step_MapStart(c, s1, s2, core, lbl),
         Step::MapOpStart { core }                     => step_MapOpStart(c, s1, s2, core, lbl),
@@ -1898,6 +1931,8 @@ impl Step {
             Step::ReadPTMem { core, paddr, value }       => mmu::Lbl::Read(core, paddr, value),
             Step::Barrier { core }                       => mmu::Lbl::Barrier(core),
             Step::Invlpg { core }                        => mmu::Lbl::Invlpg(core, pre.os_ext.shootdown_vec.vaddr as usize),
+            Step::InvPcid { core }                       => mmu::Lbl::InvPcid(core, InvPcidType::IndividualAddress(InvPcidDescriptor{ pcid: pre.mmu@.cr3.pcid, vaddr: pre.os_ext.shootdown_vec.vaddr as usize})),
+            // Step::ReloadCr3 { core }                     => mmu::Lbl::WriteCr3(core, pre.cr3, true),
             Step::MapOpStutter { core, paddr, value }    => mmu::Lbl::Write(core, paddr, value),
             Step::MapOpChange { core, paddr, value }     => mmu::Lbl::Write(core, paddr, value),
             Step::UnmapOpChange { core, paddr, value }   => mmu::Lbl::Write(core, paddr, value),

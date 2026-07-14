@@ -103,7 +103,7 @@ pub proof fn next_step_preserves_inv_basic(c: os::Constants, s1: os::State, s2: 
     hide(os::State::inv_lock);
 
     match step { // Broadcasting these is very slow
-        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
         | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
         | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
         | os::Step::ProtectOpChange { .. } => {
@@ -178,7 +178,7 @@ pub proof fn next_step_preserves_inv_basic_protect(c: os::Constants, s1: os::Sta
         s2.inv_protect_result(c),
 {
     match step { // Broadcasting these is very slow
-        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
         | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
         | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
         | os::Step::ProtectOpChange { .. } => {
@@ -222,7 +222,7 @@ pub proof fn next_step_preserves_inv_protect_vaddr_same_core(c: os::Constants, s
         s2.inv_protect_vaddr_same_core(c),
 {
     match step { // Broadcasting these is very slow
-        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid{ .. } | os::Step::Barrier { .. }
         | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
         | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
         | os::Step::ProtectOpChange { .. } => {
@@ -335,7 +335,7 @@ pub proof fn next_step_preserves_inv_protect_frame_unchanged_1(c: os::Constants,
         s2.inv_protect_frame_unchanged(c),
 {
     match step { // Broadcasting these is very slow
-        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. }  | os::Step::Barrier { .. }
         | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
         | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
         | os::Step::ProtectOpChange { .. } => {
@@ -426,7 +426,7 @@ pub proof fn next_step_preserves_inv_protect_frame_unchanged_2(c: os::Constants,
         s2.inv_protect_frame_unchanged(c),
 {
     match step { // Broadcasting these is very slow
-        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
         | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
         | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
         | os::Step::ProtectOpChange { .. } => {
@@ -530,7 +530,7 @@ pub proof fn next_step_preserves_inv_mmu(c: os::Constants, s1: os::State, s2: os
 {
     x86_arch_spec_upper_bound();
     match step { // Broadcasting these is very slow
-        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
         | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
         | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
         | os::Step::ProtectOpChange { .. } => {
@@ -590,7 +590,7 @@ pub proof fn next_step_preserves_inv_pending_maps(c: os::Constants, s1: os::Stat
         s2.inv_pending_maps(c),
 {
     match step { // Broadcasting these is very slow
-        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
         | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
         | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
         | os::Step::ProtectOpChange { .. } => {
@@ -652,6 +652,7 @@ pub proof fn next_step_preserves_inv_pending_maps(c: os::Constants, s1: os::Stat
             | os::Step::ReadPTMem { .. }
             | os::Step::Barrier { .. }
             | os::Step::Invlpg { .. }
+            | os::Step::InvPcid{ .. }
             | os::Step::MapStart { .. }
             | os::Step::UnmapStart { .. }
             | os::Step::ProtectStart { .. } => {
@@ -674,7 +675,7 @@ pub proof fn next_step_preserves_inv_allocated_mem(c: os::Constants, s1: os::Sta
         s2.inv_allocated_mem(c),
 {
     match step { // Broadcasting these is very slow
-        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
         | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
         | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
         | os::Step::ProtectOpChange { .. } => {
@@ -742,6 +743,7 @@ pub proof fn next_step_preserves_inv_impl(c: os::Constants, s1: os::State, s2: o
     broadcast use
         to_rl1::next_preserves_inv,
         to_rl1::next_refines;
+
 }
 
 #[verifier(spinoff_prover)]
@@ -783,8 +785,9 @@ pub proof fn next_step_preserves_inv_writes(c: os::Constants, s1: os::State, s2:
         s2.inv_writes(c),
 {
     hide(os::State::inv_tlb);
+
     match step { // Broadcasting these is very slow
-        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
         | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
         | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
         | os::Step::ProtectOpChange { .. } => {
@@ -979,7 +982,7 @@ pub proof fn next_step_preserves_inv_tlb_1(
         s2.inv_tlb(c),
 {
     match step { // Broadcasting these is very slow
-        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid{ .. } | os::Step::Barrier { .. }
         | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
         | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
         | os::Step::ProtectOpChange { .. } => {
@@ -1182,7 +1185,7 @@ pub proof fn next_step_preserves_inv_tlb_2(
         s2.inv_tlb(c),
 {
     match step { // Broadcasting these is very slow
-        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
         | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
         | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
         | os::Step::ProtectOpChange { .. } => {
@@ -1354,7 +1357,7 @@ pub proof fn next_step_preserves_inv_tlb_3(
         s2.inv_tlb(c),
 {
     match step { // Broadcasting these is very slow
-        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. }| os::Step::Barrier { .. }
         | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
         | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
         | os::Step::ProtectOpChange { .. } => {
@@ -1484,7 +1487,7 @@ pub proof fn next_step_preserves_inv_tlb(
         s2.inv_tlb(c),
 {
     match step { // Broadcasting these is very slow
-        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
         | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
         | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
         | os::Step::ProtectOpChange { .. } => {
@@ -1532,7 +1535,9 @@ pub proof fn next_step_preserves_inv_tlb(
         os::Step::MemOp { core }
         | os::Step::ReadPTMem { core, .. }
         | os::Step::Barrier { core }
-        | os::Step::Invlpg { core } => {
+        | os::Step::Invlpg { core }
+        | os::Step::InvPcid { core }
+        => {
             to_rl1::next_preserves_inv(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
             assert(forall|va, core| s2.is_inflight_protect_vaddr_core(va, core)
                 <==> s1.is_inflight_protect_vaddr_core(va, core));
@@ -1551,7 +1556,7 @@ pub proof fn next_step_preserves_inv_tlb(
                 <==> s1.is_unmap_vaddr_core(core, vaddr));
             assert(forall|va, core| s2.is_inflight_protect_vaddr_core(va, core)
                 <==> s1.is_inflight_protect_vaddr_core(va, core));
-            assert(s2.inv_tlb(c));
+            assert(s2.inv_tlb(c)); // fails
         },
         _ => {},
     }
@@ -1582,7 +1587,7 @@ pub proof fn next_step_preserves_overlap_mem_inv(
         s2.inv_overlapping_mem(c),
 {
     match step { // Broadcasting these is very slow
-        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
         | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
         | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. } => {
             to_rl1::next_refines(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
@@ -1775,6 +1780,7 @@ pub proof fn next_step_preserves_overlap_mem_inv(
         | os::Step::ReadPTMem { ..}
         | os::Step::Barrier {.. }
         | os::Step::Invlpg {.. }
+        | os::Step::InvPcid {.. }
         | os::Step::Deallocate {.. }
         | os::Step::UnmapOpStutter {.. }
         | os::Step::MapOpStutter {.. }

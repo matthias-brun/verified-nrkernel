@@ -340,7 +340,7 @@ proof fn next_step_refines_hl_next_step(c: os::Constants, s1: os::State, s2: os:
 {
     if s1.sound {
         match step { // Broadcasting these is very slow
-            os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+            os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
             | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
             | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
             | os::Step::ProtectOpChange { .. } => {

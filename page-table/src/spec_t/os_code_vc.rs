@@ -30,6 +30,8 @@ impl os::Step {
             os::Step::ReadPTMem { core, .. } |
             os::Step::Barrier { core, .. } |
             os::Step::Invlpg { core, .. } |
+            os::Step::InvPcid { core, .. } |
+            // os::Step::ReloadCr3 { core, .. } |
             os::Step::MapStart { core, .. } |
             os::Step::MapOpStart { core, .. } |
             os::Step::Allocate { core, .. } |
@@ -142,7 +144,7 @@ pub proof fn lemma_concurrent_trs_no_lock(pre: os::State, post: os::State, c: os
         if pre.inv(c) {
             os_invariant::next_preserves_inv(c, mid, post, lbl);
             match step { // Broadcasting these is very slow
-                os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+                os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
                 | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
                 | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
                 | os::Step::ProtectOpChange { .. } => {
@@ -203,7 +205,7 @@ pub proof fn lemma_concurrent_trs_during_shootdown(pre: os::State, post: os::Sta
         {
             os_invariant::next_preserves_inv(c, mid, post, lbl);
             match step { // Broadcasting these is very slow
-                os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+                os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. }  | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
                 | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
                 | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
                 | os::Step::ProtectOpChange { .. } => {
@@ -248,7 +250,7 @@ pub proof fn lemma_concurrent_trs(pre: os::State, post: os::State, c: os::Consta
         if pre.inv(c) && pre.os_ext.lock == Some(core) {
             os_invariant::next_preserves_inv(c, mid, post, lbl);
             match step { // Broadcasting these is very slow
-                os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+                os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
                 | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
                 | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
                 | os::Step::ProtectOpChange { .. } => {

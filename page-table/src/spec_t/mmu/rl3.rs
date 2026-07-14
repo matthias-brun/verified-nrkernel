@@ -306,7 +306,7 @@ pub struct State {
     /// Byte-indexed physical (non-page-table) memory
     phys_mem: Seq<u8>,
     /// Page table memory
-    pt_mem: PTMem,
+    pt_mem: PTMem,                  // TODO: Remove the PML4 here!
     /// the cores in the system
     cores: IMap<Core, CoreState>,
     /// History variables. These do not influence the transitions in any way. Neither in enabling
@@ -548,7 +548,7 @@ pub closed spec fn step_InvPcid(pre: State, post: State, c: Constants, lbl: Lbl)
             happy: pre.hist.happy && match typ {
                 InvPcidType::IndividualAddress(d) => { pre.hist.cr3.pcid == d.pcid }
                 InvPcidType::SingleContext(d) => { pre.hist.cr3.pcid == d.pcid },
-                _ => pre.hist.happy
+                _ => true
             },
             walks: pre.hist.walks.insert(core, iset![]),
             writes: Writes {
@@ -706,7 +706,7 @@ pub closed spec fn walk_next(state: State, core: Core, walk: Walk, r: usize) -> 
     let Walk { vaddr, path, .. } = walk;
     let mem = state.pt_mem;
     let addr = if path.len() == 0 {
-        add(mem.pml4, mul(l0_bits!(vaddr), WORD_SIZE))
+        add(mem.pml4, mul(l0_bits!(vaddr), WORD_SIZE))          // this should be the core PML4
     } else if path.len() == 1 {
         add(path.last().1->Directory_addr, mul(l1_bits!(vaddr), WORD_SIZE))
     } else if path.len() == 2 {
@@ -1021,11 +1021,11 @@ impl State {
     pub closed spec fn inv(self, c: Constants) -> bool {
         &&& self.wf(c) // maybe outside of happy
         &&& self.hist.happy ==> {
-             &&& forall|core| #[trigger] c.valid_core(core) ==> self.cores[core].inv()
-             &&& forall|core| #[trigger] c.valid_core(core) ==> self.cores[core].cr3 == self.hist.cr3
-             &&& self.inv_walks_subset_of_hist_walks(c)
-             &&& self.inv_cache_subset_of_hist_walks(c)
-             &&& self.inv_cache_no_other_entries(c)
+            &&& forall|core| #[trigger] c.valid_core(core) ==> self.cores[core].inv()
+            &&& forall|core| #[trigger] c.valid_core(core) ==> self.cores[core].cr3 == self.hist.cr3
+            &&& self.inv_walks_subset_of_hist_walks(c)
+            &&& self.inv_cache_subset_of_hist_walks(c)
+            &&& self.inv_cache_no_other_entries(c)
         }
     }
 
@@ -1669,6 +1669,80 @@ pub mod code {
         // #[cfg(not(feature="linuxmodule"))]
         // this is a no-op in standalone mode
     }
+
+    struct InvpcidDescriptor {
+            pcid: u64,
+            addr: u64,
+    }
+
+    use crate::spec_t::mmu::{Cr3, InvPcidType};
+
+    /// invalidates the TLB on the local core
+    #[verifier(external_body)]
+    pub exec fn invpcid(Tracked(tok): Tracked<&mut Token>, typ: InvPcidType)
+        requires
+            old(tok).tstate() is Validated,
+            old(tok).lbl() == mmu::Lbl::InvPcid(old(tok).core(), typ),
+        ensures
+            final(tok).tstate() is Spent,
+    {
+        let mut desc = InvpcidDescriptor {
+            pcid: 0,
+            addr: 0,
+        };
+
+        let kind = match typ {
+            InvPcidType::IndividualAddress(d) => {
+                desc.pcid = d.pcid as u64 & 0xfff;
+                desc.addr = d.vaddr as u64;
+                0
+            }
+            InvPcidType::SingleContext(d) => {
+                desc.pcid = d.pcid as u64 & 0xfff;
+                1
+            }
+            InvPcidType::AllContextGlobal(d) => {
+                2
+            }
+            InvPcidType::AllContext(d) => {
+                3
+            }
+        };
+
+        #[cfg(feature="linuxmodule")]
+        unsafe {
+            asm!("invpcid {0}, [{1}]", in(reg) kind, in(reg) &desc, options(nostack, preserves_flags));
+        }
+
+        // #[cfg(not(feature="linuxmodule"))]
+        // this is a no-op in standalone mode
+    }
+
+    /// invalidates the TLB on the local core
+    #[verifier(external_body)]
+    pub exec fn write_cr3(Tracked(tok): Tracked<&mut Token>, pml4: usize, pcid: usize, flush: bool)
+        requires
+            old(tok).tstate() is Validated,
+            old(tok).lbl() == mmu::Lbl::WriteCr3(old(tok).core(), Cr3 { pcid, pml4 }, flush),
+        ensures
+            final(tok).tstate() is Spent,
+    {
+        let val = if flush {
+            (pml4 as u64 & 0x0fff_ffff_ffff_f000) | pcid as u64 & 0xfff
+        } else {
+            (1u64 << 63) | (pml4 as u64 & 0x0fff_ffff_ffff_f000) | pcid as u64 & 0xfff
+        };
+
+        #[cfg(feature="linuxmodule")]
+        unsafe {
+            asm!("mov cr3, {}", in(reg) val, options(nostack, preserves_flags));
+        }
+
+        // #[cfg(not(feature="linuxmodule"))]
+        // this is a no-op in standalone mode
+    }
+
+
 
     // TODO: need transitions to allocate/deallocate pages i guess
     // TODO: add a transition to read pml4?
