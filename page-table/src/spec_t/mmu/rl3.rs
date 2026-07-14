@@ -270,10 +270,12 @@ impl CoreState {
     // ----------------------------------- Store Buffers--------------------------------------------
 
     /// whether or not the store buffer is empty
+    #[verifier(inline)]
     pub open spec fn stbuf_empty(self) -> bool {
         self.stbuf.len() == 0
     }
 
+    #[verifier(inline)]
     pub open spec fn stbuf_push(self, addr: Paddr, value: usize) -> CoreState {
         CoreState {
             stbuf: self.stbuf.push((addr, value)),
@@ -281,6 +283,7 @@ impl CoreState {
         }
     }
 
+    #[verifier(inline)]
     pub open spec fn stbuf_drop(self) -> CoreState
     {
         CoreState {
@@ -289,6 +292,7 @@ impl CoreState {
         }
     }
 
+    #[verifier(inline)]
     pub open spec fn stbuf_first(self) -> (Paddr, usize)
     {
         self.stbuf.first()
@@ -432,9 +436,10 @@ pub closed spec fn step_WriteCr3(pre: State, post: State, c: Constants, lbl: Lbl
     &&& post == State {
         cores: pre.cores.insert(core, pre.cores[core].cr3_set(cr3)),
         hist: History {
-            happy: pre.hist.happy && cr3 == pre.hist.cr3,
+            happy: pre.hist.happy && cr3 == pre.hist.cr3 && flush,
             // if there was a flush, then we clear the walks since last invlpg
             walks: if flush { pre.hist.walks.insert(core, iset![]) } else { pre.hist.walks },
+            // walks: pre.hist.walks.insert(core, iset![]),
             // TODO: check this!
             writes: Writes {
                 core: pre.hist.writes.core,
@@ -975,6 +980,7 @@ impl State {
         // &&& forall|core| #[trigger] c.valid_core(core) ==> self.cores[core].wf()
         &&& forall|core| #[trigger] self.cores.contains_key(core) ==> self.cores[core].wf()
         &&& forall|core| #[trigger] c.valid_core(core) ==> self.hist.walks[core].finite()
+        &&& c.valid_core(self.hist.writes.core)
         //&&& self.hist.writes.nonpos.finite()
     }
 
@@ -1002,6 +1008,16 @@ impl State {
                 ==> #[trigger] self.hist.walks[core].contains(walk)
     }
 
+    pub closed spec fn inv_cache_no_other_entries(self, c: Constants) -> bool {
+        forall |core, pcid| c.valid_core(core) && pcid != self.hist.cr3.pcid ==>
+            (#[trigger]self.cores[core].psc[pcid]).is_empty()
+    }
+
+    // pub closed spec fn inv_cache_no_other_entries(self, c: Constants) -> bool {
+    //     forall |core, pcid| c.valid_core(core) && pcid != self.hist.cr3.pcid ==>
+    //         self.cores[core].psc[pcid].is_empty()
+    // }
+
     pub closed spec fn inv(self, c: Constants) -> bool {
         &&& self.wf(c) // maybe outside of happy
         &&& self.hist.happy ==> {
@@ -1009,6 +1025,7 @@ impl State {
              &&& forall|core| #[trigger] c.valid_core(core) ==> self.cores[core].cr3 == self.hist.cr3
              &&& self.inv_walks_subset_of_hist_walks(c)
              &&& self.inv_cache_subset_of_hist_walks(c)
+             &&& self.inv_cache_no_other_entries(c)
         }
     }
 
@@ -1038,12 +1055,12 @@ pub proof fn next_preserves_inv(pre: State, post: State, c: Constants, lbl: Lbl)
         }
     assert(post.hist.cr3 == pre.hist.cr3);
 
-    // if post.hist.happy {
-    //     let step = choose|step| next_step(pre, post, c, step, lbl);
-    //     match step {
+    if post.hist.happy {
+        let step = choose|step| next_step(pre, post, c, step, lbl);
+        match step {
             // Step::Invlpg                       => {}
             // Step::InvPcid                      => {            }
-            // Step::WriteCr3                     => {            }
+            // Step::WriteCr3                     => {}
             // Step::MemOpNoTr { walk, r }        => { assert(post.inv_cache_subset_of_hist_walks(c)); }
             // Step::MemOpTLB { tlb_va }          => { assert(post.inv_cache_subset_of_hist_walks(c)); }
             // Step::CacheFill { core, walk }     => { assert(post.inv_cache_subset_of_hist_walks(c)); }
@@ -1062,9 +1079,9 @@ pub proof fn next_preserves_inv(pre: State, post: State, c: Constants, lbl: Lbl)
             // Step::Stutter                      => {
             //     assert(post.inv_cache_subset_of_hist_walks(c));
             // }
-    //         _ => ()
-    //     }
-    // }
+            _ => assert(post.inv_cache_subset_of_hist_walks(c))
+        }
+    }
 }
 
 // $line_count$}$
@@ -1158,7 +1175,7 @@ pub mod refinement {
                     }
                     rl3::Step::WriteCr3                   => {
                         if let Lbl::WriteCr3(core, cr3, flush) = lbl {
-                            if cr3 == pre.hist.cr3 {
+                            if cr3 == pre.hist.cr3 && flush {
                                 rl2::Step::WriteCr3
                             } else {
                                 rl2::Step::SadWriteCr3
@@ -1284,16 +1301,17 @@ pub mod refinement {
                     let core = lbl->WriteCr3_0;
                     let cr3 = lbl->WriteCr3_1;
                     let flush = lbl->WriteCr3_2;
-                    if (cr3 == pre.hist.cr3) {
-                        if flush {
-                            assert(post.interp().cores == pre.interp().cores.insert(core,
+                    if (cr3 == pre.hist.cr3 && flush) {
+                        assert(post.interp().cores == pre.interp().cores.insert(core,
                                 pre.interp().cores[core].cr3_set(cr3).walks_clear()
-                            ))
-                        } else {
-                            assert(post.interp().cores == pre.interp().cores.insert(core,
-                                pre.interp().cores[core].cr3_set(cr3)
                             ));
-                        }
+                        // if flush {
+
+                        // } else {
+                        //     assert(post.interp().cores == pre.interp().cores.insert(core,
+                        //         pre.interp().cores[core].cr3_set(cr3)
+                        //     ));
+                        // }
                         assert(rl2::step_WriteCr3(pre.interp(), post.interp(), c, lbl));
                     } else {
                         assert(!post.interp().happy);
@@ -1361,18 +1379,18 @@ pub mod refinement {
                         } else { arbitrary() };
 
                     assert(post.interp().cores == pre.interp().cores.insert(core, pre.interp().cores[core].stbuf_push(addr, value)));
+                    assert(post.hist.pending_maps == post.interp().hist.pending_maps);
 
+
+                    assert(post.interp().writes.core == post.hist.writes.core);
                     if pre.is_happy_writenonneg(core, addr, value) {
                         lemma_bits_misc();
                         assert(!pre.writer_mem().is_prot_write(addr, value));
-                        admit();
                         assert(rl2::step_WriteNonneg(pre.interp(), post.interp(), c, lbl));
                     } else if pre.is_happy_writenonpos(core, addr, value) {
-                        admit();
                         assert(rl2::step_WriteNonpos(pre.interp(), post.interp(), c, lbl));
                     } else if pre.is_happy_writeprotect(core, addr, value) {
                         pre.lemma_prot_write_not_nonpos_or_nonneg(addr, value);
-                        admit();
                         assert(rl2::step_WriteProtect(pre.interp(), post.interp(), c, lbl));
                     } else {
                         assert(rl2::step_SadWrite(pre.interp(), post.interp(), c, lbl));

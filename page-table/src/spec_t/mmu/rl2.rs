@@ -365,14 +365,16 @@ pub open spec fn step_WriteCr3(pre: State, post: State, c: Constants, lbl: Lbl) 
     // instruction’s source operand except those for global pages. It also invalidates all entries
     // in all paging-structure caches associated with that PCID. It is not required to invalidate
     // entries in the TLBs and paging-structure caches that are associated with other PCIDs.
-    &&& flush ==> pre.cores[core].tlb_empty_pcid(cr3.pcid)
+    &&& flush
+    &&& pre.cores[core].tlb_empty_pcid(cr3.pcid)
 
 
     // TODO: Check if this is the right level here
     &&& cr3 == pre.hist.cr3
 
     &&& post == State {
-        cores: if flush { pre.cores.insert(core, pre.cores[core].cr3_set(cr3).walks_clear()) } else { pre.cores.insert(core, pre.cores[core].cr3_set(cr3)) },
+        // cores: if flush { pre.cores.insert(core, pre.cores[core].cr3_set(cr3).walks_clear()) } else { pre.cores.insert(core, pre.cores[core].cr3_set(cr3)) },
+        cores: pre.cores.insert(core, pre.cores[core].cr3_set(cr3).walks_clear()),
         writes: Writes {
             core: pre.writes.core,
             tso: if core == pre.writes.core { iset![] } else { pre.writes.tso },
@@ -395,7 +397,7 @@ pub open spec fn step_SadWriteCr3(pre: State, post: State, c: Constants, lbl: Lb
     // If we do a write without fulfilling the right conditions, we set happy to false.
     &&& lbl matches Lbl::WriteCr3(core, cr3, flush)
 
-    &&& cr3 != pre.hist.cr3
+    &&& cr3 != pre.hist.cr3 || !flush
 
     &&& !post.happy
 }
@@ -1430,7 +1432,6 @@ proof fn next_step_preserves_inv_notin_nonpos_Unmapping(pre: State, post: State,
             assert(post.inv_notin_nonpos(c));
         },
         _ => {
-            admit();
             assert(post.inv_notin_nonpos(c));
         },
     }
@@ -1692,19 +1693,39 @@ proof fn next_step_preserves_inv_unmapping__inflight_walks(pre: State, post: Sta
                 lemma_iter_walk_equals_pt_walk;
             assert(post.inv_unmapping__inflight_walks(c));
         },
-        Step::Invlpg | Step::WriteCr3 | Step::InvPcid => {
+        Step::Invlpg | Step::InvPcid => {
             reveal(State::inv_notin_nonpos);
             if !pre.can_flip_polarity(c) && post.can_flip_polarity(c) {
                 assert(forall|core| #[trigger] c.valid_core(core) ==> !post.writes.nonpos.contains(core));
                 broadcast use
                     lemma_finish_iter_walk_prefix_matches_iter_walk,
                     lemma_iter_walk_equals_pt_walk;
-                admit();
+
                 assert(post.inv_unmapping__inflight_walks(c)); // fails
             } else {
                 assert(post.inv_unmapping__inflight_walks(c));
             }
         },
+        Step::WriteCr3 => {
+            let core = lbl->WriteCr3_0;
+            let flush = lbl->WriteCr3_2;
+            reveal(State::inv_notin_nonpos);
+            if !pre.can_flip_polarity(c) && post.can_flip_polarity(c) {
+                assert(forall|core| #[trigger] c.valid_core(core) ==> !post.writes.nonpos.contains(core));
+                broadcast use
+                    lemma_finish_iter_walk_prefix_matches_iter_walk,
+                    lemma_iter_walk_equals_pt_walk;
+
+                if flush {
+                    assert(post.inv_unmapping__inflight_walks(c));
+                } else {
+                    // no flush here! fails.
+                    assert(post.inv_unmapping__inflight_walks(c));
+                }
+            } else {
+                assert(post.inv_unmapping__inflight_walks(c));
+            }
+        }
         _ => {
             assert(post.inv_unmapping__inflight_walks(c));
         },
@@ -3563,12 +3584,13 @@ pub mod refinement {
         let core = step->TLBFill_core;
         let walk = step->TLBFill_walk;
 
-        admit();
         let walk_na = rl2::walk_next(pre.core_mem(core), walk);
         let vbase   = walk_na.result()->Valid_vbase;
         let pte     = walk_na.result()->Valid_pte;
         rl2::lemma_iter_walk_equals_pt_walk(pre.core_mem(core), walk.vaddr);
         rl2::lemma_pt_walk_result_vbase_equal(pre.core_mem(core), walk.vaddr);
+
+        assert(post.interp().cores == pre.interp().cores.insert(core, pre.interp().cores[core].tlb_fill(vbase, pte)));
 
         if pre.polarity is Mapping {
             rl2::lemma_pt_walk_result_vbase_equal(pre.writer_mem(), walk.vaddr);

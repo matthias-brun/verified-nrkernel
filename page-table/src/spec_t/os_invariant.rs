@@ -943,6 +943,12 @@ pub proof fn next_step_mmu_preserves_inv_tlb(
             }
             assert(s2.inv_tlb(c));
         }
+        rl1::Step::InvPcid => {
+            assert(s2.inv_tlb(c));
+        }
+        rl1::Step::WriteCr3 => {
+            assert(s2.inv_tlb(c));
+        }
         _ => {
             assert(forall|core| #![auto] s2.mmu@.cores[core].tlb.submap_of(s1.mmu@.cores[core].tlb));
             assert(s2.TLB_interp_pt_mem_agree(c)) by {
