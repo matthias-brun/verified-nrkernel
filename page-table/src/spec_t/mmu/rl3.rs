@@ -1435,6 +1435,7 @@ pub mod refinement {
             ensures
                 pre.inv(c),
                 pre.interp().inv(c),
+                pre@.happy
         {
             reveal(rl2::State::wf_ptmem_range);
         }
@@ -1456,7 +1457,10 @@ pub mod refinement {
         pub proof fn init_refines(pre: rl3::State, c: Constants)
             requires rl3::init(pre, c),
             ensures rl1::init(pre@, c),
-        {}
+        {
+            assert(pre@.cores == IMap::new(|core| c.valid_core(core), |core| rl1::CoreState::new(c.cr3.pml4)));
+
+        }
 
         pub broadcast proof fn next_refines(pre: rl3::State, post: rl3::State, c: Constants, lbl: Lbl)
             requires
