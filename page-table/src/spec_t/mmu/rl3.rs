@@ -706,7 +706,7 @@ pub closed spec fn walk_next(state: State, core: Core, walk: Walk, r: usize) -> 
     let Walk { vaddr, path, .. } = walk;
     let mem = state.pt_mem;
     let addr = if path.len() == 0 {
-        add(mem.pml4, mul(l0_bits!(vaddr), WORD_SIZE))          // this should be the core PML4
+        add(state.cores[core].cr3.pml4, mul(l0_bits!(vaddr), WORD_SIZE))          // this should be the core PML4
     } else if path.len() == 1 {
         add(path.last().1->Directory_addr, mul(l1_bits!(vaddr), WORD_SIZE))
     } else if path.len() == 2 {
@@ -1023,6 +1023,7 @@ impl State {
         &&& self.hist.happy ==> {
             &&& forall|core| #[trigger] c.valid_core(core) ==> self.cores[core].inv()
             &&& forall|core| #[trigger] c.valid_core(core) ==> self.cores[core].cr3 == self.hist.cr3
+            &&& forall|core| #[trigger] c.valid_core(core) ==> self.hist.cr3.pml4 == self.pt_mem.pml4
             &&& self.inv_walks_subset_of_hist_walks(c)
             &&& self.inv_cache_subset_of_hist_walks(c)
             &&& self.inv_cache_no_other_entries(c)
@@ -1232,7 +1233,8 @@ pub mod refinement {
     /// The value of r is irrelevant, so we can just ignore it.
     broadcast proof fn rl3_walk_next_is_rl2_walk_next(state: rl3::State, core: Core, walk: Walk, r: usize)
         requires walk.path.len() <= 3,
-            state.cores.contains_key(core)
+            state.cores.contains_key(core),
+            state.cores[core].cr3.pml4 == state.pt_mem.pml4
         ensures
         #[trigger] rl3::walk_next(state, core, walk, r)
                 == rl2::walk_next(state.interp().core_mem(core), walk)
