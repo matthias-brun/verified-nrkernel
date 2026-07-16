@@ -399,6 +399,7 @@ pub open spec fn step_SadWriteCr3(pre: State, post: State, c: Constants, lbl: Lb
 
     &&& cr3 != pre.hist.cr3 || !flush
 
+    &&& post.hist.cr3 == pre.hist.cr3
     &&& !post.happy
 }
 
@@ -498,22 +499,35 @@ pub open spec fn step_InvPcid(pre: State, post: State, c: Constants, lbl: Lbl) -
 pub open spec fn step_InvPcidSad(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
     &&& lbl matches Lbl::InvPcid(core, typ)
 
+    &&& pre.happy
+    &&& c.valid_core(core)
+  // InvPcid is a serializing instruction, ..
+    &&& pre.cores[core].stbuf_empty()
+
     &&& match typ {
+        // Individual-address invalidation: If the INVPCID type is 0, the logical processor invalidates
+        // mappings—except global translations—for the linear address and PCID specified in the INVPCID
+        // descriptor. In some cases, the instruction may invalidate global translations or mappings
+        // for other linear addresses (or other PCIDs) as well.
         InvPcidType::IndividualAddress(d) => {
             &&& d.pcid != pre.hist.cr3.pcid
+            &&& pre.cores[core].tlb_contains_pcid(d.pcid, d.vaddr)
+                    ==> pre.cores[core].tlb_lookup_pcid(d.pcid, d.vaddr).flags.global()
         }
+        // Single-context invalidation: If the INVPCID type is 1, the logical processor invalidates
+        // all mappings—except global translations—associated with the PCID specified in the INVPCID
+        // descriptor. In some cases, the instruction may invalidate global translations or mappings
+        // for other PCIDs as well.
         InvPcidType::SingleContext(d) => {
             &&& d.pcid != pre.hist.cr3.pcid
+            &&& forall |pcid, vaddr| #[trigger]pre.cores[core].tlb_contains_pcid(pcid, vaddr)
+                    ==> (pcid != d.pcid || pre.cores[core].tlb_lookup_pcid(pcid, vaddr).flags.global())
         }
-        InvPcidType::AllContextGlobal(d) => {
-            &&& d.pcid != pre.hist.cr3.pcid
-        }
-        InvPcidType::AllContext(d) => {
-            &&& d.pcid != pre.hist.cr3.pcid
-        }
+        _ => false,
     }
 
     &&& !post.happy
+    &&& post.hist.cr3 == pre.hist.cr3
 }
 
 pub open spec fn step_MemOpNoTr(
@@ -825,6 +839,7 @@ pub open spec fn step_SadWrite(pre: State, post: State, c: Constants, lbl: Lbl) 
     &&& lbl matches Lbl::Write(core, addr, value)
 
     &&& !post.happy
+    &&& post.hist.cr3 == pre.hist.cr3
     &&& pre.writer_mem().is_nonneg_write(addr, value) ==> !pre.is_happy_writenonneg(core, addr, value)
     &&& pre.writer_mem().is_nonpos_write(addr, value) ==> !pre.is_happy_writenonpos(core, addr, value)
     &&& pre.writer_mem().is_prot_write(addr, value)   ==> !pre.is_happy_writeprotect(core, addr, value)
@@ -3411,7 +3426,7 @@ pub mod refinement {
             },
             rl2::Step::InvPcid => {
                 assert(post.interp().cores == pre.interp().cores);
-                assert(rl1::step_Invpcid(pre.interp(), post.interp(), c, lbl));
+                assert(rl1::step_InvPcid(pre.interp(), post.interp(), c, lbl));
             }
             rl2::Step::SadInvPcid => {
                 assert(rl1::step_SadInvpcid(pre.interp(), post.interp(), c, lbl));

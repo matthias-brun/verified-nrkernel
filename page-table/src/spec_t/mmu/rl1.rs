@@ -203,6 +203,9 @@ pub open spec fn step_SadWriteCr3(pre: State, post: State, c: Constants, lbl: Lb
     // If we do a write without fulfilling the right conditions, we set happy to false.
     &&& lbl matches Lbl::WriteCr3(core, cr3, flush)
 
+    &&& pre.cr3 != cr3 || !flush
+
+    &&& pre.cr3 == post.cr3
     &&& !post.happy
 }
 
@@ -230,7 +233,7 @@ pub open spec fn step_Invlpg(pre: State, post: State, c: Constants, lbl: Lbl) ->
     }
 }
 
-pub open spec fn step_Invpcid(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+pub open spec fn step_InvPcid(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
     &&& lbl matches Lbl::InvPcid(core, typ)
 
     &&& pre.happy
@@ -276,6 +279,26 @@ pub open spec fn step_SadInvpcid(pre: State, post: State, c: Constants, lbl: Lbl
     // If we do a write without fulfilling the right conditions, we set happy to false.
     &&& lbl matches Lbl::InvPcid(core, typ)
 
+    &&& pre.happy
+    &&& c.valid_core(core)
+
+    &&& match typ {
+        // Individual-address invalidation: If the INVPCID type is 0, the logical processor invalidates
+        // mappings—except global translations—for the linear address and PCID specified in the INVPCID
+        // descriptor. In some cases, the instruction may invalidate global translations or mappings
+        // for other linear addresses (or other PCIDs) as well.
+        InvPcidType::IndividualAddress(d) => {
+            &&& pre.cr3.pcid != d.pcid
+        }
+        InvPcidType::SingleContext(d) => {
+            &&& pre.cr3.pcid != d.pcid
+        }
+        _ => {
+            &&& false // we should not reach here
+        }
+    }
+
+    &&& post.cr3 == pre.cr3
     &&& !post.happy
 }
 
@@ -348,6 +371,7 @@ pub open spec fn step_MemOpTLB(
     }
 
     &&& post.happy == pre.happy
+    &&& post.cr3 == pre.cr3
     &&& post.pt_mem == pre.pt_mem
     &&& post.cores == pre.cores
     &&& post.writes == pre.writes
@@ -547,6 +571,7 @@ pub open spec fn step_SadWrite(pre: State, post: State, c: Constants, lbl: Lbl) 
     &&& lbl matches Lbl::Write(core, addr, value)
 
     &&& !post.happy
+    &&& post.cr3 == pre.cr3
     &&& pre.pt_mem.is_nonneg_write(addr, value) ==> !pre.is_happy_writenonneg(core, addr, value)
     &&& pre.pt_mem.is_nonpos_write(addr, value) ==> !pre.is_happy_writenonpos(core, addr, value)
     &&& pre.pt_mem.is_prot_write(addr, value)   ==> !pre.is_happy_writeprotect(core, addr, value)
@@ -561,7 +586,7 @@ pub open spec fn step_Sadness(pre: State, post: State, c: Constants, lbl: Lbl) -
 pub open spec fn next_step(pre: State, post: State, c: Constants, step: Step, lbl: Lbl) -> bool {
     match step {
         Step::Invlpg                     => step_Invlpg(pre, post, c, lbl),
-        Step::InvPcid                    => step_Invpcid(pre,post, c, lbl),
+        Step::InvPcid                    => step_InvPcid(pre,post, c, lbl),
         Step::SadInvPcid                 => step_SadInvpcid(pre, post, c, lbl),
         Step::WriteCr3                   => step_WriteCr3(pre, post, c, lbl),
         Step::SadWriteCr3                => step_SadWriteCr3(pre, post, c, lbl),
