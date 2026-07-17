@@ -430,8 +430,8 @@ pub mod code {
     /// Represents a virtual address within an address space
     ///
     /// Storage format:
-    ///   [63..48] the PCID
-    ///   [48..00] the virtual address
+    ///   [59..48] the PCID (12 bits)
+    ///   [47..00] the virtual address (48 bits)
     #[repr(transparent)]
     #[derive(Clone,Copy)]
     pub struct VirtAddr(u64);
