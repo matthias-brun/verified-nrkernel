@@ -1507,7 +1507,7 @@ pub mod code {
     use crate::spec_t::mmu::{ self, Core };
     use crate::theorem::TokState;
     #[cfg(verus_keep_ghost)]
-    use crate::spec_t::mmu::defs::{ aligned };
+    use crate::spec_t::mmu::defs::{ aligned, MAX_PCID };
 
     #[cfg(feature="linuxmodule")]
     use core::arch::asm;
@@ -1583,6 +1583,14 @@ pub mod code {
                 old(self).consts().valid_core(old(self).core()),
             ensures
                 final(self).lbl() == mmu::Lbl::Invlpg(final(self).core(), addr),
+                old(self).prophesied_step(*final(self));
+
+        pub axiom fn prophesy_invpcid(tracked &mut self, typ: InvPcidType)
+            requires
+                old(self).tstate() is Init,
+                old(self).consts().valid_core(old(self).core()),
+            ensures
+                final(self).lbl() == mmu::Lbl::InvPcid(final(self).core(), typ),
                 old(self).prophesied_step(*final(self));
     }
 
@@ -1677,7 +1685,7 @@ pub mod code {
             addr: u64,
     }
 
-    use crate::spec_t::mmu::{Cr3, InvPcidType};
+    use crate::spec_t::mmu::defs::{Cr3, InvPcidType, Paddr, Pcid};
 
     /// invalidates the TLB on the local core
     #[verifier(external_body)]
@@ -1720,21 +1728,64 @@ pub mod code {
         // this is a no-op in standalone mode
     }
 
+    #[repr(transparent)]
+    pub struct Cr3RegVal(u64);
+    impl Cr3RegVal {
+        pub uninterp spec fn pcid(self) -> Pcid;
+        pub uninterp spec fn pml4(self) -> Paddr;
+
+        pub open spec fn wf(self) -> bool {
+            self.pcid() <= MAX_PCID
+        }
+
+        pub open spec fn view(self) -> Cr3 {
+            Cr3{ pcid: self.pcid(), pml4: self.pml4() }
+        }
+
+        #[verifier(external_body)]
+        pub exec fn with_pcid_pml4(pml4: usize, pcid: usize) -> (res: Self)
+            requires
+                pcid < 0x1000
+            ensures
+                res.pcid() == pcid,
+                res.pml4() == pml4
+        {
+            Cr3RegVal((pml4 as u64) & 0x0fff_ffff_ffff_f000 | (pcid as u64) & 0xfff)
+        }
+
+        #[verifier(external_body)]
+        pub exec fn val(self) -> u64
+        {
+            self.0
+        }
+
+        #[verifier(external_body)]
+        pub exec fn pml4_val(&self) -> (r: usize)
+            ensures self.pml4() == r
+        {
+            (self.0 & 0x0fff_ffff_ffff_f000) as usize
+        }
+
+        #[verifier(external_body)]
+        pub exec fn pcid_val(&self) -> (r: usize)
+            ensures self.pcid() == r
+        {
+            (self.0 & 0xfff) as usize
+        }
+    }
+
+
+
     /// invalidates the TLB on the local core
     #[verifier(external_body)]
-    pub exec fn write_cr3(Tracked(tok): Tracked<&mut Token>, pml4: usize, pcid: usize, flush: bool)
+    pub exec fn write_cr3(Tracked(tok): Tracked<&mut Token>, cr3: Cr3RegVal, flush: bool)
         requires
             old(tok).tstate() is Validated,
-            old(tok).lbl() == mmu::Lbl::WriteCr3(old(tok).core(), Cr3 { pcid, pml4 }, flush),
+            old(tok).lbl() == mmu::Lbl::WriteCr3(old(tok).core(), Cr3 { pcid: cr3.pcid(), pml4: cr3.pml4() }, flush),
         ensures
             final(tok).tstate() is Spent,
     {
-        let val = if flush {
-            (pml4 as u64 & 0x0fff_ffff_ffff_f000) | pcid as u64 & 0xfff
-        } else {
-            (1u64 << 63) | (pml4 as u64 & 0x0fff_ffff_ffff_f000) | pcid as u64 & 0xfff
-        };
-
+        let val = if flush { 0 }  else { 1u64 << 63 } | cr3.val();
         #[cfg(feature="linuxmodule")]
         unsafe {
             asm!("mov cr3, {}", in(reg) val, options(nostack, preserves_flags));

@@ -5,7 +5,7 @@
 
 use vstd::prelude::*;
 use crate::spec_t::mmu::Constants;
-use crate::spec_t::mmu::defs::{ Core, MemRegion };
+use crate::spec_t::mmu::defs::{ Core, MemRegion, Pcid, Vaddr };
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::defs::{ overlap, aligned };
 
@@ -19,7 +19,7 @@ pub enum Lbl {
     Tau,
     AcquireLock { core: Core },
     ReleaseLock { core: Core },
-    InitShootdown { core: Core, vaddr: nat },
+    InitShootdown { core: Core, pcid: Pcid, vaddr: Vaddr },
     WaitShootdown { core: Core },
     AckShootdown { core: Core },
     Allocate { core: Core, res: MemRegion },
@@ -33,7 +33,8 @@ pub struct State {
 }
 
 pub struct ShootdownVector {
-    pub vaddr: nat,
+    pub vaddr: Vaddr,
+    pub pcid: Pcid,
     pub open_requests: ISet<Core>,
 }
 
@@ -86,7 +87,7 @@ pub open spec fn step_ReleaseLock(pre: State, post: State, c: Constants, lbl: Lb
 // This initiates a shootdown for all other cores in the system, so we don't take the cores as an
 // argument.
 pub open spec fn step_InitShootdown(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
-    &&& lbl matches Lbl::InitShootdown { core, vaddr }
+    &&& lbl matches Lbl::InitShootdown { core, pcid, vaddr }
 
     &&& c.valid_core(core)
     &&& pre.shootdown_vec.open_requests === iset![]
@@ -94,6 +95,7 @@ pub open spec fn step_InitShootdown(pre: State, post: State, c: Constants, lbl: 
     &&& post == State {
         shootdown_vec: ShootdownVector {
             vaddr,
+            pcid,
             open_requests: ISet::new(|core| c.valid_core(core))
         },
         ..pre
@@ -217,7 +219,7 @@ pub open spec fn next(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
 pub mod code {
     use vstd::prelude::*;
     use crate::spec_t::os_ext;
-    use crate::spec_t::mmu::defs::{ Core, MemRegionExec, PAGE_SIZE };
+    use crate::spec_t::mmu::defs::{ Core, MemRegionExec, PAGE_SIZE, Pcid, Vaddr, InvPcidDescriptor, MAX_PCID, MAX_VIRTADDR };
     use crate::theorem::TokState;
 
     #[verifier(external_body)]
@@ -268,11 +270,11 @@ pub mod code {
                 final(self).lbl() == (os_ext::Lbl::ReleaseLock { core: final(self).core() }),
                 old(self).prophesied_step(*final(self));
 
-        pub axiom fn prophesy_init_shootdown(tracked &mut self, vaddr: usize)
+        pub axiom fn prophesy_init_shootdown(tracked &mut self, pcid: Pcid, vaddr: Vaddr)
             requires
                 old(self).tstate() is Init,
             ensures
-                final(self).lbl() == (os_ext::Lbl::InitShootdown { core: final(self).core(), vaddr: vaddr as nat }),
+                final(self).lbl() == (os_ext::Lbl::InitShootdown { core: final(self).core(), pcid, vaddr }),
                 old(self).prophesied_step(*final(self));
 
         pub axiom fn prophesy_wait_shootdown(tracked &mut self)
@@ -423,12 +425,75 @@ pub mod code {
         fn print(s: *const c_char, v: usize);
     }
 
+
+
+    /// Represents a virtual address within an address space
+    ///
+    /// Storage format:
+    ///   [63..48] the PCID
+    ///   [48..00] the virtual address
+    #[repr(transparent)]
+    #[derive(Clone,Copy)]
+    pub struct VirtAddr(u64);
+    impl VirtAddr {
+        /// obtains the PCID part of the virtual address
+        pub uninterp spec fn pcid(self) -> Pcid;
+        /// obtains the virtual address part of the address
+        pub uninterp spec fn vaddr(self) -> Vaddr;
+
+        /// well-formedness condition
+        pub open spec fn wf(self) -> bool {
+            &&& self.pcid() <= MAX_PCID
+            &&& self.vaddr() < MAX_VIRTADDR
+        }
+
+        /// obtains the view
+        pub open spec fn to_inv_pcid_desc(&self) -> InvPcidDescriptor {
+            InvPcidDescriptor{ pcid: self.pcid(), vaddr: self.vaddr() }
+        }
+
+        #[verifier(external_body)]
+        pub exec fn with_pcid_vaddr(pcid: usize, vaddr: usize) -> (res: Self)
+            requires
+                // aligned(vaddr, 0x1000),
+                pcid <= MAX_PCID,
+                vaddr < MAX_VIRTADDR
+            ensures
+                res.wf(),
+                res.pcid() == pcid,
+                res.vaddr() == vaddr
+        {
+            VirtAddr((vaddr as u64) & 0xffff_ffff_ffff_f000 | (pcid as u64) & 0xfff)
+        }
+
+        #[verifier(external_body)]
+        pub exec fn val(self) -> u64
+        {
+            self.0
+        }
+
+        #[verifier(external_body)]
+        pub exec fn vaddr_val(&self) -> (r: usize)
+            ensures self.vaddr() == r
+        {
+            (self.0 & 0x0000_ffff_ffff_ffff_ffff) as usize
+        }
+
+        #[verifier(external_body)]
+        pub exec fn pcid_val(&self) -> (r: usize)
+            ensures self.pcid() == r
+        {
+            ((self.0 >> 48) & 0xfff) as usize
+        }
+    }
+
+
     /// initiates a shootdown for a given virtual page
     #[verifier(external_body)]
-    pub exec fn init_shootdown(Tracked(tok): Tracked<&mut Token>, vaddr: usize)
+    pub exec fn init_shootdown(Tracked(tok): Tracked<&mut Token>, vaddr: VirtAddr)
         requires
             old(tok).tstate() is Validated,
-            old(tok).lbl() == (os_ext::Lbl::InitShootdown { core: old(tok).core(), vaddr: vaddr as nat }),
+            old(tok).lbl() == (os_ext::Lbl::InitShootdown { core: old(tok).core(), pcid: vaddr.pcid(), vaddr: vaddr.vaddr() }),
         ensures
             final(tok).tstate() is Spent,
     {

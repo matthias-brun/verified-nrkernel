@@ -459,6 +459,7 @@ pub open spec fn step_WriteNonneg(pre: State, post: State, c: Constants, lbl: Lb
     &&& pre.polarity is Mapping || pre.can_flip_polarity(c)
 
     &&& post.happy      == pre.happy
+    &&& post.cr3        == pre.cr3
     &&& post.phys_mem   == pre.phys_mem
     &&& post.pt_mem     == pre.pt_mem.write(addr, value)
     &&& post.cores      == pre.cores
@@ -486,6 +487,7 @@ pub open spec fn step_WriteNonpos(pre: State, post: State, c: Constants, lbl: Lb
     &&& pre.polarity is Unmapping || pre.can_flip_polarity(c)
 
     &&& post.happy      == pre.happy
+    &&& post.cr3        == pre.cr3
     &&& post.phys_mem   == pre.phys_mem
     &&& post.pt_mem     == pre.pt_mem.write(addr, value)
     &&& post.cores      == pre.cores
@@ -513,6 +515,7 @@ pub open spec fn step_WriteProtect(pre: State, post: State, c: Constants, lbl: L
     &&& pre.polarity is Protect || pre.can_flip_polarity(c)
 
     &&& post.happy      == pre.happy
+    &&& post.cr3        == pre.cr3
     &&& post.phys_mem   == pre.phys_mem
     &&& post.pt_mem     == pre.pt_mem.write(addr, value)
     &&& post.cores      == pre.cores

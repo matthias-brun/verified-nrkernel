@@ -16,6 +16,7 @@ pub mod spec_t;
 pub mod extra;
 pub mod theorem;
 
+use spec_t::mmu::rl3::code::Cr3RegVal;
 use vstd::prelude::verus;
 // #[cfg(feature="linuxmodule")]
 use vstd::prelude::Tracked;
@@ -59,15 +60,13 @@ pub extern "C" fn veros_init() -> i64 {
 #[verifier(external_body)]
 #[no_mangle]
 pub extern "C" fn veros_map_frame(
-    pt_ptr: u64,
+    cr3: Cr3RegVal,
     vaddr: u64,
     pte: &PageTableEntryExec) -> i64
 {
-
-    let pml4 = pt_ptr as usize;
     let token: Tracked<Token> = Tracked::assume_new();
 
-    let (res, _tok) = impl_u::verified_impl::PTImpl::sys_do_map(token, pml4, vaddr as usize, pte);
+    let (res, _tok) = impl_u::verified_impl::PTImpl::sys_do_map(token, cr3, vaddr as usize, pte);
     if res.is_ok() {
         return 0;
     } else {
@@ -82,14 +81,13 @@ pub extern "C" fn veros_map_frame(
 #[verifier(external_body)]
 #[no_mangle]
 pub extern "C" fn veros_unmap_frame(
-    pt_ptr: u64,
+    cr3: Cr3RegVal,
     vaddr: u64,
     ret_frame: &mut MemRegionExec) -> i64
 {
-    let pml4 = pt_ptr as usize;
     let token: Tracked<Token> = Tracked::assume_new();
 
-    let (res, _tok) = impl_u::verified_impl::PTImpl::sys_do_unmap(token, pml4, vaddr as usize, ret_frame);
+    let (res, _tok) = impl_u::verified_impl::PTImpl::sys_do_unmap(token, cr3, vaddr as usize, ret_frame);
     match res {
         Ok(frame) => {
             return 0;
@@ -106,14 +104,13 @@ pub extern "C" fn veros_unmap_frame(
 #[verifier(external_body)]
 #[no_mangle]
 pub extern "C" fn veros_mprotect_frame(
-    pt_ptr: u64,
+    cr3: Cr3RegVal,
     vaddr: u64,
     flags: &Flags) -> i64
 {
-    let pml4 = pt_ptr as usize;
     let token: Tracked<Token> = Tracked::assume_new();
 
-    let (res, _tok) = impl_u::verified_impl::PTImpl::sys_do_protect(token, pml4, vaddr as usize, flags);
+    let (res, _tok) = impl_u::verified_impl::PTImpl::sys_do_protect(token, cr3, vaddr as usize, flags);
     match res {
         Ok(frame) => {
             return 0;

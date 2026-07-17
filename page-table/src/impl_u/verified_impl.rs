@@ -1,5 +1,6 @@
 use vstd::prelude::*;
 
+use crate::Cr3RegVal;
 use crate::theorem::RLbl;
 use crate::spec_t::mmu::defs::{ PageTableEntryExec, MemRegionExec, Flags, MemRegion };
 #[cfg(verus_keep_ghost)]
@@ -14,6 +15,7 @@ use crate::spec_t::os_code_vc::{ lemma_concurrent_trs_during_shootdown };
 use crate::impl_u::wrapped_token::{ self, WrappedMapToken, WrappedUnmapToken, WrappedProtectToken, WrappedTokenView, DoShootdown };
 use crate::impl_u::l2_impl::PT::{ self, map_frame, unmap, protect };
 use crate::spec_t::os;
+use crate::spec_t::mmu::defs::{InvPcidType, InvPcidDescriptor};
 
 verus! {
 
@@ -22,7 +24,7 @@ pub struct PTImpl {}
 impl CodeVC for PTImpl {
     exec fn sys_do_map(
         Tracked(tok): Tracked<Token>,
-        pml4: usize,
+        cr3:Cr3RegVal,
         vaddr: usize,
         pte: &PageTableEntryExec,
     ) -> (Result<(),()>, Tracked<Token>)
@@ -50,7 +52,7 @@ impl CodeVC for PTImpl {
         let ghost wtok_before = wtok@;
         let ghost pt_before = pt@;
 
-        let res = map_frame(Tracked(&mut wtok), &mut pt, pml4, vaddr, pte);
+        let res = map_frame(Tracked(&mut wtok), &mut pt, cr3.pml4_val(), vaddr, pte);
         assert(PT::inv_and_nonempty(wtok@, pt@));
         assert forall|wtokp: WrappedTokenView| ({
             &&& wtokp.pt_mem == wtok@.pt_mem
@@ -89,7 +91,7 @@ impl CodeVC for PTImpl {
 
     exec fn sys_do_unmap(
         Tracked(tok): Tracked<Token>,
-        pml4: usize, //cr3 pml4 and pcid
+        cr3:Cr3RegVal,
         vaddr: usize,
         frame: &mut MemRegionExec,
     ) -> (res: (Result<(),()>, Tracked<Token>))
@@ -115,7 +117,7 @@ impl CodeVC for PTImpl {
         let ghost wtok_before = wtok@;
         let ghost pt_before = pt@;
 
-        let res = unmap(Tracked(&mut wtok), &mut pt, pml4, vaddr, frame);
+        let res = unmap(Tracked(&mut wtok), &mut pt, cr3.pml4_val(), vaddr, frame);
         assert(PT::inv_and_nonempty(wtok@, pt@));
         assert forall|wtokp: WrappedTokenView| ({
             &&& wtokp.pt_mem == wtok@.pt_mem
@@ -129,7 +131,7 @@ impl CodeVC for PTImpl {
         };
 
         let shootdown = if let Ok(pte) = res {
-            DoShootdown::Yes { vaddr }
+            DoShootdown::Yes { vaddr: os_ext::code::VirtAddr::with_pcid_vaddr(cr3.pcid_val(), vaddr) }
         } else {
             DoShootdown::No
         };
@@ -143,7 +145,7 @@ impl CodeVC for PTImpl {
     /// This function changes the protection flags of a mapped region
     exec fn sys_do_protect(
         Tracked(tok): Tracked<Token>,
-        pml4: usize,
+        cr3:Cr3RegVal,
         vaddr: usize,
         flags: &Flags,
     ) -> (res: (Result<(),()>, Tracked<Token>))
@@ -169,7 +171,7 @@ impl CodeVC for PTImpl {
         let ghost wtok_before = wtok@;
         let ghost pt_before = pt@;
 
-        let res = protect(Tracked(&mut wtok), &mut pt, pml4, vaddr, flags);
+        let res = protect(Tracked(&mut wtok), &mut pt, cr3.pml4_val(), vaddr, flags);
         assert(PT::inv_and_nonempty(wtok@, pt@));
         assert forall|wtokp: WrappedTokenView| ({
             &&& wtokp.pt_mem == wtok@.pt_mem
@@ -183,7 +185,7 @@ impl CodeVC for PTImpl {
         };
 
         let (res, shootdown) = if let Ok(_) = res {
-            (Ok(()), DoShootdown::Yes { vaddr })
+            (Ok(()), DoShootdown::Yes { vaddr: os_ext::code::VirtAddr::with_pcid_vaddr(cr3.pcid_val(), vaddr) })
         } else {
             (Err(()), DoShootdown::No)
         };
@@ -196,7 +198,7 @@ impl CodeVC for PTImpl {
 }
 
 impl HandlerVC for PTImpl {
-    exec fn handle_shootdown_ipi(Tracked(tok): Tracked<Token>, vaddr: usize) -> (res: Tracked<Token>) {
+    exec fn handle_shootdown_ipi(Tracked(tok): Tracked<Token>, vaddr: os_ext::code::VirtAddr) -> (res: Tracked<Token>) {
         let tracked mut tok = tok;
         let ghost core = tok.core();
         let ghost state1 = tok.st();
@@ -211,21 +213,22 @@ impl HandlerVC for PTImpl {
 
         let tracked mut mmu_tok = tok.get_mmu_token();
         proof {
-            mmu_tok.prophesy_invlpg(vaddr);
+            broadcast use to_rl1::next_refines;
+            mmu_tok.prophesy_invpcid(InvPcidType::IndividualAddress(InvPcidDescriptor { pcid: tok.st().os_ext.shootdown_vec.pcid, vaddr: tok.st().os_ext.shootdown_vec.vaddr }));
             let post = os::State {
                 mmu: mmu_tok.post(),
                 ..tok.st()
             };
+            assert(mmu::rl1::step_InvPcid(tok.st().mmu@, post.mmu@, tok.consts().common, mmu_tok.lbl()));
             assert(mmu::rl3::next(tok.st().mmu, post.mmu, tok.consts().common, mmu_tok.lbl()));
-            assert(tok.st().os_ext.shootdown_vec.open_requests.contains(core));
-            assert(os::step_Invlpg(tok.consts(), tok.st(), post, core, RLbl::Tau));
-            let step = os::Step::Invlpg { core };
+            assert(os::step_InvPcid(tok.consts(), tok.st(), post, core, RLbl::Tau));
+            let step = os::Step::InvPcid { core };
             assert(os::next_step(tok.consts(), tok.st(), post, step, RLbl::Tau));
             tok.register_internal_step_mmu(&mut mmu_tok, post, step);
             crate::spec_t::os_invariant::next_preserves_inv(tok.consts(), state2, tok.st(), RLbl::Tau);
         }
-        // Execute invlpg to evict from local TLB
-        mmu::rl3::code::invlpg(Tracked(&mut mmu_tok), vaddr);
+        // Execute invpcid to evict from local TLB
+        mmu::rl3::code::invpcid(Tracked(&mut mmu_tok), InvPcidType::IndividualAddress(InvPcidDescriptor { pcid: vaddr.pcid_val(), vaddr: vaddr.vaddr_val() }));
         let ghost state3 = tok.st();
 
         proof {
@@ -249,7 +252,7 @@ impl HandlerVC for PTImpl {
             assert(state3.mmu@.writes.nonpos === state2.mmu@.writes.nonpos.remove(core));
             assert(!state3.mmu@.writes.nonpos.contains(core));
             assert(!tok.st().mmu@.writes.nonpos.contains(core));
-            assert(!state3.mmu@.cores[core].tlb.contains_key(vaddr));
+            assert(!state3.mmu@.cores[core].tlb.contains_key(vaddr.vaddr()));
             assert(tok.consts().valid_core(state2.os_ext.lock->Some_0));
             assert(tok.consts().valid_core(core));
             assert(tok.st().core_states[state2.os_ext.lock->Some_0].is_in_shootdown());

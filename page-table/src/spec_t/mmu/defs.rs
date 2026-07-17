@@ -133,6 +133,8 @@ pub const L1_ENTRY_SIZE: usize = 512 * L2_ENTRY_SIZE;
 
 pub const L0_ENTRY_SIZE: usize = 512 * L1_ENTRY_SIZE;
 
+pub const MAX_VIRTADDR: usize = L0_ENTRY_SIZE * X86_NUM_ENTRIES;
+
 pub open spec fn index_from_offset(offset: nat, entry_size: nat) -> (res: nat)
     recommends entry_size > 0,
 {

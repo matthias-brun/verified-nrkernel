@@ -2,6 +2,7 @@
 // trusted: VCs for implementation
 use vstd::prelude::*;
 
+use crate::Cr3RegVal;
 use crate::spec_t::os;
 use crate::spec_t::os_invariant;
 use crate::spec_t::mmu;
@@ -124,12 +125,14 @@ pub proof fn lemma_concurrent_trs_no_lock(pre: os::State, post: os::State, c: os
         //c.valid_core(core),
     ensures
         post.mmu@.pt_mem.pml4 == pre.mmu@.pt_mem.pml4,
+        post.mmu@.cr3 == pre.mmu@.cr3,
         post.core_states[core] == pre.core_states[core],
         post.inv(c),
 {
     let pred = |pre: os::State, post: os::State|
         pre.inv(c) ==> {
             &&& post.mmu@.pt_mem.pml4 == pre.mmu@.pt_mem.pml4
+            &&& post.mmu@.cr3 == pre.mmu@.cr3
             &&& post.core_states[core] == pre.core_states[core]
             &&& post.inv(c)
         };
@@ -168,10 +171,12 @@ pub proof fn lemma_concurrent_trs_during_shootdown(pre: os::State, post: os::Sta
         pre.os_ext.shootdown_vec.open_requests.contains(core),
     ensures
         post.mmu@.pt_mem.pml4 == pre.mmu@.pt_mem.pml4,
+        post.mmu@.cr3 == pre.mmu@.cr3,
         post.core_states[core] == pre.core_states[core],
         post.core_states[pre.os_ext.lock->Some_0] == pre.core_states[pre.os_ext.lock->Some_0],
         post.os_ext.shootdown_vec.open_requests.contains(core),
         post.os_ext.shootdown_vec.vaddr == pre.os_ext.shootdown_vec.vaddr,
+        post.os_ext.shootdown_vec.pcid == pre.os_ext.shootdown_vec.pcid,
         // post.mmu@.writes.tso.subset_of(pre.mmu@.writes.tso),
         post.mmu@.writes.nonpos.subset_of(pre.mmu@.writes.nonpos),
         post.inv(c),
@@ -183,10 +188,12 @@ pub proof fn lemma_concurrent_trs_during_shootdown(pre: os::State, post: os::Sta
         && pre.os_ext.shootdown_vec.open_requests.contains(core)
         ==> {
             &&& post.mmu@.pt_mem.pml4 == pre.mmu@.pt_mem.pml4
+            &&& post.mmu@.cr3 == pre.mmu@.cr3
             &&& post.core_states[core] == pre.core_states[core]
             &&& post.core_states[pre.os_ext.lock->Some_0] == pre.core_states[pre.os_ext.lock->Some_0]
             &&& post.os_ext.shootdown_vec.open_requests.contains(core)
             &&& post.os_ext.shootdown_vec.vaddr == pre.os_ext.shootdown_vec.vaddr
+            &&& post.os_ext.shootdown_vec.pcid == pre.os_ext.shootdown_vec.pcid
             // &&& post.mmu@.writes.tso.subset_of(pre.mmu@.writes.tso)
             &&& post.mmu@.writes.nonpos.subset_of(pre.mmu@.writes.nonpos)
             &&& post.inv(c)
@@ -334,6 +341,7 @@ impl Token {
             final(self).consts() == old(self).consts(),
             final(self).thread() == old(self).thread(),
             final(self).st() == post,
+            final(self).st().mmu@.cr3 == old(self).st().mmu@.cr3,
             final(self).steps() == old(self).steps(),
             final(self).steps_taken() == old(self).steps_taken(),
             final(self).progress() == old(self).progress(),
@@ -408,6 +416,7 @@ impl Token {
             final(self).consts() == old(self).consts(),
             final(self).thread() == old(self).thread(),
             final(self).st() == post,
+            final(self).st().mmu@.cr3 == old(self).st().mmu@.cr3,
             final(self).steps() == old(self).steps(),
             final(self).steps_taken() == old(self).steps_taken(),
             final(self).progress() == old(self).progress(),
@@ -492,7 +501,7 @@ pub trait CodeVC {
     /// `steps_taken`, which we can use to tie it to the return value.
     exec fn sys_do_map(
         Tracked(tok): Tracked<Token>,
-        pml4: usize,
+        cr3: Cr3RegVal,
         vaddr: usize,
         pte: &PageTableEntryExec,
     ) -> (res: (Result<(),()>, Tracked<Token>))
@@ -510,7 +519,9 @@ pub trait CodeVC {
             tok.on_first_step(),
             tok.progress() is Unready,
             // Caller preconditions
-            pml4 == tok.st().mmu@.pt_mem.pml4,
+            cr3.wf(),
+            tok.st().mmu@.pt_mem.pml4 == cr3.pml4(),
+            tok.st().mmu@.cr3 == cr3@,
         ensures
             res.0 == res.1@.steps_taken().last()->MapEnd_result,
             res.1@.steps() === seq![],
@@ -521,7 +532,7 @@ pub trait CodeVC {
     /// considered a hint as it's not verified.
     exec fn sys_do_unmap(
         Tracked(tok): Tracked<Token>,
-        pml4: usize,
+        cr3: Cr3RegVal,
         vaddr: usize,
         frame: &mut MemRegionExec,
     ) -> (res: (Result<(),()>, Tracked<Token>))
@@ -538,7 +549,9 @@ pub trait CodeVC {
             tok.on_first_step(),
             tok.progress() is Unready,
             // Caller preconditions
-            pml4 == tok.st().mmu@.pt_mem.pml4,
+            cr3.wf(),
+            tok.st().mmu@.pt_mem.pml4 == cr3.pml4(),
+            tok.st().mmu@.cr3 == cr3@,
         ensures
             res.0 is Ok <==> res.1@.steps_taken().last()->UnmapEnd_result is Ok,
             res.1@.steps() === seq![],
@@ -548,7 +561,7 @@ pub trait CodeVC {
     /// This function changes the protection flags of a mapped region
     exec fn sys_do_protect(
         Tracked(tok): Tracked<Token>,
-        pml4: usize,
+        cr3: Cr3RegVal,
         vaddr: usize,
         flags: &Flags,
         // Ghost(frame): Ghost<MemRegion>,
@@ -567,7 +580,9 @@ pub trait CodeVC {
             tok.on_first_step(),
             tok.progress() is Unready,
             // Caller preconditions
-            pml4 == tok.st().mmu@.pt_mem.pml4,
+            cr3.wf(),
+            tok.st().mmu@.pt_mem.pml4 == cr3.pml4(),
+            tok.st().mmu@.cr3 == cr3@,
         ensures
             res.0 == res.1@.steps_taken().last()->ProtectEnd_result,
             res.1@.steps() === seq![],
@@ -579,7 +594,7 @@ pub trait CodeVC {
 pub trait HandlerVC {
     exec fn handle_shootdown_ipi(
         Tracked(tok): Tracked<Token>,
-        vaddr: usize,
+        vaddr: os_ext::code::VirtAddr,
     ) -> (res: Tracked<Token>)
         requires
             // State machine VC preconditions
@@ -595,7 +610,10 @@ pub trait HandlerVC {
             !tok.on_first_step(),
             tok.progress() is Unready,
             // Caller preconditions
-            vaddr == tok.st().os_ext.shootdown_vec.vaddr,
+            vaddr.wf(),
+            tok.st().os_ext.shootdown_vec.vaddr == vaddr.vaddr(),
+            tok.st().os_ext.shootdown_vec.pcid == vaddr.pcid(),
+            tok.st().mmu@.cr3.pcid == vaddr.pcid()
         ensures
             res@.steps() === seq![],
             res@.progress() is Unready,
@@ -607,6 +625,7 @@ pub trait HandlerVC {
 pub open spec fn unchanged_state_during_concurrent_trs(pre: os::State, post: os::State, core: Core) -> bool {
     &&& post.mmu@.happy          == pre.mmu@.happy
     &&& post.mmu@.pt_mem         == pre.mmu@.pt_mem
+    &&& post.mmu@.cr3            == pre.mmu@.cr3
     &&& post.os_ext.allocated    == pre.os_ext.allocated
     &&& post.mmu@.writes.tso.subset_of(pre.mmu@.writes.tso)
     &&& post.mmu@.writes.nonpos.subset_of(pre.mmu@.writes.nonpos)

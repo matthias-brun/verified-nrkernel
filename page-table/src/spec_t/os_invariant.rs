@@ -862,7 +862,7 @@ pub proof fn next_step_mmu_preserves_inv_tlb(
 
     match mmu_step {
         rl1::Step::TLBFill { core, vaddr } => {
-            assert(rl1::next_step(s1.mmu@, s2.mmu@, c.common,rl1::Step::TLBFill { core, vaddr }, mmu::Lbl::Tau));
+            // assert(rl1::next_step(s1.mmu@, s2.mmu@, c.common,rl1::Step::TLBFill { core, vaddr }, mmu::Lbl::Tau));
             let vbase = s1.mmu@.pt_mem.pt_walk(vaddr).result()->Valid_vbase;
             crate::spec_t::mmu::rl2::lemma_pt_walk_result_vbase_equal(s1.mmu@.pt_mem, vaddr);
             assert(s2.shootdown_cores_valid(c));

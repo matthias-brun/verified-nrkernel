@@ -2883,6 +2883,7 @@ fn unmap_aux(
     ensures
         final(tok).inv(),
         final(tok)@.pt_mem.pml4 == old(tok)@.pt_mem.pml4,
+        final(tok)@.orig_st.mmu@.cr3 == old(tok)@.orig_st.mmu@.cr3,
         match res {
             Ok(resv) => {
                 let (pt_res, removed_regions) = resv@;
@@ -3357,6 +3358,7 @@ pub fn unmap(Tracked(tok): Tracked<&mut WrappedUnmapToken>, pt: &mut Ghost<PTDir
             },
         },
         final(tok).inv(),
+        final(tok)@.orig_st.mmu@.cr3 == old(tok)@.orig_st.mmu@.cr3,
 {
     let ghost rebuild_root_pt = |pt_new, removed_regions| pt_new;
     match unmap_aux(Tracked(tok), *pt, 0, pml4, 0, vaddr, frame, Ghost(rebuild_root_pt)) {
@@ -3427,6 +3429,7 @@ fn protect_aux(
     ensures
         final(tok).inv(),
         final(tok)@.pt_mem.pml4 == old(tok)@.pt_mem.pml4,
+        final(tok)@.orig_st.mmu@.cr3 == old(tok)@.orig_st.mmu@.cr3,
         match res {
             Ok(_) => {
                 &&& final(tok)@.regions.dom() == old(tok)@.regions.dom()
@@ -3746,6 +3749,7 @@ pub fn protect(Tracked(tok): Tracked<&mut WrappedProtectToken>, pt: &mut Ghost<P
             },
         },
         final(tok).inv(),
+        final(tok)@.orig_st.mmu@.cr3 == old(tok)@.orig_st.mmu@.cr3,
 {
     if let Ok(_) = protect_aux(Tracked(tok), *pt, *pt, 0, pml4, 0, vaddr, permissions) {
         assert(inv_and_nonempty(tok@, pt@));
