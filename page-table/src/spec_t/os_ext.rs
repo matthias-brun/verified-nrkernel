@@ -436,11 +436,6 @@ pub mod code {
     #[derive(Clone,Copy)]
     pub struct VirtAddr(u64);
     impl VirtAddr {
-        /// obtains the PCID part of the virtual address
-        pub uninterp spec fn pcid(self) -> Pcid;
-        /// obtains the virtual address part of the address
-        pub uninterp spec fn vaddr(self) -> Vaddr;
-
         /// well-formedness condition
         pub open spec fn wf(self) -> bool {
             &&& self.pcid() <= MAX_PCID
@@ -452,7 +447,37 @@ pub mod code {
             InvPcidDescriptor{ pcid: self.pcid(), vaddr: self.vaddr() }
         }
 
-        #[verifier(external_body)]
+        pub proof fn max_virtaddr_fits(vaddr: usize)
+            requires
+                vaddr < MAX_VIRTADDR
+            ensures
+                (vaddr & 0x0000_ffff_ffff_ffff) == vaddr
+        {
+            assert((vaddr & 0x0000_ffff_ffff_ffff) == vaddr) by (bit_vector)
+                requires vaddr < MAX_VIRTADDR;
+
+        }
+
+        pub proof fn virtaddr_insert_extract(pcid: usize, vaddr: usize)
+            requires
+                vaddr < MAX_VIRTADDR,
+                pcid <= MAX_PCID,
+            ensures
+                VirtAddr::spec_with_pcid_vaddr(pcid, vaddr).pcid() == pcid,
+                VirtAddr::spec_with_pcid_vaddr(pcid, vaddr).vaddr() == vaddr,
+        {
+            assert(VirtAddr::spec_with_pcid_vaddr(pcid, vaddr).pcid() == pcid as u64) by (bit_vector)
+                requires vaddr < MAX_VIRTADDR && pcid <= MAX_PCID;
+            assert(VirtAddr::spec_with_pcid_vaddr(pcid, vaddr).vaddr() == vaddr as u64) by (bit_vector)
+                requires vaddr < MAX_VIRTADDR && pcid <= MAX_PCID;
+        }
+
+        pub closed spec fn  spec_with_pcid_vaddr(pcid: usize, vaddr: usize) -> VirtAddr
+            recommends pcid <= MAX_PCID && vaddr < MAX_VIRTADDR
+        {
+            VirtAddr((vaddr as u64) & 0x0000_ffff_ffff_ffff | ((pcid as u64) & 0xfff) << 48)
+        }
+
         pub exec fn with_pcid_vaddr(pcid: usize, vaddr: usize) -> (res: Self)
             requires
                 // aligned(vaddr, 0x1000),
@@ -460,26 +485,33 @@ pub mod code {
                 vaddr < MAX_VIRTADDR
             ensures
                 res.wf(),
+                res == VirtAddr::spec_with_pcid_vaddr(pcid, vaddr),
                 res.pcid() == pcid,
                 res.vaddr() == vaddr
         {
-            VirtAddr((vaddr as u64) & 0xffff_ffff_ffff_f000 | (pcid as u64) & 0xfff)
+            proof { VirtAddr::virtaddr_insert_extract(pcid, vaddr); }
+            VirtAddr((vaddr as u64) & 0x0000_ffff_ffff_ffff | ((pcid as u64) & 0xfff) << 48)
         }
 
-        #[verifier(external_body)]
         pub exec fn val(self) -> u64
         {
             self.0
         }
 
-        #[verifier(external_body)]
+        pub closed spec fn vaddr(&self) -> usize {
+            (self.0 & 0x0000_ffff_ffff_ffff) as usize
+        }
+
         pub exec fn vaddr_val(&self) -> (r: usize)
             ensures self.vaddr() == r
         {
-            (self.0 & 0x0000_ffff_ffff_ffff_ffff) as usize
+            (self.0 & 0x0000_ffff_ffff_ffff) as usize
         }
 
-        #[verifier(external_body)]
+        pub closed spec fn pcid(self) -> usize {
+            ((self.0 >> 48) & 0xfff) as usize
+        }
+
         pub exec fn pcid_val(&self) -> (r: usize)
             ensures self.pcid() == r
         {

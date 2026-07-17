@@ -9,7 +9,7 @@ use crate::spec_t::mmu::defs::{
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::defs::{
     aligned, between, candidate_mapping_in_bounds, candidate_mapping_overlaps_existing_pmem,
-    candidate_mapping_overlaps_existing_vmem, overlap, x86_arch_spec, update_range, MAX_BASE
+    candidate_mapping_overlaps_existing_vmem, overlap, x86_arch_spec, update_range, MAX_VIRTADDR
 };
 use crate::theorem::RLbl;
 
@@ -108,7 +108,7 @@ pub open spec fn wf(c: Constants, s: State) -> bool {
 }
 
 pub open spec fn init(c: Constants, s: State) -> bool {
-    &&& s.mem.len() === MAX_BASE
+    &&& s.mem.len() === MAX_VIRTADDR
     &&& s.mappings === imap![]
     &&& forall|id: nat| id < c.thread_no ==> s.thread_state[id] is Idle
     &&& wf(c, s)

@@ -14,7 +14,7 @@ use crate::spec_t::mmu::defs::{
 use crate::spec_t::mmu::defs::{
     aligned, between, candidate_mapping_in_bounds, candidate_mapping_overlaps_existing_pmem,
     candidate_mapping_in_bounds_pmem,
-    candidate_mapping_overlaps_existing_vmem, overlap, x86_arch_spec, MAX_BASE
+    candidate_mapping_overlaps_existing_vmem, overlap, x86_arch_spec, MAX_VIRTADDR
 };
 use crate::theorem::RLbl;
 use crate::spec_t::os_ext;
@@ -1173,7 +1173,7 @@ impl State {
 
     pub open spec fn vmem_apply_mappings(applied_mappings: IMap<nat, PTE>, phys_mem: Seq<u8>) -> Seq<u8> {
         Seq::new(
-            MAX_BASE,
+            MAX_VIRTADDR,
             |vaddr: int| {
                 if Self::has_base_and_pte_for_vaddr(applied_mappings, vaddr) {
                     let (base, pte) = Self::base_and_pte_for_vaddr(applied_mappings, vaddr);
@@ -1637,7 +1637,7 @@ impl State {
     ///////////////////////////////////////////////////////////////////////////////////////////////
     pub open spec fn inv_tlb_wf(self, c: Constants) -> bool {
         forall|core| #![auto] c.valid_core(core) && !(self.core_states[core] is Idle)
-            ==> self.core_states[core].vaddr() < MAX_BASE
+            ==> self.core_states[core].vaddr() < MAX_VIRTADDR
     }
 
     pub open spec fn inv_shootdown_wf(self, c: Constants) -> bool {

@@ -2,7 +2,7 @@ use vstd::prelude::*;
 use crate::spec_t::mmu::*;
 use crate::spec_t::mmu::pt_mem::*;
 #[cfg(verus_keep_ghost)]
-use crate::spec_t::mmu::defs::{ aligned, LoadResult, update_range, MAX_BASE };
+use crate::spec_t::mmu::defs::{ aligned, LoadResult, update_range, MAX_VIRTADDR };
 use crate::spec_t::mmu::defs::{ PTE, Core, Paddr, Vaddr, Vpn };
 use crate::spec_t::mmu::rl3::{ Writes };
 use crate::spec_t::mmu::translation::{ MASK_NEG_DIRTY_ACCESS };
@@ -388,7 +388,7 @@ pub open spec fn step_TLBFill(pre: State, post: State, c: Constants, core: Core,
     &&& pre.happy
 
     &&& c.valid_core(core)
-    &&& vaddr < MAX_BASE
+    &&& vaddr < MAX_VIRTADDR
     &&& pre.pt_mem.pt_walk(vaddr).result() matches WalkResult::Valid { vbase, pte }
 
     &&& post == State {

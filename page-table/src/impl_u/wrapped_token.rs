@@ -11,7 +11,7 @@ use crate::spec_t::os_ext;
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::defs::{
     aligned, bit, candidate_mapping_overlaps_existing_vmem, WORD_SIZE,
-    bitmask_inc, x86_arch_spec, x86_arch_spec_upper_bound, MAX_BASE, align_to_usize
+    bitmask_inc, x86_arch_spec, x86_arch_spec_upper_bound, MAX_VIRTADDR, align_to_usize
 };
 use crate::spec_t::mmu::defs::{
     Flags, MemRegionExec, MemRegion, PTE, MAX_PHYADDR, L0_ENTRY_SIZE, L1_ENTRY_SIZE, L2_ENTRY_SIZE,
@@ -92,7 +92,7 @@ impl WrappedTokenView {
             &&& self.pt_mem.is_base_pt_walk(vaddr as usize)
         } by {
             x86_arch_spec_upper_bound();
-            assert_by_contradiction!(vaddr < MAX_BASE, {
+            assert_by_contradiction!(vaddr < MAX_VIRTADDR, {
                 assert_by_contradiction!(!PT::interp(self, pt).interp().contains_key(vaddr), {
                     broadcast use crate::impl_u::l2_impl::PT::lemma_inv_implies_interp_inv;
                     PT::interp(self, pt).lemma_interp_aux_between(0, vaddr, PT::interp(self, pt).interp()[vaddr]);

@@ -14,7 +14,7 @@ use crate::spec_t::mmu::*;
 use crate::spec_t::mmu::pt_mem::*;
 use crate::spec_t::mmu::defs::{ bit, Core, bitmask_inc, MemOp, LoadResult, PTE, Vpn, Paddr, Vaddr, Pcid, Cr3 };
 #[cfg(verus_keep_ghost)]
-use crate::spec_t::mmu::defs::{ aligned, update_range, MAX_BASE };
+use crate::spec_t::mmu::defs::{ aligned, update_range, MAX_VIRTADDR };
 use crate::spec_t::mmu::translation::{ l0_bits, l1_bits, l2_bits, l3_bits, MASK_DIRTY_ACCESS };
 
 verus! {
@@ -690,7 +690,7 @@ pub closed spec fn step_WalkInit(pre: State, post: State, c: Constants, core: Co
 
     &&& c.valid_core(core)
     &&& aligned(vaddr as nat, 8)
-    &&& vaddr < MAX_BASE
+    &&& vaddr < MAX_VIRTADDR
 
     &&& post == State {
         cores: pre.cores.insert(core, pre.cores[core].walks_insert(walk)),

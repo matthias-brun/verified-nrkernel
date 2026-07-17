@@ -4,7 +4,7 @@ use crate::Cr3RegVal;
 use crate::theorem::RLbl;
 use crate::spec_t::mmu::defs::{ PageTableEntryExec, MemRegionExec, Flags, MemRegion };
 #[cfg(verus_keep_ghost)]
-use crate::spec_t::mmu::defs::{ candidate_mapping_overlaps_existing_vmem, MAX_BASE, x86_arch_spec, x86_arch_spec_upper_bound };
+use crate::spec_t::mmu::defs::{ candidate_mapping_overlaps_existing_vmem, MAX_VIRTADDR, x86_arch_spec, x86_arch_spec_upper_bound };
 use crate::spec_t::os_ext;
 use crate::spec_t::mmu;
 #[cfg(verus_keep_ghost)]
@@ -41,7 +41,7 @@ impl CodeVC for PTImpl {
 
         proof {
             x86_arch_spec_upper_bound();
-            assert(vaddr < MAX_BASE);
+            assert(vaddr < MAX_VIRTADDR);
             assert(x86_arch_spec.contains_entry_size_at_index_atleast(pte.frame.size as nat, 1)) by {
                 assert(x86_arch_spec.entry_size(1) == crate::spec_t::mmu::defs::L1_ENTRY_SIZE);
                 assert(x86_arch_spec.entry_size(2) == crate::spec_t::mmu::defs::L2_ENTRY_SIZE);
@@ -108,7 +108,7 @@ impl CodeVC for PTImpl {
 
         proof {
             x86_arch_spec_upper_bound();
-            assert(vaddr < MAX_BASE);
+            assert(vaddr < MAX_VIRTADDR);
             assert(x86_arch_spec.entry_size(1) == crate::spec_t::mmu::defs::L1_ENTRY_SIZE);
             assert(x86_arch_spec.entry_size(2) == crate::spec_t::mmu::defs::L2_ENTRY_SIZE);
             assert(x86_arch_spec.entry_size(3) == crate::spec_t::mmu::defs::L3_ENTRY_SIZE);
@@ -162,7 +162,7 @@ impl CodeVC for PTImpl {
 
         proof {
             x86_arch_spec_upper_bound();
-            assert(vaddr < MAX_BASE);
+            assert(vaddr < MAX_VIRTADDR);
             assert(x86_arch_spec.entry_size(1) == crate::spec_t::mmu::defs::L1_ENTRY_SIZE);
             assert(x86_arch_spec.entry_size(2) == crate::spec_t::mmu::defs::L2_ENTRY_SIZE);
             assert(x86_arch_spec.entry_size(3) == crate::spec_t::mmu::defs::L3_ENTRY_SIZE);

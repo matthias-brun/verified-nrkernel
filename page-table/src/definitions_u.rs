@@ -5,7 +5,7 @@ use crate::spec_t::mmu::defs::{
 };
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::defs::{
-    axiom_max_phyaddr_width_facts, aligned, new_seq, MAX_BASE, X86_MAX_ENTRY_SIZE, x86_arch_spec,
+    axiom_max_phyaddr_width_facts, aligned, new_seq, MAX_VIRTADDR, X86_MAX_ENTRY_SIZE, x86_arch_spec,
 };
 
 verus! {
@@ -50,10 +50,10 @@ pub spec const permissive_flags: Flags = Flags {
 pub proof fn overflow_bounds()
     ensures
         X86_MAX_ENTRY_SIZE * (X86_NUM_ENTRIES + 1) < 0x10000000000000000,
-        MAX_BASE + X86_MAX_ENTRY_SIZE * (X86_NUM_ENTRIES + 1) < 0x10000000000000000,
+        MAX_VIRTADDR + X86_MAX_ENTRY_SIZE * (X86_NUM_ENTRIES + 1) < 0x10000000000000000,
 {
     assert(X86_MAX_ENTRY_SIZE * (X86_NUM_ENTRIES + 1) < 0x10000000000000000) by (nonlinear_arith);
-    assert(MAX_BASE + X86_MAX_ENTRY_SIZE * (X86_NUM_ENTRIES + 1) < 0x10000000000000000) by (nonlinear_arith);
+    assert(MAX_VIRTADDR + X86_MAX_ENTRY_SIZE * (X86_NUM_ENTRIES + 1) < 0x10000000000000000) by (nonlinear_arith);
 }
 
 // Architecture
@@ -143,7 +143,7 @@ impl ArchExec {
         requires
             self@.inv(),
             layer < self@.layers.len(),
-            base <= MAX_BASE,
+            base <= MAX_VIRTADDR,
             idx <= X86_NUM_ENTRIES,
         ensures
             res == self@.entry_base(layer as nat, base as nat, idx as nat)
@@ -160,7 +160,7 @@ impl ArchExec {
         requires
             self@.inv(),
             layer < self@.layers.len(),
-            base <= MAX_BASE,
+            base <= MAX_VIRTADDR,
             idx <= X86_NUM_ENTRIES,
         ensures
             res == self@.next_entry_base(layer as nat, base as nat, idx as nat)
@@ -174,10 +174,10 @@ impl ArchExec {
         }
         let offset = (idx + 1) * self.entry_size(layer);
         proof {
-            assert(base + offset <= MAX_BASE + X86_MAX_ENTRY_SIZE * (X86_NUM_ENTRIES + 1)) by (nonlinear_arith)
+            assert(base + offset <= MAX_VIRTADDR + X86_MAX_ENTRY_SIZE * (X86_NUM_ENTRIES + 1)) by (nonlinear_arith)
                 requires
                     0 <= offset <= X86_MAX_ENTRY_SIZE * (X86_NUM_ENTRIES + 1),
-                    0 <= base <= MAX_BASE,
+                    0 <= base <= MAX_VIRTADDR,
                 {};
         }
         base + offset

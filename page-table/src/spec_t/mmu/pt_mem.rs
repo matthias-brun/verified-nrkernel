@@ -10,7 +10,7 @@ use crate::spec_t::mmu::translation::{
 use crate::spec_t::mmu::defs::{ PTE, bitmask_inc, WORD_SIZE, bit, PAGE_SIZE,
 L0_ENTRY_SIZE, L1_ENTRY_SIZE, L2_ENTRY_SIZE, L3_ENTRY_SIZE };
 #[cfg(verus_keep_ghost)]
-use crate::spec_t::mmu::defs::MAX_BASE;
+use crate::spec_t::mmu::defs::MAX_VIRTADDR;
 use crate::spec_t::mmu::{ Walk, WalkResult };
 
 verus! {
@@ -214,7 +214,7 @@ impl PTMem {
     }
 
     pub open spec fn is_base_pt_walk(self, vaddr: usize) -> bool {
-        &&& vaddr < MAX_BASE
+        &&& vaddr < MAX_VIRTADDR
         &&& self.pt_walk(vaddr).result() matches WalkResult::Valid { vbase, pte }
         &&& vbase == vaddr
     }
