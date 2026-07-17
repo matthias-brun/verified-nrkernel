@@ -859,8 +859,10 @@ pub proof fn next_step_mmu_preserves_inv_tlb(
     let mmu_step = choose|step| rl1::next_step(s1.mmu@, s2.mmu@, c.common, step, mmu::Lbl::Tau);
     assert(s2.interp_pt_mem().dom().union(s2.unmap_vaddr_set())
         =~= s1.interp_pt_mem().dom().union(s1.unmap_vaddr_set()));
+
     match mmu_step {
         rl1::Step::TLBFill { core, vaddr } => {
+            assert(rl1::next_step(s1.mmu@, s2.mmu@, c.common,rl1::Step::TLBFill { core, vaddr }, mmu::Lbl::Tau));
             let vbase = s1.mmu@.pt_mem.pt_walk(vaddr).result()->Valid_vbase;
             crate::spec_t::mmu::rl2::lemma_pt_walk_result_vbase_equal(s1.mmu@.pt_mem, vaddr);
             assert(s2.shootdown_cores_valid(c));
