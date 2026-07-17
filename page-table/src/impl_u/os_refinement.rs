@@ -12,7 +12,7 @@ use crate::spec_t::mmu::defs::{
     candidate_mapping_in_bounds_pmem,
     candidate_mapping_overlaps_existing_pmem,
     candidate_mapping_overlaps_existing_vmem, overlap,
-    MAX_BASE, MemRegion, PTE, Core,
+    MAX_VIRTADDR, MemRegion, PTE, Core,
     L1_ENTRY_SIZE, L2_ENTRY_SIZE, L3_ENTRY_SIZE,
     aligned,
 };
@@ -2088,7 +2088,7 @@ proof fn relevant_mem_preserved(c: os::Constants, s1: os::State, s2: os::State)
 
         bounds_applied_mappings(c, s1);
         x86_arch_spec_upper_bound();
-        assert(mem_vaddr < MAX_BASE);
+        assert(mem_vaddr < MAX_VIRTADDR);
     }
 }
 

@@ -9,7 +9,7 @@ use crate::spec_t::mmu::defs::{
 };
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::defs::{ between, aligned, new_seq, x86_arch_spec,
-axiom_max_phyaddr_width_facts, MAX_BASE, candidate_mapping_overlaps_existing_vmem, lemma_x86_arch_spec_inv, overlap };
+axiom_max_phyaddr_width_facts, MAX_VIRTADDR, candidate_mapping_overlaps_existing_vmem, lemma_x86_arch_spec_inv, overlap };
 #[cfg(verus_keep_ghost)]
 use crate::definitions_u::{ lemma_new_seq };
 use crate::definitions_u::{ aligned_exec };
@@ -1371,7 +1371,7 @@ proof fn lemma_no_empty_directories_implies_interp_at_no_empty_directories(tok: 
 //        inv_at(mem, pt, layer as nat, ptr),
 //        interp_at(mem, pt, layer as nat, ptr, base as nat).inv(),
 //        interp_at(mem, pt, layer as nat, ptr, base as nat).interp().accepted_resolve(vaddr as nat),
-//        base <= vaddr < MAX_BASE,
+//        base <= vaddr < MAX_VIRTADDR,
 //    ensures
 //        // Refinement of l1
 //        result_map_ok(res, |v: (usize, PageTableEntryExec)| (v.0 as nat, v.1@)) === interp_at(mem, pt, layer as nat, ptr, base as nat).resolve(vaddr as nat),
@@ -1444,7 +1444,7 @@ proof fn lemma_no_empty_directories_implies_interp_at_no_empty_directories(tok: 
 //        inv(mem, pt),
 //        interp(mem, pt).inv(),
 //        interp(mem, pt).interp().accepted_resolve(vaddr as nat),
-//        vaddr < MAX_BASE,
+//        vaddr < MAX_VIRTADDR,
 //    ensures
 //        // Refinement of l1
 //        result_map_ok(res, |v: (usize, PageTableEntryExec)| (v.0 as nat, v.1@)) === interp(mem, pt).resolve(vaddr as nat),
@@ -1503,7 +1503,7 @@ fn map_frame_aux(
         no_empty_directories(old(tok)@, pt, layer as nat, ptr),
         aligned(base as nat, x86_arch_spec.entry_size(layer as nat)),
         accepted_mapping(vaddr as nat, pte@, layer as nat, base as nat),
-        base <= vaddr < MAX_BASE,
+        base <= vaddr < MAX_VIRTADDR,
         candidate_mapping_overlaps_existing_vmem(interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp(), vaddr as nat, pte@)
             <==> candidate_mapping_overlaps_existing_vmem(interp_to_l0(old(tok)@, rebuild_root_pt(pt, iset![])), vaddr as nat, pte@),
         // When we fully recursed and insert the actual entry, to take the corresponding OSSM step
@@ -2255,7 +2255,7 @@ pub fn map_frame(Tracked(tok): Tracked<&mut WrappedMapToken>, pt: &mut Ghost<PTD
         //old(tok)@.alloc_available_pages() >= 3,
         accepted_mapping(vaddr as nat, pte@, 0, 0),
         //interp(old(tok)@, old(pt)@).accepted_mapping(vaddr as nat, pte@),
-        vaddr < MAX_BASE,
+        vaddr < MAX_VIRTADDR,
         pml4 == old(tok)@.pt_mem.pml4,
         old(tok)@.args == (OpArgs::Map { base: vaddr, pte: pte@ }),
     ensures
@@ -2858,7 +2858,7 @@ fn unmap_aux(
         no_empty_directories(old(tok)@, pt, layer as nat, ptr),
         accepted_unmap(vaddr as nat, layer as nat, base as nat),
         aligned(base as nat, x86_arch_spec.entry_size(layer as nat)),
-        base <= vaddr < MAX_BASE,
+        base <= vaddr < MAX_VIRTADDR,
         interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp().contains_key(vaddr as nat)
             <==> interp_to_l0(old(tok)@, rebuild_root_pt(pt, iset![])).contains_key(vaddr as nat),
         forall|tok_new, pt_new, removed_regions|
@@ -2883,6 +2883,7 @@ fn unmap_aux(
     ensures
         final(tok).inv(),
         final(tok)@.pt_mem.pml4 == old(tok)@.pt_mem.pml4,
+        final(tok)@.orig_st.mmu@.cr3 == old(tok)@.orig_st.mmu@.cr3,
         match res {
             Ok(resv) => {
                 let (pt_res, removed_regions) = resv@;
@@ -3340,7 +3341,7 @@ pub fn unmap(Tracked(tok): Tracked<&mut WrappedUnmapToken>, pt: &mut Ghost<PTDir
         inv_and_nonempty(old(tok)@, old(pt)@),
         old(tok).inv(),
         accepted_unmap(vaddr as nat, 0, 0),
-        vaddr < MAX_BASE,
+        vaddr < MAX_VIRTADDR,
         pml4 == old(tok)@.pt_mem.pml4,
         old(tok)@.args == (OpArgs::Unmap { base: vaddr }),
     ensures
@@ -3357,6 +3358,7 @@ pub fn unmap(Tracked(tok): Tracked<&mut WrappedUnmapToken>, pt: &mut Ghost<PTDir
             },
         },
         final(tok).inv(),
+        final(tok)@.orig_st.mmu@.cr3 == old(tok)@.orig_st.mmu@.cr3,
 {
     let ghost rebuild_root_pt = |pt_new, removed_regions| pt_new;
     match unmap_aux(Tracked(tok), *pt, 0, pml4, 0, vaddr, frame, Ghost(rebuild_root_pt)) {
@@ -3405,7 +3407,7 @@ fn protect_aux(
         no_empty_directories(old(tok)@, pt, layer as nat, ptr),
         accepted_protect(vaddr as nat, layer as nat, base as nat),
         aligned(base as nat, x86_arch_spec.entry_size(layer as nat)),
-        base <= vaddr < MAX_BASE,
+        base <= vaddr < MAX_VIRTADDR,
         interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp().contains_key(vaddr as nat)
              <==> interp_to_l0(old(tok)@, root_pt).contains_key(vaddr as nat),
         interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp().contains_key(vaddr as nat)
@@ -3427,6 +3429,7 @@ fn protect_aux(
     ensures
         final(tok).inv(),
         final(tok)@.pt_mem.pml4 == old(tok)@.pt_mem.pml4,
+        final(tok)@.orig_st.mmu@.cr3 == old(tok)@.orig_st.mmu@.cr3,
         match res {
             Ok(_) => {
                 &&& final(tok)@.regions.dom() == old(tok)@.regions.dom()
@@ -3729,7 +3732,7 @@ pub fn protect(Tracked(tok): Tracked<&mut WrappedProtectToken>, pt: &mut Ghost<P
         inv_and_nonempty(old(tok)@, old(pt)@),
         old(tok).inv(),
         accepted_protect(vaddr as nat, 0, 0),
-        vaddr < MAX_BASE,
+        vaddr < MAX_VIRTADDR,
         pml4 == old(tok)@.pt_mem.pml4,
         old(tok)@.args == (OpArgs::Protect { base: vaddr, flags: *permissions }),
     ensures
@@ -3746,6 +3749,7 @@ pub fn protect(Tracked(tok): Tracked<&mut WrappedProtectToken>, pt: &mut Ghost<P
             },
         },
         final(tok).inv(),
+        final(tok)@.orig_st.mmu@.cr3 == old(tok)@.orig_st.mmu@.cr3,
 {
     if let Ok(_) = protect_aux(Tracked(tok), *pt, *pt, 0, pml4, 0, vaddr, permissions) {
         assert(inv_and_nonempty(tok@, pt@));

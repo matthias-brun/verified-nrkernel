@@ -123,7 +123,7 @@ pub const PAGE_SIZE: usize = 4096;
 
 pub spec const X86_MAX_ENTRY_SIZE: nat = 512 * 512 * 512 * 4096;
 
-pub spec const MAX_BASE: nat = X86_MAX_ENTRY_SIZE * (X86_NUM_ENTRIES as nat);
+pub spec const MAX_VIRTADDR: nat = X86_MAX_ENTRY_SIZE * (X86_NUM_ENTRIES as nat);
 
 pub const L3_ENTRY_SIZE: usize = PAGE_SIZE;
 
@@ -490,10 +490,10 @@ pub spec const x86_arch_spec: Arch = Arch {
 pub proof fn x86_arch_spec_upper_bound()
     ensures
         x86_arch_spec.upper_vaddr(0, 0) == 512 * 512 * 1024 * 1024 * 1024,
-        x86_arch_spec.upper_vaddr(0, 0) == MAX_BASE
+        x86_arch_spec.upper_vaddr(0, 0) == MAX_VIRTADDR
 {
     assert(x86_arch_spec.upper_vaddr(0, 0) == 512 * 512 * 1024 * 1024 * 1024) by (compute_only);
-    assert(x86_arch_spec.upper_vaddr(0, 0) == MAX_BASE) by (compute_only);
+    assert(x86_arch_spec.upper_vaddr(0, 0) == MAX_VIRTADDR) by (compute_only);
 }
 
 pub proof fn lemma_x86_arch_spec_inv()

@@ -7,7 +7,7 @@ use crate::extra::lemma_bits_misc;
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::defs::{
     candidate_mapping_overlaps_existing_vmem, overlap, MemRegion, PTE, Core, X86_NUM_ENTRIES,
-    new_seq, aligned, MAX_BASE, x86_arch_spec_upper_bound, candidate_mapping_in_bounds_pmem,
+    new_seq, aligned, MAX_VIRTADDR, x86_arch_spec_upper_bound, candidate_mapping_in_bounds_pmem,
     L1_ENTRY_SIZE, L2_ENTRY_SIZE, L3_ENTRY_SIZE, bit
 };
 use crate::spec_t::mmu::pt_mem::PTMem;
@@ -862,7 +862,7 @@ pub proof fn next_step_mmu_preserves_inv_tlb(
 
     match mmu_step {
         rl1::Step::TLBFill { core, vaddr } => {
-            assert(rl1::next_step(s1.mmu@, s2.mmu@, c.common,rl1::Step::TLBFill { core, vaddr }, mmu::Lbl::Tau));
+            // assert(rl1::next_step(s1.mmu@, s2.mmu@, c.common,rl1::Step::TLBFill { core, vaddr }, mmu::Lbl::Tau));
             let vbase = s1.mmu@.pt_mem.pt_walk(vaddr).result()->Valid_vbase;
             crate::spec_t::mmu::rl2::lemma_pt_walk_result_vbase_equal(s1.mmu@.pt_mem, vaddr);
             assert(s2.shootdown_cores_valid(c));
@@ -883,7 +883,7 @@ pub proof fn next_step_mmu_preserves_inv_tlb(
                     assert(s1.core_states[dispatcher].is_unmapping());
                     assert(shootdown_vaddr == s1.core_states[dispatcher].vaddr());
                     assert(!s2.interp_pt_mem().contains_key(shootdown_vaddr));
-                    assert(shootdown_vaddr < MAX_BASE);
+                    assert(shootdown_vaddr < MAX_VIRTADDR);
                     assert(!s2.mmu@.pt_mem@.contains_key(shootdown_vaddr as usize));
                     assert(!s1.mmu@.cores[handler].tlb.contains_key(shootdown_vaddr as usize));
                     if vbase == shootdown_vaddr {

@@ -32,7 +32,7 @@ proof fn program_1() {
     let c = Constants { thread_no: 4, phys_mem_size: 4096 * 4096 };
 
     let s1 = State {
-        mem: seq![arbitrary(); crate::spec_t::mmu::defs::MAX_BASE],
+        mem: seq![arbitrary(); crate::spec_t::mmu::defs::MAX_VIRTADDR],
         thread_state:
             imap![
             0 => ThreadState::Idle,
@@ -287,7 +287,7 @@ proof fn program_threads_4() {
     let c = Constants { thread_no: 5, phys_mem_size: 8_192_000 };
 
     let s1 = State {
-        mem: seq![arbitrary(); crate::spec_t::mmu::defs::MAX_BASE],
+        mem: seq![arbitrary(); crate::spec_t::mmu::defs::MAX_VIRTADDR],
         thread_state:
             imap![
             0 => ThreadState::Idle,
@@ -664,7 +664,7 @@ mod program_two {
             if !pending.contains(MapTransition::T1MapEnd) { imap![pte1_vaddr => pte1] } else { IMap::empty() }.union_prefer_right(
             if !pending.contains(MapTransition::T2MapEnd) { imap![pte2_vaddr => pte2] } else { IMap::empty() })
         )
-        &&& s.mem.len() == crate::spec_t::mmu::defs::MAX_BASE
+        &&& s.mem.len() == crate::spec_t::mmu::defs::MAX_VIRTADDR
     }
 
     proof fn map_next_ensures(
@@ -787,7 +787,7 @@ mod program_two {
         let c = Constants { thread_no: 2, phys_mem_size: 8_192_000 };
 
         let s1 = State {
-            mem: seq![arbitrary(); crate::spec_t::mmu::defs::MAX_BASE],
+            mem: seq![arbitrary(); crate::spec_t::mmu::defs::MAX_VIRTADDR],
             thread_state:
                 imap![
                 0 => ThreadState::Idle,
@@ -963,7 +963,7 @@ mod program_three {
         let c = Constants { thread_no: 1, phys_mem_size: 8_192_000 };
 
         let s1 = State {
-            mem: seq![arbitrary(); crate::spec_t::mmu::defs::MAX_BASE],
+            mem: seq![arbitrary(); crate::spec_t::mmu::defs::MAX_VIRTADDR],
             thread_state: imap![0 => ThreadState::Idle],
             mappings: IMap::empty(),
             sound: true,
@@ -1041,7 +1041,7 @@ mod program_four {
         let c = Constants { thread_no: 1, phys_mem_size: 8_192_000 };
 
         let s1 = State {
-            mem: seq![arbitrary(); crate::spec_t::mmu::defs::MAX_BASE],
+            mem: seq![arbitrary(); crate::spec_t::mmu::defs::MAX_VIRTADDR],
             thread_state: imap![0 => ThreadState::Idle],
             mappings: IMap::empty(),
             sound: true,

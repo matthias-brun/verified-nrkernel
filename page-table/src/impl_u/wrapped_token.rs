@@ -11,7 +11,7 @@ use crate::spec_t::os_ext;
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::defs::{
     aligned, bit, candidate_mapping_overlaps_existing_vmem, WORD_SIZE,
-    bitmask_inc, x86_arch_spec, x86_arch_spec_upper_bound, MAX_BASE, align_to_usize
+    bitmask_inc, x86_arch_spec, x86_arch_spec_upper_bound, MAX_VIRTADDR, align_to_usize
 };
 use crate::spec_t::mmu::defs::{
     Flags, MemRegionExec, MemRegion, PTE, MAX_PHYADDR, L0_ENTRY_SIZE, L1_ENTRY_SIZE, L2_ENTRY_SIZE,
@@ -92,7 +92,7 @@ impl WrappedTokenView {
             &&& self.pt_mem.is_base_pt_walk(vaddr as usize)
         } by {
             x86_arch_spec_upper_bound();
-            assert_by_contradiction!(vaddr < MAX_BASE, {
+            assert_by_contradiction!(vaddr < MAX_VIRTADDR, {
                 assert_by_contradiction!(!PT::interp(self, pt).interp().contains_key(vaddr), {
                     broadcast use crate::impl_u::l2_impl::PT::lemma_inv_implies_interp_inv;
                     PT::interp(self, pt).lemma_interp_aux_between(0, vaddr, PT::interp(self, pt).interp()[vaddr]);
@@ -1199,6 +1199,7 @@ impl WrappedUnmapToken {
         &&& self.tok.steps()[0]->UnmapEnd_thread_id == self.tok.thread()
         &&& self.tok.steps()[0]->UnmapEnd_vaddr <= usize::MAX
         &&& self.orig_st.core_states[self.tok.core()]->UnmapExecuting_vaddr == self.tok.steps()[0]->UnmapEnd_vaddr
+        &&& self.tok.st().mmu@.cr3 == self.orig_st.mmu@.cr3
         &&& if self.change_made {
             &&& self.tok.st().core_states[self.tok.core()] matches os::CoreState::UnmapExecuting { vaddr, ult_id, result: Some(Ok(pte)) }
             &&& vaddr == self.tok.steps()[0]->UnmapEnd_vaddr
@@ -1490,7 +1491,8 @@ impl WrappedUnmapToken {
         requires
             (if shootdown is Yes {
                 &&& tok@.change_made
-                &&& shootdown->Yes_vaddr == tok@.args->Unmap_base
+                &&& shootdown->Yes_vaddr.vaddr() == tok@.args->Unmap_base
+                &&& shootdown->Yes_vaddr.pcid() == tok@.orig_st.mmu@.cr3.pcid
             } else {
                 &&& !tok@.change_made
                 &&& PT::inv(tok@, root_pt)
@@ -1545,8 +1547,8 @@ impl WrappedUnmapToken {
 
             let tracked mut osext_tok = tok.tok.get_osext_token();
             proof {
-                osext_tok.prophesy_init_shootdown(vaddr);
-                let new_cs = os::CoreState::UnmapShootdownWaiting { ult_id: tok.tok.thread(), vaddr: vaddr as nat, result: result->Some_0 };
+                osext_tok.prophesy_init_shootdown(vaddr.pcid(), vaddr.vaddr());
+                let new_cs = os::CoreState::UnmapShootdownWaiting { ult_id: tok.tok.thread(), vaddr: vaddr.vaddr() as nat, result: result->Some_0 };
                 let post = os::State {
                     core_states: tok.tok.st().core_states.insert(core, new_cs),
                     os_ext: osext_tok.post(),
@@ -1576,7 +1578,7 @@ impl WrappedUnmapToken {
 
             let tracked mut mmu_tok = tok.tok.get_mmu_token();
             proof {
-                mmu_tok.prophesy_invlpg(vaddr);
+                mmu_tok.prophesy_invlpg(vaddr.vaddr());
                 let post = os::State {
                     mmu: mmu_tok.post(),
                     ..tok.tok.st()
@@ -1591,7 +1593,7 @@ impl WrappedUnmapToken {
             }
 
             // Execute invlpg to evict from local TLB
-            mmu::rl3::code::invlpg(Tracked(&mut mmu_tok), vaddr);
+            mmu::rl3::code::invlpg(Tracked(&mut mmu_tok), vaddr.vaddr_val());
             let ghost state6 = tok.tok.st();
 
             proof {
@@ -1611,12 +1613,12 @@ impl WrappedUnmapToken {
                 };
                 assert(os_ext::next(tok.tok.st().os_ext, post.os_ext, tok.tok.consts().common, osext_tok.lbl()));
                 assert(!tok.tok.st().mmu@.writes.nonpos.contains(core));
-                assert(!tok.tok.st().mmu@.cores[core].tlb.contains_key(vaddr)) by {
+                assert(!tok.tok.st().mmu@.cores[core].tlb.contains_key(vaddr.vaddr())) by {
                     assert(tok.tok.st().core_states[core] is UnmapShootdownWaiting);
-                    assert(vaddr == tok.tok.st().core_states[core]->UnmapShootdownWaiting_vaddr);
+                    assert(vaddr.vaddr() == tok.tok.st().core_states[core]->UnmapShootdownWaiting_vaddr);
                     assert(state6.os_ext.shootdown_vec.open_requests.contains(core));
                     broadcast use to_rl1::next_refines;
-                    assert(!state6.mmu@.cores[core].tlb.contains_key(vaddr));
+                    assert(!state6.mmu@.cores[core].tlb.contains_key(vaddr.vaddr()));
                 };
                 let lbl = RLbl::AckShootdownIPI { core: tok.tok.core() };
                 assert(os::step_AckShootdownIPI(tok.tok.consts(), tok.tok.st(), post, core, lbl));
@@ -1809,6 +1811,7 @@ impl WrappedProtectToken {
         &&& self.tok.steps()[0]->ProtectEnd_thread_id == self.tok.thread()
         &&& self.tok.steps()[0]->ProtectEnd_vaddr <= usize::MAX
         &&& self.orig_st.core_states[self.tok.core()]->ProtectExecuting_vaddr == self.tok.steps()[0]->ProtectEnd_vaddr
+        &&& self.tok.st().mmu@.cr3 == self.orig_st.mmu@.cr3
         &&& if self.change_made {
             &&& self.tok.st().core_states[self.tok.core()] matches os::CoreState::ProtectExecuting { vaddr, flags, ult_id, result: Some(Ok(pte)) }
             &&& vaddr == self.tok.steps()[0]->ProtectEnd_vaddr
@@ -2002,7 +2005,8 @@ impl WrappedProtectToken {
         requires
             (if shootdown is Yes {
                 &&& tok@.change_made
-                &&& shootdown->Yes_vaddr == tok@.args->Protect_base
+                &&& shootdown->Yes_vaddr.vaddr() == tok@.args->Protect_base
+                &&& shootdown->Yes_vaddr.pcid() == tok@.orig_st.mmu@.cr3.pcid
             } else {
                 &&& !tok@.change_made
                 &&& PT::inv(tok@, root_pt)
@@ -2058,8 +2062,8 @@ impl WrappedProtectToken {
 
             let tracked mut osext_tok = tok.tok.get_osext_token();
             proof {
-                osext_tok.prophesy_init_shootdown(vaddr);
-                let new_cs = os::CoreState::ProtectShootdownWaiting { ult_id: tok.tok.thread(), vaddr: vaddr as nat, flags, result: result->Some_0 };
+                osext_tok.prophesy_init_shootdown(vaddr.pcid(), vaddr.vaddr());
+                let new_cs = os::CoreState::ProtectShootdownWaiting { ult_id: tok.tok.thread(), vaddr: vaddr.vaddr() as nat, flags, result: result->Some_0 };
                 let post = os::State {
                     core_states: tok.tok.st().core_states.insert(core, new_cs),
                     os_ext: osext_tok.post(),
@@ -2089,7 +2093,7 @@ impl WrappedProtectToken {
 
             let tracked mut mmu_tok = tok.tok.get_mmu_token();
             proof {
-                mmu_tok.prophesy_invlpg(vaddr);
+                mmu_tok.prophesy_invlpg(vaddr.vaddr());
                 let post = os::State {
                     mmu: mmu_tok.post(),
                     ..tok.tok.st()
@@ -2104,7 +2108,7 @@ impl WrappedProtectToken {
             }
 
             // Execute invlpg to evict from local TLB
-            mmu::rl3::code::invlpg(Tracked(&mut mmu_tok), vaddr);
+            mmu::rl3::code::invlpg(Tracked(&mut mmu_tok), vaddr.vaddr_val());
             let ghost state6 = tok.tok.st();
 
             proof {
@@ -2239,7 +2243,7 @@ impl WrappedProtectToken {
 
 
 pub enum DoShootdown {
-    Yes { vaddr: usize },
+    Yes { vaddr: os_ext::code::VirtAddr },
     No,
 }
 
@@ -2262,6 +2266,7 @@ pub exec fn start_unmap_and_acquire_lock(Tracked(tok): Tracked<&mut Token>, Ghos
         final(tok).st().os_ext.lock == Some(final(tok).core()),
         final(tok).st().inv(final(tok).consts()),
         final(tok).st().mmu@.pt_mem.pml4 == old(tok).st().mmu@.pt_mem.pml4,
+        final(tok).st().mmu@.cr3 == old(tok).st().mmu@.cr3,
         final(tok).consts() == old(tok).consts(),
         final(tok).steps() == old(tok).steps().drop_first(),
         final(tok).steps_taken() == seq![old(tok).steps().first()],
@@ -2350,6 +2355,7 @@ pub exec fn start_protect_and_acquire_lock(Tracked(tok): Tracked<&mut Token>, Gh
         final(tok).st().os_ext.lock == Some(final(tok).core()),
         final(tok).st().inv(final(tok).consts()),
         final(tok).st().mmu@.pt_mem.pml4 == old(tok).st().mmu@.pt_mem.pml4,
+        final(tok).st().mmu@.cr3 == old(tok).st().mmu@.cr3,
         final(tok).consts() == old(tok).consts(),
         final(tok).steps() == old(tok).steps().drop_first(),
         final(tok).steps_taken() == seq![old(tok).steps().first()],

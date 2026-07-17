@@ -14,13 +14,14 @@ use crate::spec_t::mmu::defs::{
 use crate::spec_t::mmu::defs::{
     aligned, between, candidate_mapping_in_bounds, candidate_mapping_overlaps_existing_pmem,
     candidate_mapping_in_bounds_pmem,
-    candidate_mapping_overlaps_existing_vmem, overlap, x86_arch_spec, MAX_BASE
+    candidate_mapping_overlaps_existing_vmem, overlap, x86_arch_spec, MAX_VIRTADDR
 };
 use crate::theorem::RLbl;
 use crate::spec_t::os_ext;
 use crate::impl_u::{ wrapped_token, l2_impl::PT };
 
 use super::mmu::defs::InvPcidDescriptor;
+use super::os_ext::code::VirtAddr;
 
 verus! {
 
@@ -296,7 +297,7 @@ pub open spec fn step_InvPcid(c: Constants, s1: State, s2: State, core: Core, lb
     &&& s1.os_ext.shootdown_vec.open_requests.contains(core)
 
     // mmu statemachine steps
-    &&& rl3::next(s1.mmu, s2.mmu, c.common, mmu::Lbl::InvPcid(core, InvPcidType::IndividualAddress(InvPcidDescriptor{ pcid: s1.mmu@.cr3.pcid, vaddr: s1.os_ext.shootdown_vec.vaddr as usize})))
+    &&& rl3::next(s1.mmu, s2.mmu, c.common, mmu::Lbl::InvPcid(core, InvPcidType::IndividualAddress(InvPcidDescriptor{ pcid: s1.os_ext.shootdown_vec.pcid, vaddr: s1.os_ext.shootdown_vec.vaddr})))
     &&& s2.mmu@.happy == s1.mmu@.happy
 
     &&& s2.os_ext == s1.os_ext
@@ -607,7 +608,7 @@ pub open spec fn step_UnmapInitiateShootdown(c: Constants, s1: State, s2: State,
     &&& s1.mmu@.writes.tso === iset![]
     // mmu statemachine steps
     &&& s2.mmu == s1.mmu
-    &&& os_ext::next(s1.os_ext, s2.os_ext, c.common, os_ext::Lbl::InitShootdown { core, vaddr })
+    &&& os_ext::next(s1.os_ext, s2.os_ext, c.common, os_ext::Lbl::InitShootdown { core, pcid: s1.mmu@.cr3.pcid, vaddr: vaddr as usize })
     // new state
     &&& s2.core_states == s1.core_states.insert(
         core,
@@ -773,7 +774,7 @@ pub open spec fn step_ProtectInitiateShootdown(c: Constants, s1: State, s2: Stat
     &&& s1.mmu@.writes.tso === iset![]
     // mmu statemachine steps
     &&& s2.mmu == s1.mmu
-    &&& os_ext::next(s1.os_ext, s2.os_ext, c.common, os_ext::Lbl::InitShootdown { core, vaddr })
+    &&& os_ext::next(s1.os_ext, s2.os_ext, c.common, os_ext::Lbl::InitShootdown { core, pcid: s1.mmu@.cr3.pcid, vaddr: vaddr as usize })
     // new state
     &&& s2.core_states == s1.core_states.insert(
         core,
@@ -1172,7 +1173,7 @@ impl State {
 
     pub open spec fn vmem_apply_mappings(applied_mappings: IMap<nat, PTE>, phys_mem: Seq<u8>) -> Seq<u8> {
         Seq::new(
-            MAX_BASE,
+            MAX_VIRTADDR,
             |vaddr: int| {
                 if Self::has_base_and_pte_for_vaddr(applied_mappings, vaddr) {
                     let (base, pte) = Self::base_and_pte_for_vaddr(applied_mappings, vaddr);
@@ -1636,10 +1637,11 @@ impl State {
     ///////////////////////////////////////////////////////////////////////////////////////////////
     pub open spec fn inv_tlb_wf(self, c: Constants) -> bool {
         forall|core| #![auto] c.valid_core(core) && !(self.core_states[core] is Idle)
-            ==> self.core_states[core].vaddr() < MAX_BASE
+            ==> self.core_states[core].vaddr() < MAX_VIRTADDR
     }
 
     pub open spec fn inv_shootdown_wf(self, c: Constants) -> bool {
+        // TODO: add a condition here on the PCID?
         forall|dispatcher: Core| (#[trigger] c.valid_core(dispatcher) && self.core_states[dispatcher].is_in_shootdown())
         ==> self.core_states[dispatcher].shootdown_vaddr() == self.os_ext.shootdown_vec.vaddr
     }
@@ -1930,8 +1932,8 @@ impl Step {
             Step::MemOp { core }                         => mmu::Lbl::MemOp(core, lbl->MemOp_vaddr as usize, lbl->MemOp_op),
             Step::ReadPTMem { core, paddr, value }       => mmu::Lbl::Read(core, paddr, value),
             Step::Barrier { core }                       => mmu::Lbl::Barrier(core),
-            Step::Invlpg { core }                        => mmu::Lbl::Invlpg(core, pre.os_ext.shootdown_vec.vaddr as usize),
-            Step::InvPcid { core }                       => mmu::Lbl::InvPcid(core, InvPcidType::IndividualAddress(InvPcidDescriptor{ pcid: pre.mmu@.cr3.pcid, vaddr: pre.os_ext.shootdown_vec.vaddr as usize})),
+            Step::Invlpg { core }                        => mmu::Lbl::Invlpg(core, pre.os_ext.shootdown_vec.vaddr),
+            Step::InvPcid { core }                       => mmu::Lbl::InvPcid(core, InvPcidType::IndividualAddress(InvPcidDescriptor{ pcid: pre.os_ext.shootdown_vec.pcid, vaddr: pre.os_ext.shootdown_vec.vaddr})),
             // Step::ReloadCr3 { core }                     => mmu::Lbl::WriteCr3(core, pre.cr3, true),
             Step::MapOpStutter { core, paddr, value }    => mmu::Lbl::Write(core, paddr, value),
             Step::MapOpChange { core, paddr, value }     => mmu::Lbl::Write(core, paddr, value),

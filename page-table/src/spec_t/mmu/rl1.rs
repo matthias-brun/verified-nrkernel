@@ -2,7 +2,7 @@ use vstd::prelude::*;
 use crate::spec_t::mmu::*;
 use crate::spec_t::mmu::pt_mem::*;
 #[cfg(verus_keep_ghost)]
-use crate::spec_t::mmu::defs::{ aligned, LoadResult, update_range, MAX_BASE };
+use crate::spec_t::mmu::defs::{ aligned, LoadResult, update_range, MAX_VIRTADDR };
 use crate::spec_t::mmu::defs::{ PTE, Core, Paddr, Vaddr, Vpn };
 use crate::spec_t::mmu::rl3::{ Writes };
 use crate::spec_t::mmu::translation::{ MASK_NEG_DIRTY_ACCESS };
@@ -388,7 +388,7 @@ pub open spec fn step_TLBFill(pre: State, post: State, c: Constants, core: Core,
     &&& pre.happy
 
     &&& c.valid_core(core)
-    &&& vaddr < MAX_BASE
+    &&& vaddr < MAX_VIRTADDR
     &&& pre.pt_mem.pt_walk(vaddr).result() matches WalkResult::Valid { vbase, pte }
 
     &&& post == State {
@@ -459,6 +459,7 @@ pub open spec fn step_WriteNonneg(pre: State, post: State, c: Constants, lbl: Lb
     &&& pre.polarity is Mapping || pre.can_flip_polarity(c)
 
     &&& post.happy      == pre.happy
+    &&& post.cr3        == pre.cr3
     &&& post.phys_mem   == pre.phys_mem
     &&& post.pt_mem     == pre.pt_mem.write(addr, value)
     &&& post.cores      == pre.cores
@@ -486,6 +487,7 @@ pub open spec fn step_WriteNonpos(pre: State, post: State, c: Constants, lbl: Lb
     &&& pre.polarity is Unmapping || pre.can_flip_polarity(c)
 
     &&& post.happy      == pre.happy
+    &&& post.cr3        == pre.cr3
     &&& post.phys_mem   == pre.phys_mem
     &&& post.pt_mem     == pre.pt_mem.write(addr, value)
     &&& post.cores      == pre.cores
@@ -513,6 +515,7 @@ pub open spec fn step_WriteProtect(pre: State, post: State, c: Constants, lbl: L
     &&& pre.polarity is Protect || pre.can_flip_polarity(c)
 
     &&& post.happy      == pre.happy
+    &&& post.cr3        == pre.cr3
     &&& post.phys_mem   == pre.phys_mem
     &&& post.pt_mem     == pre.pt_mem.write(addr, value)
     &&& post.cores      == pre.cores
