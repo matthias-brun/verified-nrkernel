@@ -84,7 +84,7 @@ impl CoreState {
 
     /// Invariant
     pub open spec fn inv(self) -> bool {
-        &&& forall |walk| #[trigger]self.walks_contains(walk)
+        &&& forall |walk| #[trigger] self.walks_contains(walk)
             ==> Self::walk_valid(walk)
         &&& forall |pcid, walk| self.psc_contains_pcid(pcid, walk)
             ==> Self::walk_valid(walk)
@@ -321,12 +321,12 @@ pub enum CASProgress {
         core: Core,
         addr: Paddr, 
         expect: u64,
-        new_value: u64,
+        new: u64,
     },
     NextWrite {
         core: Core,
         addr: Paddr, 
-        new_value: u64,
+        new: u64,
     },
     Done {
         core: Core,
@@ -456,7 +456,6 @@ pub closed spec fn step_WriteCr3(pre: State, post: State, c: Constants, lbl: Lbl
             happy: pre.hist.happy && cr3 == pre.hist.cr3 && flush,
             // if there was a flush, then we clear the walks since last invlpg
             walks: if flush { pre.hist.walks.insert(core, iset![]) } else { pre.hist.walks },
-            pending_maps: if pre.lock matches Some(c) && c == core { imap![] } else { pre.hist.pending_maps },
             ..pre.hist
         },
         ..pre
@@ -486,7 +485,6 @@ pub closed spec fn step_Invlpg(pre: State, post: State, c: Constants, lbl: Lbl) 
     &&& post == State {
         hist: History {
             walks: pre.hist.walks.insert(core, iset![]),
-            pending_maps: if pre.lock matches Some(c) && c == core { imap![] } else { pre.hist.pending_maps },
             ..pre.hist
         },
         ..pre
@@ -545,8 +543,12 @@ pub closed spec fn step_InvPcid(pre: State, post: State, c: Constants, lbl: Lbl)
 
     &&& post == State {
         hist: History {
+            happy: pre.hist.happy && match typ {
+                InvPcidType::IndividualAddress(d) => { pre.hist.cr3.pcid == d.pcid }
+                InvPcidType::SingleContext(d) => { pre.hist.cr3.pcid == d.pcid },
+                _ => true
+            },
             walks: pre.hist.walks.insert(core, iset![]),
-            pending_maps: if pre.lock matches Some(c) && c == core { imap![] } else { pre.hist.pending_maps },
             ..pre.hist
         },
         ..pre
@@ -627,6 +629,7 @@ pub closed spec fn step_MemOpTLB(
         }
     }
 
+    &&& post.lock == pre.lock
     &&& post.pt_mem == pre.pt_mem
     &&& post.cores == pre.cores
     &&& post.hist == pre.hist
@@ -860,10 +863,6 @@ pub closed spec fn step_Barrier(pre: State, post: State, c: Constants, lbl: Lbl)
     &&& pre.cores[core].stbuf_empty()
 
     &&& post == State {
-        hist: History {
-            pending_maps: if pre.lock matches Some(c) && c == core { imap![] } else { pre.hist.pending_maps },
-            ..pre.hist
-        },
         ..pre
     }
 }
@@ -892,6 +891,10 @@ pub closed spec fn step_Unlock(pre: State, post: State, c: Constants, lbl: Lbl) 
 
     &&& post == State {
         lock: None,
+        hist: History {
+            pending_maps: imap![],
+            ..pre.hist
+        },
         ..pre
     }
 }
@@ -995,6 +998,10 @@ impl State {
             (#[trigger]self.cores[core].psc[pcid]).is_empty()
     }
 
+    pub closed spec fn inv_unlocked_stbuf_empty(self, c: Constants) -> bool {
+        forall|core| #[trigger] c.valid_core(core) && self.lock != Some(core) ==> self.cores[core].stbuf_empty()
+    }
+
     // pub closed spec fn inv_cache_no_other_entries(self, c: Constants) -> bool {
     //     forall |core, pcid| c.valid_core(core) && pcid != self.hist.cr3.pcid ==>
     //         self.cores[core].psc[pcid].is_empty()
@@ -1009,6 +1016,8 @@ impl State {
             &&& self.inv_walks_subset_of_hist_walks(c)
             &&& self.inv_cache_subset_of_hist_walks(c)
             &&& self.inv_cache_no_other_entries(c)
+            &&& self.inv_unlocked_stbuf_empty(c)
+            &&& self.lock is None ==> self.hist.pending_maps.is_empty()
         }
     }
 
@@ -1039,28 +1048,27 @@ pub proof fn next_preserves_inv(pre: State, post: State, c: Constants, lbl: Lbl)
     if post.hist.happy {
         let step = choose|step| next_step(pre, post, c, step, lbl);
         match step {
-            // Step::Invlpg                       => {}
-            // Step::InvPcid                      => {            }
-            // Step::WriteCr3                     => {}
-            // Step::MemOpNoTr { walk, r }        => { assert(post.inv_cache_subset_of_hist_walks(c)); }
-            // Step::MemOpTLB { tlb_va }          => { assert(post.inv_cache_subset_of_hist_walks(c)); }
-            // Step::CacheFill { core, walk }     => { assert(post.inv_cache_subset_of_hist_walks(c)); }
-            // Step::CacheUse { core, walk }      => { assert(post.inv_cache_subset_of_hist_walks(c)); }
-            // Step::CacheEvict { core, pcid, walk }    => { assert(post.inv_cache_subset_of_hist_walks(c)); }
-            // Step::WalkInit { core, vaddr }     => { assert(post.inv_cache_subset_of_hist_walks(c)); }
-            // Step::WalkStep { core, walk, r }   => { assert(post.inv_cache_subset_of_hist_walks(c)); }
-            // Step::WalkAbort { core, walk }     => { assert(post.inv_cache_subset_of_hist_walks(c)); }
-            // Step::TLBFill { core, walk, r }    => { assert(post.inv_cache_subset_of_hist_walks(c)); }
-            // Step::TLBEvict { core, tlb_pcid,  tlb_va }    =>{ assert(post.inv_cache_subset_of_hist_walks(c)); }
-            // //Step::WalkDone { core, walk, r } => step_WalkDone(pre, post, c, core, walk, r, lbl),
-            // Step::Write                        => { assert(post.inv_cache_subset_of_hist_walks(c)); }
-            // Step::Writeback { core }           => { assert(post.inv_cache_subset_of_hist_walks(c)); }
-            // Step::Read { r }                   => { assert(post.inv_cache_subset_of_hist_walks(c)); }
-            // Step::Barrier                      => { assert(post.inv_cache_subset_of_hist_walks(c)); }
-            // Step::Stutter                      => {
-            //     assert(post.inv_cache_subset_of_hist_walks(c));
-            // }
-            _ => assert(post.inv_cache_subset_of_hist_walks(c))
+            Step::Invlpg                       => { assert(post.inv_unlocked_stbuf_empty(c)); }
+            Step::InvPcid                      => { assert(post.inv_unlocked_stbuf_empty(c)); }
+            Step::WriteCr3                     => { assert(post.inv_unlocked_stbuf_empty(c)); }
+            Step::MemOpNoTr { walk, r }        => { assert(post.inv_unlocked_stbuf_empty(c)); }
+            Step::MemOpTLB { tlb_va }          => { assert(post.inv_unlocked_stbuf_empty(c)); }
+            Step::CacheFill { core, walk }     => { assert(post.inv_unlocked_stbuf_empty(c)); }
+            Step::CacheUse { core, walk }      => { assert(post.inv_unlocked_stbuf_empty(c)); }
+            Step::CacheEvict { core, pcid, walk }    => { assert(post.inv_unlocked_stbuf_empty(c)); }
+            Step::WalkInit { core, vaddr }     => { assert(post.inv_unlocked_stbuf_empty(c)); }
+            Step::WalkStep { core, walk, r }   => { assert(post.inv_unlocked_stbuf_empty(c)); }
+            Step::WalkAbort { core, walk }     => { assert(post.inv_unlocked_stbuf_empty(c)); }
+            Step::TLBFill { core, walk, r }    => { assert(post.inv_unlocked_stbuf_empty(c)); }
+            Step::TLBEvict { core, tlb_pcid, tlb_va }    => { assert(post.inv_unlocked_stbuf_empty(c)); }
+            Step::Write                        => { assert(post.inv_unlocked_stbuf_empty(c)); }
+            Step::Writeback { core }           => { assert(post.inv_unlocked_stbuf_empty(c)); }
+            Step::Read { r }                   => { assert(post.inv_unlocked_stbuf_empty(c)); }
+            Step::Barrier                      => { assert(post.inv_unlocked_stbuf_empty(c)); }
+            Step::Stutter                      => {
+                assert(post.inv_unlocked_stbuf_empty(c));
+            }
+            _ => assert(post.inv_unlocked_stbuf_empty(c))
         }
     }
 }

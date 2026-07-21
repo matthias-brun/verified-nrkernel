@@ -108,10 +108,10 @@ pub ghost enum Step {
     TLBFill { core: Core, vaddr: usize },
     TLBEvict { core: Core, tlb_va: usize },
     // TSO
-    WriteNonneg,
+    CASWrite,
     Read,
     Barrier,
-    Lock { addr: Paddr, expect: u64, new_value: u64 },
+    Lock { addr: Paddr, expect: u64, new: u64 },
     Unlock,
     SadWrite,
     Sadness,
@@ -150,10 +150,7 @@ pub open spec fn step_Invlpg(pre: State, post: State, c: Constants, lbl: Lbl) ->
     &&& c.valid_core(core)
     &&& !pre.cores[core].tlb.contains_key(va)
 
-    &&& post == State {
-        pending_maps: if pre.cas !is NoOngoingCAS && pre.cas.core() == core { imap![] } else { pre.pending_maps },
-        ..pre
-    }
+    &&& post == pre
 }
 
 pub open spec fn step_InvPcid(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
@@ -182,10 +179,7 @@ pub open spec fn step_InvPcid(pre: State, post: State, c: Constants, lbl: Lbl) -
 
     // Individual-address inv
 
-    &&& post == State {
-        pending_maps: if pre.cas !is NoOngoingCAS && pre.cas.core() == core { imap![] } else { pre.pending_maps },
-        ..pre
-    }
+    &&& post == pre
 }
 
 pub open spec fn step_SadInvpcid(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
@@ -323,7 +317,7 @@ pub open spec fn step_TLBEvict(pre: State, post: State, c: Constants, core: Core
 
 // ---- TSO ----
 
-pub open spec fn step_WriteNonneg(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+pub open spec fn step_CASWrite(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
     &&& lbl matches Lbl::Write(core, addr, value)
 
     &&& pre.happy
@@ -333,7 +327,7 @@ pub open spec fn step_WriteNonneg(pre: State, post: State, c: Constants, lbl: Lb
     &&& pre.cas is NextWrite
     &&& pre.cas.core() == core
     &&& pre.cas.addr() == addr
-    &&& pre.cas->NextWrite_new_value == value
+    &&& pre.cas->NextWrite_new == value
     &&& pre.pt_mem.is_nonneg_write(addr, value)
 
     &&& post == State {
@@ -355,8 +349,9 @@ pub open spec fn step_Read(pre: State, post: State, c: Constants, lbl: Lbl) -> b
     &&& c.valid_core(core)
     &&& c.in_ptmem_range(addr as nat, 8)
     &&& aligned(addr as nat, 8)
+    &&& !(pre.cas is NextRead && pre.cas.core() == core && pre.cas.addr() == addr)
 
-    &&& pre.cas is NoOngoingCAS || (pre.cas.core() != core && pre.cas.addr() != addr)
+    &&& pre.cas is NoOngoingCAS
         ==> value & MASK_NEG_DIRTY_ACCESS == pre.pt_mem.read(addr) & MASK_NEG_DIRTY_ACCESS
 
     &&& post == pre
@@ -377,7 +372,7 @@ pub open spec fn step_CASRead(pre: State, post: State, c: Constants, lbl: Lbl) -
 
     &&& post == State {
         cas: if pre.cas->NextRead_expect == value {
-            CASProgress::NextWrite { core, addr, new_value: pre.cas->NextRead_new_value }
+            CASProgress::NextWrite { core, addr, new: pre.cas->NextRead_new }
         } else { CASProgress::Done { core, addr } },
         ..pre
     }
@@ -389,14 +384,11 @@ pub open spec fn step_Barrier(pre: State, post: State, c: Constants, lbl: Lbl) -
     &&& pre.happy
     &&& c.valid_core(core)
 
-    &&& post == State {
-        pending_maps: if pre.cas !is NoOngoingCAS && pre.cas.core() == core { imap![] } else { pre.pending_maps },
-        ..pre
-    }
+    &&& post == pre
 }
 
 /// Indicates start of a CAS instruction
-pub closed spec fn step_Lock(pre: State, post: State, c: Constants, addr: Paddr, expect: u64, new_value: u64, lbl: Lbl) -> bool {
+pub closed spec fn step_Lock(pre: State, post: State, c: Constants, addr: Paddr, expect: u64, new: u64, lbl: Lbl) -> bool {
     &&& lbl matches Lbl::Lock(core)
 
     &&& c.valid_core(core)
@@ -404,13 +396,13 @@ pub closed spec fn step_Lock(pre: State, post: State, c: Constants, addr: Paddr,
 
     &&& post == State {
         cas: CASProgress::NextRead {
-            core, addr, expect, new_value
+            core, addr, expect, new
         },
         ..pre
     }
 }
 
-/// Indicates end of a locked instruction
+/// Indicates end of a CAS instruction
 pub closed spec fn step_Unlock(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
     &&& lbl matches Lbl::Unlock(core)
 
@@ -455,10 +447,10 @@ pub open spec fn next_step(pre: State, post: State, c: Constants, step: Step, lb
         Step::MemOpTLB { tlb_va }        => step_MemOpTLB(pre, post, c, tlb_va, lbl),
         Step::TLBFill { core, vaddr }    => step_TLBFill(pre, post, c, core, vaddr, lbl),
         Step::TLBEvict { core, tlb_va }  => step_TLBEvict(pre, post, c, core, tlb_va, lbl),
-        Step::WriteNonneg                => step_WriteNonneg(pre, post, c, lbl),
+        Step::CASWrite                   => step_CASWrite(pre, post, c, lbl),
         Step::Read                       => step_Read(pre, post, c, lbl),
         Step::Barrier                    => step_Barrier(pre, post, c, lbl),
-        Step::Lock { addr, expect, new_value } => step_Lock(pre, post, c, addr, expect, new_value, lbl),
+        Step::Lock { addr, expect, new } => step_Lock(pre, post, c, addr, expect, new, lbl),
         Step::Unlock                     => step_Unlock(pre, post, c, lbl),
         Step::SadWrite                   => step_SadWrite(pre, post, c, lbl),
         Step::Sadness                    => step_Sadness(pre, post, c, lbl),
