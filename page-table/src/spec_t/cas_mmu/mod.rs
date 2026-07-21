@@ -155,6 +155,10 @@ pub enum Lbl {
     WriteCr3(Core, Cr3, bool),
     /// Serializing instruction
     Barrier(Core),
+    /// Start of a locked instruction
+    Lock(Core),
+    /// End of a locked instruction
+    Unlock(Core),
 }
 
 // Only used in the simplified hardware models.

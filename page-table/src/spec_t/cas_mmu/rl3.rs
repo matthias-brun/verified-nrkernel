@@ -297,12 +297,13 @@ impl CoreState {
     {
         self.stbuf.first()
     }
-
 }
 
 
 /// System State
 pub struct State {
+    /// For locked instructions (modeled as in Sewell et al. x86-TSO)
+    lock: Option<Core>,
     /// Byte-indexed physical (non-page-table) memory
     phys_mem: Seq<u8>,
     /// Page table memory
@@ -364,6 +365,8 @@ pub enum Step {
     TLBFill { core: Core, walk: Walk, r: usize },
     TLBEvict { core: Core, tlb_pcid: Pcid, tlb_va: Vaddr },
     // TSO, operations on page table memory
+    Lock,
+    Unlock,
     Write,
     Writeback { core: Core },
     Read { r: usize },
@@ -421,6 +424,9 @@ pub closed spec fn step_WriteCr3(pre: State, post: State, c: Constants, lbl: Lbl
     &&& pre.cores[core].stbuf_empty()
     &&& pre.cores[core].walks_empty()
 
+    // Writing to control register with lock prefix causes exception
+    &&& pre.lock != Some(core)
+
     // If CR4.PCIDE = 1 and bit 63 of the instruction’s source operand is 1, the instruction is not
     // required to invalidate any TLB entries or entries in paging-structure caches.
     // If CR4.PCIDE = 1 and bit 63 of the instruction’s source operand is 0, the instruction
@@ -440,7 +446,6 @@ pub closed spec fn step_WriteCr3(pre: State, post: State, c: Constants, lbl: Lbl
             // if there was a flush, then we clear the walks since last invlpg
             walks: if flush { pre.hist.walks.insert(core, iset![]) } else { pre.hist.walks },
             // walks: pre.hist.walks.insert(core, iset![]),
-            // TODO: check this!
             writes: Writes {
                 core: pre.hist.writes.core,
                 tso: if core == pre.hist.writes.core { iset![] } else { pre.hist.writes.tso },
@@ -475,6 +480,8 @@ pub closed spec fn step_Invlpg(pre: State, post: State, c: Constants, lbl: Lbl) 
     &&& pre.cores[core].walks_empty()
     // .. and evicts the corresponding TLB entry
     &&& !pre.cores[core].tlb_contains(va)
+    // invlpg with lock prefix causes exception
+    &&& pre.lock != Some(core)
 
     &&& post == State {
         hist: History {
@@ -505,6 +512,9 @@ pub closed spec fn step_InvPcid(pre: State, post: State, c: Constants, lbl: Lbl)
     // InvPcid is a serializing instruction, ..
     &&& pre.cores[core].stbuf_empty()
     &&& pre.cores[core].walks_empty()
+    // invpcid with lock prefix causes exception
+    &&& pre.lock != Some(core)
+
 
 
     &&& match typ {
@@ -579,6 +589,9 @@ pub closed spec fn step_MemOpNoTr(
 ) -> bool {
     &&& lbl matches Lbl::MemOp(core, memop_vaddr, memop)
 
+    // Userspace mem accesses aren't mixed with locked page table memory accesses
+    &&& pre.lock != Some(core)
+
     &&& {
     let walk_next = walk_next(pre, core, walk, r);
     &&& c.valid_core(core)
@@ -605,6 +618,9 @@ pub closed spec fn step_MemOpTLB(
     lbl: Lbl,
 ) -> bool {
     &&& lbl matches Lbl::MemOp(core, memop_vaddr, memop)
+
+    // Userspace mem accesses aren't mixed with locked page table memory accesses
+    &&& pre.lock != Some(core)
 
     &&& c.valid_core(core)
     &&& aligned(memop_vaddr as nat, memop.op_size())
@@ -706,7 +722,7 @@ pub closed spec fn walk_next(state: State, core: Core, walk: Walk, r: usize) -> 
     let Walk { vaddr, path, .. } = walk;
     let mem = state.pt_mem;
     let addr = if path.len() == 0 {
-        add(state.cores[core].cr3.pml4, mul(l0_bits!(vaddr), WORD_SIZE))          // this should be the core PML4
+        add(state.cores[core].cr3.pml4, mul(l0_bits!(vaddr), WORD_SIZE))
     } else if path.len() == 1 {
         add(path.last().1->Directory_addr, mul(l1_bits!(vaddr), WORD_SIZE))
     } else if path.len() == 2 {
@@ -819,6 +835,7 @@ pub closed spec fn step_Write(pre: State, post: State, c: Constants, lbl: Lbl) -
     &&& post.phys_mem == pre.phys_mem
     &&& post.pt_mem == pre.pt_mem
     &&& post.cores === pre.cores.insert(core, pre.cores[core].stbuf_push(addr, value))
+    &&& post.lock === pre.lock
 
     &&& post.hist.cr3 == pre.hist.cr3
     &&& post.hist.happy == pre.hist.happy
@@ -869,6 +886,7 @@ pub closed spec fn step_Writeback(pre: State, post: State, c: Constants, core: C
 
     &&& c.valid_core(core)
     &&& !pre.cores[core].stbuf_empty()
+    &&& pre.not_blocked(core)
 
     &&& post == State {
         pt_mem: pre.pt_mem.write(addr, value),
@@ -883,6 +901,7 @@ pub closed spec fn step_Read(pre: State, post: State, c: Constants, r: usize, lb
     &&& c.valid_core(core)
     &&& c.in_ptmem_range(addr as nat, 8)
     &&& aligned(addr as nat, 8)
+    &&& pre.not_blocked(core)
     &&& value == pre.read_from_mem_tso(core, addr, r)
 
     &&& post == pre
@@ -905,6 +924,34 @@ pub closed spec fn step_Barrier(pre: State, post: State, c: Constants, lbl: Lbl)
             pending_maps: if core == pre.hist.writes.core { imap![] } else { pre.hist.pending_maps },
             ..pre.hist
         },
+        ..pre
+    }
+}
+
+/// Indicates start of a locked instruction
+pub closed spec fn step_Lock(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+    &&& lbl matches Lbl::Lock(core)
+
+    &&& c.valid_core(core)
+    &&& pre.cores[core].stbuf_empty()
+    &&& pre.lock is None
+
+    &&& post == State {
+        lock: Some(core),
+        ..pre
+    }
+}
+
+/// Indicates end of a locked instruction
+pub closed spec fn step_Unlock(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+    &&& lbl matches Lbl::Unlock(core)
+
+    &&& c.valid_core(core)
+    &&& pre.cores[core].stbuf_empty()
+    &&& pre.lock == Some(core)
+
+    &&& post == State {
+        lock: None,
         ..pre
     }
 }
@@ -935,6 +982,8 @@ pub open spec fn next_step(pre: State, post: State, c: Constants, step: Step, lb
         Step::Writeback { core }           => step_Writeback(pre, post, c, core, lbl),
         Step::Read { r }                   => step_Read(pre, post, c, r, lbl),
         Step::Barrier                      => step_Barrier(pre, post, c, lbl),
+        Step::Lock                         => step_Lock(pre, post, c, lbl),
+        Step::Unlock                       => step_Unlock(pre, post, c, lbl),
         Step::Stutter                      => step_Stutter(pre, post, c, lbl),
     }
 }
@@ -1035,6 +1084,9 @@ impl State {
         &&& self.hist.writes.nonpos === iset![]
     }
 
+    pub closed spec fn not_blocked(self, core: Core) -> bool {
+        self.lock == Some(core) || self.lock is None
+    }
 } // impl State
 
 
@@ -1495,320 +1547,6 @@ pub mod refinement {
         }
     }
 }
-
-
-/// The axiomatized interface to execute the actions specified in this state machine.
-pub mod code {
-    // This interface is trusted.
-    // $line_count$Trusted${$
-    use vstd::prelude::*;
-    use crate::spec_t::cas_mmu::rl3;
-    #[cfg(verus_keep_ghost)]
-    use crate::spec_t::cas_mmu::{ self, Core };
-    use crate::theorem::TokState;
-    #[cfg(verus_keep_ghost)]
-    use crate::spec_t::cas_mmu::defs::{ aligned, MAX_PCID };
-
-    #[cfg(feature="linuxmodule")]
-    use core::arch::asm;
-
-
-    // Note:
-    // We should look into consolidating all the prophesy_* functions into a single prophesy
-    // function that takes a label as an argument and then have a specific precond function that
-    // just maps each label to the necessary preconditions for that op.
-    // Or would that be more annoying to work with?
-
-    #[verifier(external_body)]
-    pub tracked struct Token {}
-
-    impl Token {
-        pub uninterp spec fn consts(self) -> cas_mmu::Constants;
-        pub uninterp spec fn core(self) -> Core;
-        pub uninterp spec fn pre(self) -> rl3::State;
-        pub uninterp spec fn post(self) -> rl3::State;
-        pub uninterp spec fn lbl(self) -> cas_mmu::Lbl;
-        pub uninterp spec fn tstate(self) -> TokState;
-
-        pub open spec fn set_validated(self, new: Token) -> bool {
-            &&& new.consts() == self.consts()
-            &&& new.core() == self.core()
-            &&& new.pre() == self.pre()
-            &&& new.post() == self.post()
-            &&& new.lbl() == self.lbl()
-            &&& new.tstate() is Validated
-        }
-
-        pub open spec fn prophesied_step(self, new: Token) -> bool {
-            &&& new.consts() == self.consts()
-            &&& new.core() == self.core()
-            &&& new.pre() == self.pre()
-            &&& new.tstate() is ProphecyMade
-            &&& rl3::next(new.pre(), new.post(), new.consts(), new.lbl())
-        }
-
-        pub axiom fn prophesy_read(tracked &mut self, addr: usize)
-            requires
-                old(self).tstate() is Init,
-                old(self).consts().valid_core(old(self).core()),
-                old(self).consts().in_ptmem_range(addr as nat, 8),
-                aligned(addr as nat, 8),
-            ensures
-                final(self).lbl() is Read,
-                final(self).lbl()->Read_0 == final(self).core(),
-                final(self).lbl()->Read_1 == addr,
-                old(self).prophesied_step(*final(self));
-
-        pub axiom fn prophesy_write(tracked &mut self, addr: usize, value: usize)
-            requires
-                old(self).tstate() is Init,
-                old(self).consts().valid_core(old(self).core()),
-                old(self).consts().in_ptmem_range(addr as nat, 8),
-                aligned(addr as nat, 8),
-            ensures
-                final(self).lbl() == cas_mmu::Lbl::Write(final(self).core(), addr, value),
-                old(self).prophesied_step(*final(self));
-
-        pub axiom fn prophesy_barrier(tracked &mut self)
-            requires
-                old(self).tstate() is Init,
-                old(self).consts().valid_core(old(self).core()),
-            ensures
-                final(self).lbl() == cas_mmu::Lbl::Barrier(final(self).core()),
-                old(self).prophesied_step(*final(self));
-
-        pub axiom fn prophesy_invlpg(tracked &mut self, addr: usize)
-            requires
-                old(self).tstate() is Init,
-                old(self).consts().valid_core(old(self).core()),
-            ensures
-                final(self).lbl() == cas_mmu::Lbl::Invlpg(final(self).core(), addr),
-                old(self).prophesied_step(*final(self));
-
-        pub axiom fn prophesy_invpcid(tracked &mut self, typ: InvPcidType)
-            requires
-                old(self).tstate() is Init,
-                old(self).consts().valid_core(old(self).core()),
-            ensures
-                final(self).lbl() == cas_mmu::Lbl::InvPcid(final(self).core(), typ),
-                old(self).prophesied_step(*final(self));
-    }
-
-    // External interface to the  memory allocation of the linux module
-    #[cfg(feature="linuxmodule")]
-    extern "C" {
-        fn mem_to_local_phys(va: usize) -> usize;
-        fn local_phys_to_mem(pa: usize) -> usize;
-    }
-
-    /// standalone virtual -> physical address translation
-    /// note we do label it as unsafe as the C version is unsafe
-    #[cfg(not(feature="linuxmodule"))]
-    unsafe fn mem_to_local_phys(va: usize) -> usize {
-        va
-    }
-
-    /// standaline physical -> virtual address translation
-    /// note we do label it as unsafe as the C version is unsafe
-    #[cfg(not(feature="linuxmodule"))]
-    unsafe fn local_phys_to_mem(pa: usize) -> usize {
-        pa
-    }
-
-    /// reads from the memory location given by the physical address in `addr`
-    #[verifier(external_body)]
-    pub exec fn read(Tracked(tok): Tracked<&mut Token>, addr: usize) -> (res: usize)
-        requires
-            old(tok).tstate() is Validated,
-            old(tok).lbl() matches cas_mmu::Lbl::Read(lbl_core, lbl_addr, _)
-               && lbl_core == old(tok).core() && lbl_addr == addr,
-        ensures
-            final(tok).tstate() is Spent,
-            res == old(tok).lbl()->Read_2,
-    {
-        unsafe {
-            let vaddr_ptr : *const usize = local_phys_to_mem(addr) as *const usize;
-            *vaddr_ptr
-        }
-    }
-
-    /// writes to the memory location given by the physical address in `addr`
-    #[verifier(external_body)]
-    pub exec fn write(Tracked(tok): Tracked<&mut Token>, addr: usize, value: usize)
-        requires
-            old(tok).tstate() is Validated,
-            old(tok).lbl() == cas_mmu::Lbl::Write(old(tok).core(), addr, value),
-        ensures
-            final(tok).tstate() is Spent,
-    {
-        unsafe {
-            let vaddr_ptr : *mut usize = local_phys_to_mem(addr) as *mut usize;
-            *vaddr_ptr = value;
-        }
-    }
-
-    /// performs a fence instructions to garantee ordering
-    #[verifier(external_body)]
-    pub exec fn barrier(Tracked(tok): Tracked<&mut Token>)
-        requires
-            old(tok).tstate() is Validated,
-            old(tok).lbl() == cas_mmu::Lbl::Barrier(old(tok).core()),
-        ensures
-            final(tok).tstate() is Spent,
-    {
-        // let's only have the mfence when we actually compile for the linux module
-        #[cfg(feature="linuxmodule")]
-        unsafe { asm!("mfence") };
-        // unsafe { asm!("sfence") };
-    }
-
-    /// invalidates the TLB on the local core
-    #[verifier(external_body)]
-    pub exec fn invlpg(Tracked(tok): Tracked<&mut Token>, vaddr: usize)
-        requires
-            old(tok).tstate() is Validated,
-            old(tok).lbl() == cas_mmu::Lbl::Invlpg(old(tok).core(), vaddr),
-        ensures
-            final(tok).tstate() is Spent,
-    {
-        #[cfg(feature="linuxmodule")]
-        unsafe {
-            // note: to execute this instruction we need to be on x86 ring 0.
-            asm!("invlpg ({})", in(reg) vaddr, options(att_syntax, nostack, preserves_flags));
-        }
-        // #[cfg(not(feature="linuxmodule"))]
-        // this is a no-op in standalone mode
-    }
-
-    struct InvpcidDescriptor {
-            pcid: u64,
-            addr: u64,
-    }
-
-    use crate::spec_t::cas_mmu::defs::{Cr3, InvPcidType, Paddr, Pcid};
-
-    /// invalidates the TLB on the local core
-    #[verifier(external_body)]
-    pub exec fn invpcid(Tracked(tok): Tracked<&mut Token>, typ: InvPcidType)
-        requires
-            old(tok).tstate() is Validated,
-            old(tok).lbl() == cas_mmu::Lbl::InvPcid(old(tok).core(), typ),
-        ensures
-            final(tok).tstate() is Spent,
-    {
-        let mut desc = InvpcidDescriptor {
-            pcid: 0,
-            addr: 0,
-        };
-
-        let kind = match typ {
-            InvPcidType::IndividualAddress(d) => {
-                desc.pcid = d.pcid as u64 & 0xfff;
-                desc.addr = d.vaddr as u64;
-                0
-            }
-            InvPcidType::SingleContext(d) => {
-                desc.pcid = d.pcid as u64 & 0xfff;
-                1
-            }
-            InvPcidType::AllContextGlobal(d) => {
-                2
-            }
-            InvPcidType::AllContext(d) => {
-                3
-            }
-        };
-
-        #[cfg(feature="linuxmodule")]
-        unsafe {
-            asm!("invpcid {0}, [{1}]", in(reg) kind, in(reg) &desc, options(nostack, preserves_flags));
-        }
-
-        // #[cfg(not(feature="linuxmodule"))]
-        // this is a no-op in standalone mode
-    }
-
-    #[repr(transparent)]
-    pub struct Cr3RegVal(u64);
-    impl Cr3RegVal {
-        pub uninterp spec fn pcid(self) -> Pcid;
-        pub uninterp spec fn pml4(self) -> Paddr;
-
-        pub open spec fn wf(self) -> bool {
-            self.pcid() <= MAX_PCID
-        }
-
-        pub open spec fn view(self) -> Cr3 {
-            Cr3{ pcid: self.pcid(), pml4: self.pml4() }
-        }
-
-        #[verifier(external_body)]
-        pub exec fn with_pcid_pml4(pml4: usize, pcid: usize) -> (res: Self)
-            requires
-                pcid < 0x1000
-            ensures
-                res.pcid() == pcid,
-                res.pml4() == pml4
-        {
-            Cr3RegVal((pml4 as u64) & 0x0fff_ffff_ffff_f000 | (pcid as u64) & 0xfff)
-        }
-
-        #[verifier(external_body)]
-        pub exec fn val(self) -> u64
-        {
-            self.0
-        }
-
-        #[verifier(external_body)]
-        pub exec fn pml4_val(&self) -> (r: usize)
-            ensures self.pml4() == r
-        {
-            (self.0 & 0x0fff_ffff_ffff_f000) as usize
-        }
-
-        #[verifier(external_body)]
-        pub exec fn pcid_val(&self) -> (r: usize)
-            ensures self.pcid() == r
-        {
-            (self.0 & 0xfff) as usize
-        }
-    }
-
-
-
-    /// invalidates the TLB on the local core
-    #[verifier(external_body)]
-    pub exec fn write_cr3(Tracked(tok): Tracked<&mut Token>, cr3: Cr3RegVal, flush: bool)
-        requires
-            old(tok).tstate() is Validated,
-            old(tok).lbl() == cas_mmu::Lbl::WriteCr3(old(tok).core(), Cr3 { pcid: cr3.pcid(), pml4: cr3.pml4() }, flush),
-        ensures
-            final(tok).tstate() is Spent,
-    {
-        let val = if flush { 0 }  else { 1u64 << 63 } | cr3.val();
-        #[cfg(feature="linuxmodule")]
-        unsafe {
-            asm!("mov cr3, {}", in(reg) val, options(nostack, preserves_flags));
-        }
-
-        // #[cfg(not(feature="linuxmodule"))]
-        // this is a no-op in standalone mode
-    }
-
-
-
-    // TODO: need transitions to allocate/deallocate pages i guess
-    // TODO: add a transition to read pml4?
-    //#[verifier(external_body)]
-    //pub exec fn get_pml4(Tracked(tok): Tracked<Token>, vaddr: usize) -> (stub: Tracked<Stub>)
-    //    ensures ..
-    //{
-    //    unimplemented!()
-    //}
-
-    // $line_count$}$
-}
-
 
 
 } // verus!
