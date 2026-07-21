@@ -4,7 +4,7 @@ use crate::spec_t::cas_mmu::pt_mem::*;
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::cas_mmu::defs::{ aligned, LoadResult, update_range, MAX_VIRTADDR };
 use crate::spec_t::cas_mmu::defs::{ PTE, Core, Paddr, Vaddr, Vpn };
-use crate::spec_t::cas_mmu::rl3::{ Writes };
+use crate::spec_t::cas_mmu::rl3::{ CASProgress };
 use crate::spec_t::cas_mmu::translation::{ MASK_NEG_DIRTY_ACCESS };
 
 verus! {
@@ -14,7 +14,6 @@ verus! {
 // MMU model.
 
 /// Represents the Per-Core State.
-///
 pub ghost struct CoreState {
     /// the CR3 register containing the pml4 pointer (we abstract away the PCID here)
     pub cr3: Paddr,
@@ -86,15 +85,9 @@ pub ghost struct State {
     pub pt_mem: PTMem,
     /// Per-node state (TLBs)
     pub cores: IMap<Core, CoreState>,
-    pub writes: Writes,
     /// Tracks the virtual addresses and entries for which we may see non-atomic results.
-    /// If polarity is positive, translations may non-atomically fail.
-    /// If polarity is negative, translations may non-atomically succeed.
-    /// If polarity is protect, translations may non-atomically still have old permissions.
     pub pending_maps: IMap<usize, PTE>,
-    pub pending_unmaps: IMap<usize, PTE>,
-    pub pending_protects: IMap<usize, PTE>,
-    pub polarity: Polarity,
+    pub cas: CASProgress,
 }
 
 pub ghost enum Step {
@@ -114,61 +107,15 @@ pub ghost enum Step {
     MemOpTLB { tlb_va: usize },
     TLBFill { core: Core, vaddr: usize },
     TLBEvict { core: Core, tlb_va: usize },
-    // Non-atomic TLB fill during an unmap
-    TLBFillNA1 { core: Core, vaddr: usize },
-    // Non-atomic TLB fill during an mprotect
-    TLBFillNA2 { core: Core, vaddr: usize },
     // TSO
     WriteNonneg,
-    WriteNonpos,
-    WriteProtect,
     Read,
     Barrier,
+    Lock { addr: Paddr, expect: u64, new_value: u64 },
+    Unlock,
     SadWrite,
     Sadness,
     Stutter,
-}
-
-
-impl State {
-    pub open spec fn is_happy_writenonneg(self, core: Core, addr: usize, value: usize) -> bool {
-        &&& !self.writes.tso.is_empty() ==> core == self.writes.core
-        &&& self.pt_mem.is_nonneg_write(addr, value)
-    }
-
-    pub open spec fn is_happy_writenonpos(self, core: Core, addr: usize, value: usize) -> bool {
-        &&& !self.writes.tso.is_empty() ==> core == self.writes.core
-        &&& self.pt_mem.is_nonpos_write(addr, value)
-    }
-
-    pub open spec fn is_happy_writeprotect(self, core: Core, addr: usize, value: usize) -> bool {
-        &&& self.pt_mem.is_prot_write(addr, value)
-        // We only allow one modification per protect period for simplicity. Lifting this
-        // restriction probably wouldn't be very hard, since writes (due to the bit 7 condition)
-        // can only affect pages and thus we would retain the rl2::inv_inflight_walks_are_prefixes
-        // invariant. But our code only makes a single modification, so we keep it simple.
-        &&& self.writes.tso === iset![]
-        &&& self.writes.nonpos === iset![]
-    }
-
-    pub open spec fn is_tso_read_deterministic(self, core: Core, addr: usize) -> bool {
-        self.writes.tso.contains(addr) ==> self.writes.core == core
-    }
-
-    pub open spec fn can_flip_polarity(self, c: Constants) -> bool {
-        &&& self.writes.tso === iset![]
-        &&& self.writes.nonpos === iset![]
-    }
-
-    //pub open spec fn wf(self, c: Constants) -> bool {
-    //    true
-    //}
-    //
-    //pub open spec fn inv(self, c: Constants) -> bool {
-    //    self.happy ==> {
-    //    &&& self.wf(c)
-    //    }
-    //}
 }
 
 // ---- Mixed (relevant to multiple of TSO/Cache/Non-Atomic) ----
@@ -180,23 +127,9 @@ pub open spec fn step_WriteCr3(pre: State, post: State, c: Constants, lbl: Lbl) 
     &&& c.valid_core(core)
 
     &&& flush ==> pre.cores[core].tlb_empty()
-
     &&& pre.cores[core].cr3 == cr3.pml4
 
-    &&& post == State {
-        writes: Writes {
-            core: pre.writes.core,
-            tso: if core == pre.writes.core { iset![] } else { pre.writes.tso },
-            nonpos:
-                if post.writes.tso === iset![] {
-                    pre.writes.nonpos.remove(core)
-                } else { pre.writes.nonpos },
-        },
-        pending_maps: if core == pre.writes.core { imap![] } else { pre.pending_maps },
-        pending_unmaps: if post.writes.nonpos === iset![] { imap![] } else { pre.pending_unmaps },
-        pending_protects: if post.writes.nonpos === iset![] { imap![] } else { pre.pending_protects },
-        ..pre
-    }
+    &&& post == pre
 }
 
 pub open spec fn step_SadWriteCr3(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
@@ -218,17 +151,7 @@ pub open spec fn step_Invlpg(pre: State, post: State, c: Constants, lbl: Lbl) ->
     &&& !pre.cores[core].tlb.contains_key(va)
 
     &&& post == State {
-        writes: Writes {
-            core: pre.writes.core,
-            tso: if core == pre.writes.core { iset![] } else { pre.writes.tso },
-            nonpos:
-                if post.writes.tso === iset![] {
-                    pre.writes.nonpos.remove(core)
-                } else { pre.writes.nonpos },
-        },
-        pending_maps: if core == pre.writes.core { imap![] } else { pre.pending_maps },
-        pending_unmaps: if post.writes.nonpos === iset![] { imap![] } else { pre.pending_unmaps },
-        pending_protects: if post.writes.nonpos === iset![] { imap![] } else { pre.pending_protects },
+        pending_maps: if pre.cas !is NoOngoingCAS && pre.cas.core() == core { imap![] } else { pre.pending_maps },
         ..pre
     }
 }
@@ -260,17 +183,7 @@ pub open spec fn step_InvPcid(pre: State, post: State, c: Constants, lbl: Lbl) -
     // Individual-address inv
 
     &&& post == State {
-        writes: Writes {
-            core: pre.writes.core,
-            tso: if core == pre.writes.core { iset![] } else { pre.writes.tso },
-            nonpos:
-                if post.writes.tso === iset![] {
-                    pre.writes.nonpos.remove(core)
-                } else { pre.writes.nonpos },
-        },
-        pending_maps: if core == pre.writes.core { imap![] } else { pre.pending_maps },
-        pending_unmaps: if post.writes.nonpos === iset![] { imap![] } else { pre.pending_unmaps },
-        pending_protects: if post.writes.nonpos === iset![] { imap![] } else { pre.pending_protects },
+        pending_maps: if pre.cas !is NoOngoingCAS && pre.cas.core() == core { imap![] } else { pre.pending_maps },
         ..pre
     }
 }
@@ -318,7 +231,6 @@ pub open spec fn step_MemOpNoTr(pre: State, post: State, c: Constants, lbl: Lbl)
 pub open spec fn step_MemOpNoTrNA(pre: State, post: State, c: Constants, vbase: usize, lbl: Lbl) -> bool {
     &&& lbl matches Lbl::MemOp(core, memop_vaddr, memop)
     &&& pre.happy
-    &&& pre.polarity is Mapping
 
     &&& c.valid_core(core)
     &&& aligned(memop_vaddr as nat, memop.op_size())
@@ -370,14 +282,12 @@ pub open spec fn step_MemOpTLB(
     }
     }
 
+    &&& post.cas == pre.cas
     &&& post.happy == pre.happy
     &&& post.cr3 == pre.cr3
     &&& post.pt_mem == pre.pt_mem
     &&& post.cores == pre.cores
-    &&& post.writes == pre.writes
     &&& post.pending_maps == pre.pending_maps
-    &&& post.pending_unmaps == pre.pending_unmaps
-    &&& post.pending_protects == pre.pending_protects
 }
 
 // ---- Non-atomic page table walks ----
@@ -410,41 +320,6 @@ pub open spec fn step_TLBEvict(pre: State, post: State, c: Constants, core: Core
     }
 }
 
-/// A stale TLB fill when unmapping
-pub open spec fn step_TLBFillNA1(pre: State, post: State, c: Constants, core: Core, vaddr: usize, lbl: Lbl) -> bool {
-    let pte = pre.pending_unmaps[vaddr];
-    &&& lbl is Tau
-    &&& pre.happy
-    &&& pre.polarity is Unmapping
-
-    &&& c.valid_core(core)
-    &&& pre.writes.nonpos.contains(core)
-    &&& pre.pending_unmaps.contains_key(vaddr)
-
-    &&& post == State {
-        cores: pre.cores.insert(core, pre.cores[core].tlb_fill(vaddr, pte)),
-        ..pre
-    }
-}
-
-/// A stale TLB fill during mprotect
-pub open spec fn step_TLBFillNA2(pre: State, post: State, c: Constants, core: Core, vaddr: usize, lbl: Lbl) -> bool {
-    let pte = pre.pending_protects[vaddr];
-    &&& lbl is Tau
-    &&& pre.happy
-    &&& pre.polarity is Protect
-
-    &&& c.valid_core(core)
-    &&& pre.writes.nonpos.contains(core)
-    &&& pre.pending_protects.contains_key(vaddr)
-
-    &&& post == State {
-        cores: pre.cores.insert(core, pre.cores[core].tlb_fill(vaddr, pte)),
-        ..pre
-    }
-}
-
-
 
 // ---- TSO ----
 
@@ -455,84 +330,22 @@ pub open spec fn step_WriteNonneg(pre: State, post: State, c: Constants, lbl: Lb
     &&& c.valid_core(core)
     &&& c.in_ptmem_range(addr as nat, 8)
     &&& aligned(addr as nat, 8)
-    &&& pre.is_happy_writenonneg(core, addr, value)
-    &&& pre.polarity is Mapping || pre.can_flip_polarity(c)
+    &&& pre.cas is NextWrite
+    &&& pre.cas.core() == core
+    &&& pre.cas.addr() == addr
+    &&& pre.cas->NextWrite_new_value == value
+    &&& pre.pt_mem.is_nonneg_write(addr, value)
 
-    &&& post.happy      == pre.happy
-    &&& post.cr3        == pre.cr3
-    &&& post.phys_mem   == pre.phys_mem
-    &&& post.pt_mem     == pre.pt_mem.write(addr, value)
-    &&& post.cores      == pre.cores
-    &&& post.writes.tso == pre.writes.tso.insert(addr)
-    &&& post.writes.core == core
-    &&& post.polarity == Polarity::Mapping
-    &&& post.writes.nonpos == pre.writes.nonpos
-    &&& post.pending_maps == pre.pending_maps.union_prefer_right(
-        IMap::new(
-            |vbase| post.pt_mem@.contains_key(vbase) && !pre.pt_mem@.contains_key(vbase),
-            |vbase| post.pt_mem@[vbase]
-        ))
-    &&& post.pending_unmaps == pre.pending_unmaps
-    &&& post.pending_protects == pre.pending_protects
-}
-
-pub open spec fn step_WriteNonpos(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
-    &&& lbl matches Lbl::Write(core, addr, value)
-
-    &&& pre.happy
-    &&& c.valid_core(core)
-    &&& c.in_ptmem_range(addr as nat, 8)
-    &&& aligned(addr as nat, 8)
-    &&& pre.is_happy_writenonpos(core, addr, value)
-    &&& pre.polarity is Unmapping || pre.can_flip_polarity(c)
-
-    &&& post.happy      == pre.happy
-    &&& post.cr3        == pre.cr3
-    &&& post.phys_mem   == pre.phys_mem
-    &&& post.pt_mem     == pre.pt_mem.write(addr, value)
-    &&& post.cores      == pre.cores
-    &&& post.writes.tso == pre.writes.tso.insert(addr)
-    &&& post.writes.core == core
-    &&& post.polarity == Polarity::Unmapping
-    &&& post.writes.nonpos == ISet::new(|core| c.valid_core(core))
-    &&& post.pending_maps == pre.pending_maps
-    &&& post.pending_unmaps == pre.pending_unmaps.union_prefer_right(
-        IMap::new(
-            |vbase| pre.pt_mem@.contains_key(vbase) && !post.pt_mem@.contains_key(vbase),
-            |vbase| pre.pt_mem@[vbase]
-        ))
-    &&& post.pending_protects == pre.pending_protects
-}
-
-pub open spec fn step_WriteProtect(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
-    &&& lbl matches Lbl::Write(core, addr, value)
-
-    &&& pre.happy
-    &&& c.valid_core(core)
-    &&& c.in_ptmem_range(addr as nat, 8)
-    &&& aligned(addr as nat, 8)
-    &&& pre.is_happy_writeprotect(core, addr, value)
-    &&& pre.polarity is Protect || pre.can_flip_polarity(c)
-
-    &&& post.happy      == pre.happy
-    &&& post.cr3        == pre.cr3
-    &&& post.phys_mem   == pre.phys_mem
-    &&& post.pt_mem     == pre.pt_mem.write(addr, value)
-    &&& post.cores      == pre.cores
-    &&& post.writes.tso == pre.writes.tso.insert(addr)
-    &&& post.writes.core == core
-    &&& post.polarity == Polarity::Protect
-    &&& post.writes.nonpos == ISet::new(|core| c.valid_core(core))
-    &&& post.pending_maps == pre.pending_maps
-    &&& post.pending_unmaps == pre.pending_unmaps
-    &&& post.pending_protects
-        == if post.polarity is Protect {
-                pre.pending_protects.union_prefer_right(
-                    IMap::new(
-                        |vbase| pre.pt_mem@.contains_key(vbase) && post.pt_mem@[vbase] != pre.pt_mem@[vbase],
-                        |vbase| pre.pt_mem@[vbase]
-                    ))
-        } else { pre.pending_protects }
+    &&& post == State {
+        pt_mem: pre.pt_mem.write(addr, value),
+        cas: CASProgress::Done { core, addr },
+        pending_maps:
+            IMap::new(
+                |vbase| post.pt_mem@.contains_key(vbase) && !pre.pt_mem@.contains_key(vbase),
+                |vbase| post.pt_mem@[vbase]
+            ),
+        ..pre
+    }
 }
 
 pub open spec fn step_Read(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
@@ -542,10 +355,32 @@ pub open spec fn step_Read(pre: State, post: State, c: Constants, lbl: Lbl) -> b
     &&& c.valid_core(core)
     &&& c.in_ptmem_range(addr as nat, 8)
     &&& aligned(addr as nat, 8)
-    &&& pre.is_tso_read_deterministic(core, addr)
-            ==> value & MASK_NEG_DIRTY_ACCESS == pre.pt_mem.read(addr) & MASK_NEG_DIRTY_ACCESS
+
+    &&& pre.cas is NoOngoingCAS || (pre.cas.core() != core && pre.cas.addr() != addr)
+        ==> value & MASK_NEG_DIRTY_ACCESS == pre.pt_mem.read(addr) & MASK_NEG_DIRTY_ACCESS
 
     &&& post == pre
+}
+
+pub open spec fn step_CASRead(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+    &&& lbl matches Lbl::Read(core, addr, value)
+
+    &&& pre.happy
+    &&& c.valid_core(core)
+    &&& c.in_ptmem_range(addr as nat, 8)
+    &&& aligned(addr as nat, 8)
+    &&& pre.cas is NextRead
+    &&& pre.cas.core() == core
+    &&& pre.cas.addr() == addr
+
+    &&& value & MASK_NEG_DIRTY_ACCESS == pre.pt_mem.read(addr) & MASK_NEG_DIRTY_ACCESS
+
+    &&& post == State {
+        cas: if pre.cas->NextRead_expect == value {
+            CASProgress::NextWrite { core, addr, new_value: pre.cas->NextRead_new_value }
+        } else { CASProgress::Done { core, addr } },
+        ..pre
+    }
 }
 
 pub open spec fn step_Barrier(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
@@ -555,11 +390,35 @@ pub open spec fn step_Barrier(pre: State, post: State, c: Constants, lbl: Lbl) -
     &&& c.valid_core(core)
 
     &&& post == State {
-        writes: Writes {
-            tso: if core == pre.writes.core { iset![] } else { pre.writes.tso },
-            ..pre.writes
+        pending_maps: if pre.cas !is NoOngoingCAS && pre.cas.core() == core { imap![] } else { pre.pending_maps },
+        ..pre
+    }
+}
+
+/// Indicates start of a CAS instruction
+pub closed spec fn step_Lock(pre: State, post: State, c: Constants, addr: Paddr, expect: u64, new_value: u64, lbl: Lbl) -> bool {
+    &&& lbl matches Lbl::Lock(core)
+
+    &&& c.valid_core(core)
+    &&& pre.cas is NoOngoingCAS
+
+    &&& post == State {
+        cas: CASProgress::NextRead {
+            core, addr, expect, new_value
         },
-        pending_maps: if core == pre.writes.core { imap![] } else { pre.pending_maps },
+        ..pre
+    }
+}
+
+/// Indicates end of a locked instruction
+pub closed spec fn step_Unlock(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+    &&& lbl matches Lbl::Unlock(core)
+
+    &&& c.valid_core(core)
+    &&& pre.cas matches CASProgress::Done { core: c, .. } && c == core
+
+    &&& post == State {
+        cas: CASProgress::NoOngoingCAS,
         ..pre
     }
 }
@@ -575,9 +434,7 @@ pub open spec fn step_SadWrite(pre: State, post: State, c: Constants, lbl: Lbl) 
 
     &&& !post.happy
     &&& post.cr3 == pre.cr3
-    &&& pre.pt_mem.is_nonneg_write(addr, value) ==> !pre.is_happy_writenonneg(core, addr, value)
-    &&& pre.pt_mem.is_nonpos_write(addr, value) ==> !pre.is_happy_writenonpos(core, addr, value)
-    &&& pre.pt_mem.is_prot_write(addr, value)   ==> !pre.is_happy_writeprotect(core, addr, value)
+    // &&& pre.pt_mem.is_nonneg_write(addr, value) ==> !pre.is_happy_writenonneg(core, addr, value)
 }
 
 pub open spec fn step_Sadness(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
@@ -598,13 +455,11 @@ pub open spec fn next_step(pre: State, post: State, c: Constants, step: Step, lb
         Step::MemOpTLB { tlb_va }        => step_MemOpTLB(pre, post, c, tlb_va, lbl),
         Step::TLBFill { core, vaddr }    => step_TLBFill(pre, post, c, core, vaddr, lbl),
         Step::TLBEvict { core, tlb_va }  => step_TLBEvict(pre, post, c, core, tlb_va, lbl),
-        Step::TLBFillNA1 { core, vaddr } => step_TLBFillNA1(pre, post, c, core, vaddr, lbl),
-        Step::TLBFillNA2 { core, vaddr } => step_TLBFillNA2(pre, post, c, core, vaddr, lbl),
         Step::WriteNonneg                => step_WriteNonneg(pre, post, c, lbl),
-        Step::WriteNonpos                => step_WriteNonpos(pre, post, c, lbl),
-        Step::WriteProtect               => step_WriteProtect(pre, post, c, lbl),
         Step::Read                       => step_Read(pre, post, c, lbl),
         Step::Barrier                    => step_Barrier(pre, post, c, lbl),
+        Step::Lock { addr, expect, new_value } => step_Lock(pre, post, c, addr, expect, new_value, lbl),
+        Step::Unlock                     => step_Unlock(pre, post, c, lbl),
         Step::SadWrite                   => step_SadWrite(pre, post, c, lbl),
         Step::Sadness                    => step_Sadness(pre, post, c, lbl),
         Step::Stutter                    => step_Stutter(pre, post, c, lbl),
@@ -618,14 +473,9 @@ pub open spec fn next(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
 pub open spec fn init(pre: State, c: Constants) -> bool {
     &&& pre.happy == (pre.pt_mem.pml4 == c.cr3.pml4)
     &&& pre.cores === IMap::new(|core| c.valid_core(core), |core| CoreState::new(c.cr3.pml4))
-    &&& pre.writes.tso === iset![]
-    &&& pre.writes.nonpos === iset![]
     &&& pre.pending_maps === imap![]
-    &&& pre.pending_unmaps === imap![]
-    &&& pre.pending_protects === imap![]
-    &&& pre.polarity === Polarity::Mapping
+    &&& pre.cas == CASProgress::NoOngoingCAS
 
-    &&& c.valid_core(pre.writes.core)
     &&& pre.pt_mem.mem === IMap::new(|va| aligned(va as nat, 8) && c.in_ptmem_range(va as nat, 8), |va| 0)
     &&& aligned(pre.pt_mem.pml4 as nat, 4096)
     &&& c.memories_disjoint()

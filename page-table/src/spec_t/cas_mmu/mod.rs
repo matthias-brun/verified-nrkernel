@@ -2,7 +2,7 @@
 // trusted: definitions for the trusted low-level hardware model
 
 pub mod rl1;
-pub mod rl2;
+// pub mod rl2;
 pub mod rl3;
 pub mod pt_mem;
 pub mod translation;
@@ -18,18 +18,6 @@ use crate::spec_t::cas_mmu::defs::{ Core, PTE, MemOp, InvPcidType };
 use crate::spec_t::cas_mmu::translation::{ PDE, GPDE, l0_bits, l1_bits, l2_bits, l3_bits };
 
 verus! {
-
-// Only used in the simplified hardware models. (The trusted model does technically use it but only
-// in history variables, so it has no effect.)
-// $line_count$Trusted${$
-
-pub enum Polarity {
-    Mapping,
-    Unmapping,
-    Protect,
-}
-
-// $line_count$}$
 
 pub struct Walk {
     pub vaddr: usize,
