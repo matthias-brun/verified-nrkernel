@@ -86,7 +86,6 @@ pub ghost struct State {
     /// Per-node state (TLBs)
     pub cores: IMap<Core, CoreState>,
     /// Tracks the virtual addresses and entries for which we may see non-atomic results.
-    pub pending_maps: IMap<usize, PTE>,
     pub cas: CASProgress,
 }
 
@@ -94,25 +93,24 @@ pub ghost enum Step {
     // Mixed
     Invlpg,
     InvPcid,
-    SadInvPcid,
+    InvPcidSad,
     WriteCr3,
     SadWriteCr3,
     // Faulting memory op due to failed translation
-    // (atomic walk)
     MemOpNoTr,
-    // Faulting memory op due to failed translation
-    // (non-atomic walk result)
-    MemOpNoTrNA { vbase: usize },
     // Memory op using a translation from the TLB
     MemOpTLB { tlb_va: usize },
     TLBFill { core: Core, vaddr: usize },
     TLBEvict { core: Core, tlb_va: usize },
     // TSO
     CASWrite,
+    CASRead,
     Read,
     Barrier,
     Lock { addr: Paddr, expect: u64, new: u64 },
+    SadLock,
     Unlock,
+    SadUnlock,
     SadWrite,
     Sadness,
     Stutter,
@@ -182,7 +180,7 @@ pub open spec fn step_InvPcid(pre: State, post: State, c: Constants, lbl: Lbl) -
     &&& post == pre
 }
 
-pub open spec fn step_SadInvpcid(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+pub open spec fn step_InvPcidSad(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
     // If we do a write without fulfilling the right conditions, we set happy to false.
     &&& lbl matches Lbl::InvPcid(core, typ)
 
@@ -214,23 +212,10 @@ pub open spec fn step_MemOpNoTr(pre: State, post: State, c: Constants, lbl: Lbl)
     &&& pre.happy
 
     &&& c.valid_core(core)
+    &&& pre.cas is NoOngoingCAS
     &&& aligned(memop_vaddr as nat, memop.op_size())
     &&& memop.valid_op_size()
     &&& pre.pt_mem.pt_walk(memop_vaddr).result() is Invalid
-    &&& memop.is_pagefault()
-
-    &&& post == pre
-}
-
-pub open spec fn step_MemOpNoTrNA(pre: State, post: State, c: Constants, vbase: usize, lbl: Lbl) -> bool {
-    &&& lbl matches Lbl::MemOp(core, memop_vaddr, memop)
-    &&& pre.happy
-
-    &&& c.valid_core(core)
-    &&& aligned(memop_vaddr as nat, memop.op_size())
-    &&& memop.valid_op_size()
-    &&& pre.pending_maps.contains_key(vbase)
-    &&& vbase <= memop_vaddr < vbase + pre.pending_maps[vbase].frame.size
     &&& memop.is_pagefault()
 
     &&& post == pre
@@ -281,7 +266,6 @@ pub open spec fn step_MemOpTLB(
     &&& post.cr3 == pre.cr3
     &&& post.pt_mem == pre.pt_mem
     &&& post.cores == pre.cores
-    &&& post.pending_maps == pre.pending_maps
 }
 
 // ---- Non-atomic page table walks ----
@@ -333,11 +317,6 @@ pub open spec fn step_CASWrite(pre: State, post: State, c: Constants, lbl: Lbl) 
     &&& post == State {
         pt_mem: pre.pt_mem.write(addr, value),
         cas: CASProgress::Done { core, addr },
-        pending_maps:
-            IMap::new(
-                |vbase| post.pt_mem@.contains_key(vbase) && !pre.pt_mem@.contains_key(vbase),
-                |vbase| post.pt_mem@[vbase]
-            ),
         ..pre
     }
 }
@@ -351,8 +330,7 @@ pub open spec fn step_Read(pre: State, post: State, c: Constants, lbl: Lbl) -> b
     &&& aligned(addr as nat, 8)
     &&& !(pre.cas is NextRead && pre.cas.core() == core && pre.cas.addr() == addr)
 
-    &&& pre.cas is NoOngoingCAS
-        ==> value & MASK_NEG_DIRTY_ACCESS == pre.pt_mem.read(addr) & MASK_NEG_DIRTY_ACCESS
+    &&& value & MASK_NEG_DIRTY_ACCESS == pre.pt_mem.read(addr) & MASK_NEG_DIRTY_ACCESS
 
     &&& post == pre
 }
@@ -388,22 +366,28 @@ pub open spec fn step_Barrier(pre: State, post: State, c: Constants, lbl: Lbl) -
 }
 
 /// Indicates start of a CAS instruction
-pub closed spec fn step_Lock(pre: State, post: State, c: Constants, addr: Paddr, expect: u64, new: u64, lbl: Lbl) -> bool {
+pub open spec fn step_Lock(pre: State, post: State, c: Constants, addr: Paddr, expect: u64, new: u64, lbl: Lbl) -> bool {
     &&& lbl matches Lbl::Lock(core)
 
     &&& c.valid_core(core)
     &&& pre.cas is NoOngoingCAS
 
     &&& post == State {
-        cas: CASProgress::NextRead {
-            core, addr, expect, new
-        },
+        cas: CASProgress::NextRead { core, addr, expect, new },
         ..pre
     }
 }
 
+pub open spec fn step_SadLock(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+    &&& lbl matches Lbl::Lock(core)
+
+    &&& c.valid_core(core)
+    &&& pre.cas !is NoOngoingCAS
+    &&& !post.happy
+}
+
 /// Indicates end of a CAS instruction
-pub closed spec fn step_Unlock(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+pub open spec fn step_Unlock(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
     &&& lbl matches Lbl::Unlock(core)
 
     &&& c.valid_core(core)
@@ -413,6 +397,14 @@ pub closed spec fn step_Unlock(pre: State, post: State, c: Constants, lbl: Lbl) 
         cas: CASProgress::NoOngoingCAS,
         ..pre
     }
+}
+
+pub open spec fn step_SadUnlock(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+    &&& lbl matches Lbl::Unlock(core)
+
+    &&& c.valid_core(core)
+    &&& !(pre.cas matches CASProgress::Done { core: c, .. } && c == core)
+    &&& !post.happy
 }
 
 pub open spec fn step_Stutter(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
@@ -439,19 +431,21 @@ pub open spec fn next_step(pre: State, post: State, c: Constants, step: Step, lb
     match step {
         Step::Invlpg                     => step_Invlpg(pre, post, c, lbl),
         Step::InvPcid                    => step_InvPcid(pre,post, c, lbl),
-        Step::SadInvPcid                 => step_SadInvpcid(pre, post, c, lbl),
+        Step::InvPcidSad                 => step_InvPcidSad(pre, post, c, lbl),
         Step::WriteCr3                   => step_WriteCr3(pre, post, c, lbl),
         Step::SadWriteCr3                => step_SadWriteCr3(pre, post, c, lbl),
         Step::MemOpNoTr                  => step_MemOpNoTr(pre, post, c, lbl),
-        Step::MemOpNoTrNA { vbase }      => step_MemOpNoTrNA(pre, post, c, vbase, lbl),
         Step::MemOpTLB { tlb_va }        => step_MemOpTLB(pre, post, c, tlb_va, lbl),
         Step::TLBFill { core, vaddr }    => step_TLBFill(pre, post, c, core, vaddr, lbl),
         Step::TLBEvict { core, tlb_va }  => step_TLBEvict(pre, post, c, core, tlb_va, lbl),
         Step::CASWrite                   => step_CASWrite(pre, post, c, lbl),
+        Step::CASRead                    => step_CASRead(pre, post, c, lbl),
         Step::Read                       => step_Read(pre, post, c, lbl),
         Step::Barrier                    => step_Barrier(pre, post, c, lbl),
         Step::Lock { addr, expect, new } => step_Lock(pre, post, c, addr, expect, new, lbl),
+        Step::SadLock                    => step_SadLock(pre, post, c, lbl),
         Step::Unlock                     => step_Unlock(pre, post, c, lbl),
+        Step::SadUnlock                  => step_SadUnlock(pre, post, c, lbl),
         Step::SadWrite                   => step_SadWrite(pre, post, c, lbl),
         Step::Sadness                    => step_Sadness(pre, post, c, lbl),
         Step::Stutter                    => step_Stutter(pre, post, c, lbl),
@@ -465,7 +459,6 @@ pub open spec fn next(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
 pub open spec fn init(pre: State, c: Constants) -> bool {
     &&& pre.happy == (pre.pt_mem.pml4 == c.cr3.pml4)
     &&& pre.cores === IMap::new(|core| c.valid_core(core), |core| CoreState::new(c.cr3.pml4))
-    &&& pre.pending_maps === imap![]
     &&& pre.cas == CASProgress::NoOngoingCAS
 
     &&& pre.pt_mem.mem === IMap::new(|va| aligned(va as nat, 8) && c.in_ptmem_range(va as nat, 8), |va| 0)

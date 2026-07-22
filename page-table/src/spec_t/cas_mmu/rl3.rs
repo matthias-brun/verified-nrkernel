@@ -365,7 +365,6 @@ pub struct History {
     pub cas: CASProgress,
     /// All partial walks since the last invlpg
     pub walks: IMap<Core, ISet<Walk>>,
-    pub pending_maps: IMap<usize, PTE>,
 }
 
 /// Any transition that reads from page table memory takes an arbitrary usize `r`, which is used to
@@ -395,7 +394,7 @@ pub enum Step {
     TLBFill { core: Core, walk: Walk, r: usize },
     TLBEvict { core: Core, tlb_pcid: Pcid, tlb_va: Vaddr },
     // TSO, operations on page table memory
-    Lock,
+    Lock { addr: Paddr, expect: u64, new: u64 }, // These are ghost arguments, not part of lock itself
     Unlock,
     Write,
     Writeback { core: Core },
@@ -418,7 +417,20 @@ impl State {
 
     /// The view of the memory from the writer core's perspective.
     pub closed spec fn writer_mem(self) -> PTMem {
-        self.core_mem(self.lock->Some_0)
+        match self.lock {
+            None => self.pt_mem,
+            Some(core) => self.core_mem(core),
+        }
+    }
+
+    pub closed spec fn is_happy_write(self, core: Core, addr: Paddr, value: usize) -> bool {
+        &&& self.hist.cas is NextWrite
+        &&& self.hist.cas.core() == core
+        &&& self.hist.cas.addr() == addr
+        &&& self.hist.cas->NextWrite_new == value
+        &&& self.writer_mem().is_nonneg_write(addr, value)
+        // && pre.lock == Some(core)
+        // && pre.cores[core].stbuf_empty()
     }
 }
 
@@ -566,8 +578,9 @@ pub closed spec fn step_MemOpNoTr(
 ) -> bool {
     &&& lbl matches Lbl::MemOp(core, memop_vaddr, memop)
 
-    // Userspace mem accesses aren't mixed with locked page table memory accesses
-    &&& pre.lock != Some(core)
+    // Atomic sequences only happen in the kernel, so even on the core executing a locked sequence,
+    // the sequence never contains userspace memory accesses.
+    &&& pre.lock is None
 
     &&& {
     let walk_next = walk_next(pre, core, walk, r);
@@ -596,8 +609,9 @@ pub closed spec fn step_MemOpTLB(
 ) -> bool {
     &&& lbl matches Lbl::MemOp(core, memop_vaddr, memop)
 
-    // Userspace mem accesses aren't mixed with locked page table memory accesses
-    &&& pre.lock != Some(core)
+    // Atomic sequences only happen in the kernel, so even on the core executing a locked sequence,
+    // the sequence never contains userspace memory accesses.
+    &&& pre.lock is None
 
     &&& c.valid_core(core)
     &&& aligned(memop_vaddr as nat, memop.op_size())
@@ -813,13 +827,8 @@ pub closed spec fn step_Write(pre: State, post: State, c: Constants, lbl: Lbl) -
     &&& post == State {
         cores: pre.cores.insert(core, pre.cores[core].stbuf_push(addr, value)),
         hist: History {
-            happy: pre.hist.happy
-                && pre.lock == Some(core)
-                && pre.cores[core].stbuf_empty()
-                && pre.writer_mem().is_nonneg_write(addr, value),
-            pending_maps: IMap::new(
-                |vbase| post.writer_mem()@.contains_key(vbase) && !pre.writer_mem()@.contains_key(vbase),
-                |vbase| post.writer_mem()@[vbase]),
+            happy: pre.hist.happy && pre.is_happy_write(core, addr, value),
+            cas: CASProgress::Done { core, addr },
             ..pre.hist
         },
         ..pre
@@ -851,7 +860,17 @@ pub closed spec fn step_Read(pre: State, post: State, c: Constants, r: usize, lb
     &&& pre.not_blocked(core)
     &&& value == pre.read_from_mem_tso(core, addr, r)
 
-    &&& post == pre
+    &&& post == State {
+        hist: History {
+            cas: if pre.hist.cas is NextRead && pre.hist.cas.core() == core && pre.hist.cas.addr() == addr {
+                if pre.hist.cas->NextRead_expect == value {
+                    CASProgress::NextWrite { core, addr, new: pre.hist.cas->NextRead_new }
+                } else { CASProgress::Done { core, addr } }
+            } else { pre.hist.cas },
+            ..pre.hist
+        },
+        ..pre
+    }
 }
 
 /// The `step_Barrier` transition corresponds to any memory-serializing instruction. This includes
@@ -868,7 +887,7 @@ pub closed spec fn step_Barrier(pre: State, post: State, c: Constants, lbl: Lbl)
 }
 
 /// Indicates start of a locked instruction
-pub closed spec fn step_Lock(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+pub closed spec fn step_Lock(pre: State, post: State, c: Constants, paddr: Paddr, expect: u64, new: u64, lbl: Lbl) -> bool {
     &&& lbl matches Lbl::Lock(core)
 
     &&& c.valid_core(core)
@@ -877,6 +896,11 @@ pub closed spec fn step_Lock(pre: State, post: State, c: Constants, lbl: Lbl) ->
 
     &&& post == State {
         lock: Some(core),
+        hist: History {
+            happy: pre.hist.happy && pre.hist.cas is NoOngoingCAS,
+            cas: CASProgress::NextRead { core, addr: paddr, expect, new },
+            ..pre.hist
+        },
         ..pre
     }
 }
@@ -892,7 +916,8 @@ pub closed spec fn step_Unlock(pre: State, post: State, c: Constants, lbl: Lbl) 
     &&& post == State {
         lock: None,
         hist: History {
-            pending_maps: imap![],
+            happy: pre.hist.happy && (pre.hist.cas matches CASProgress::Done { core: c, .. } && c == core),
+            cas: CASProgress::NoOngoingCAS,
             ..pre.hist
         },
         ..pre
@@ -925,7 +950,7 @@ pub open spec fn next_step(pre: State, post: State, c: Constants, step: Step, lb
         Step::Writeback { core }           => step_Writeback(pre, post, c, core, lbl),
         Step::Read { r }                   => step_Read(pre, post, c, r, lbl),
         Step::Barrier                      => step_Barrier(pre, post, c, lbl),
-        Step::Lock                         => step_Lock(pre, post, c, lbl),
+        Step::Lock { addr, expect, new }   => step_Lock(pre, post, c, addr, expect, new, lbl),
         Step::Unlock                       => step_Unlock(pre, post, c, lbl),
         Step::Stutter                      => step_Stutter(pre, post, c, lbl),
     }
@@ -938,7 +963,7 @@ pub closed spec fn init(pre: State, c: Constants) -> bool {
     &&& pre.hist.happy == true
     &&& pre.hist.walks === IMap::new(|core| c.valid_core(core), |core| iset![])
     &&& pre.hist.cr3 == c.cr3
-    &&& pre.hist.pending_maps === imap![]
+    &&& pre.hist.cas == CASProgress::NoOngoingCAS
 
     &&& pre.lock is None
     &&& pre.pt_mem.mem === IMap::new(|va| aligned(va as nat, 8) && c.in_ptmem_range(va as nat, 8), |va| 0)
@@ -966,7 +991,6 @@ impl State {
         // &&& forall|core| #[trigger] c.valid_core(core) ==> self.cores[core].wf()
         &&& forall|core| #[trigger] self.cores.contains_key(core) ==> self.cores[core].wf()
         &&& forall|core| #[trigger] c.valid_core(core) ==> self.hist.walks[core].finite()
-        //&&& self.hist.writes.nonpos.finite()
     }
 
     pub closed spec fn inv_inflight_walks(self, c: Constants) -> bool {
@@ -995,11 +1019,19 @@ impl State {
 
     pub closed spec fn inv_cache_no_other_entries(self, c: Constants) -> bool {
         forall |core, pcid| c.valid_core(core) && pcid != self.hist.cr3.pcid ==>
-            (#[trigger]self.cores[core].psc[pcid]).is_empty()
+            (#[trigger] self.cores[core].psc[pcid]).is_empty()
     }
 
     pub closed spec fn inv_unlocked_stbuf_empty(self, c: Constants) -> bool {
         forall|core| #[trigger] c.valid_core(core) && self.lock != Some(core) ==> self.cores[core].stbuf_empty()
+    }
+
+    pub closed spec fn inv_cr3_match(self, c: Constants) -> bool {
+        // the history CR3 value must be the one in PTMem
+        &&& self.hist.cr3.pml4 == self.pt_mem.pml4
+        // all cores have the same cr3 value
+        &&& forall |core| #[trigger]c.valid_core(core)
+            ==> self.cores[core].cr3 == self.hist.cr3
     }
 
     // pub closed spec fn inv_cache_no_other_entries(self, c: Constants) -> bool {
@@ -1008,7 +1040,7 @@ impl State {
     // }
 
     pub closed spec fn inv(self, c: Constants) -> bool {
-        &&& self.wf(c) // maybe outside of happy
+        &&& self.wf(c)
         &&& self.hist.happy ==> {
             &&& forall|core| #[trigger] c.valid_core(core) ==> self.cores[core].inv()
             &&& forall|core| #[trigger] c.valid_core(core) ==> self.cores[core].cr3 == self.hist.cr3
@@ -1017,7 +1049,7 @@ impl State {
             &&& self.inv_cache_subset_of_hist_walks(c)
             &&& self.inv_cache_no_other_entries(c)
             &&& self.inv_unlocked_stbuf_empty(c)
-            &&& self.lock is None ==> self.hist.pending_maps.is_empty()
+            &&& self.inv_cr3_match(c)
         }
     }
 
@@ -1076,413 +1108,453 @@ pub proof fn next_preserves_inv(pre: State, post: State, c: Constants, lbl: Lbl)
 // $line_count$}$
 
 
-// pub mod refinement {
-//     use vstd::pervasive::arbitrary;
-//
-//     #[cfg(verus_keep_ghost)]
-//     use crate::extra::lemma_bits_misc;
-//     use crate::spec_t::cas_mmu::*;
-//     use crate::spec_t::cas_mmu::rl2;
-//     use crate::spec_t::cas_mmu::rl3;
-//     #[cfg(verus_keep_ghost)]
-//     use crate::spec_t::cas_mmu::rl3::bit;
-//     use crate::spec_t::cas_mmu::translation::{ MASK_DIRTY_ACCESS, MASK_NEG_DIRTY_ACCESS };
-//
-//     impl rl3::CoreState {
-//         #[verifier(inline)]
-//         pub open spec fn interp(self, walks: ISet<Walk>) -> rl2::CoreState {
-//             rl2::CoreState {
-//                 cr3: self.cr3,
-//                 tlb: self.tlb,
-//                 walks,
-//                 stbuf: self.stbuf
-//             }
-//         }
-//     }
-//
-//     impl rl3::State {
-//         pub closed spec fn interp(self) -> rl2::State {
-//             rl2::State {
-//                 happy: self.hist.happy,
-//                 phys_mem: self.phys_mem,
-//                 pt_mem: self.pt_mem,
-//                 cores: self.cores.map_entries(|k, v:rl3::CoreState| v.interp(self.hist.walks[k])),
-//                 // walks: self.hist.walks,
-//                 writes: self.hist.writes,
-//                 polarity: self.hist.polarity,
-//                 hist: rl2::History {
-//                     cr3: self.hist.cr3,
-//                     pending_maps: self.hist.pending_maps,
-//                     pending_unmaps: self.hist.pending_unmaps,
-//                     pending_protects: self.hist.pending_protects,
-//                 },
-//                 //polarity: self.hist.polarity,
-//             }
-//         }
-//
-//         pub proof fn lemma_prot_write_not_nonpos_or_nonneg(self, addr: usize, value: usize)
-//             requires self.writer_mem().is_prot_write(addr, value)
-//             ensures
-//                 !self.writer_mem().is_nonpos_write(addr, value),
-//                 !self.writer_mem().is_nonneg_write(addr, value),
-//         {
-//             lemma_bits_misc();
-//             let v2 = self.writer_mem().read(addr);
-//             assert((v2 & 1) != (value & 1) ==>
-//                 v2 & !(bit!(63usize) | bit!(2usize) | bit!(1usize)) !=
-//                 value & !(bit!(63usize) | bit!(2usize) | bit!(1usize))) by (bit_vector);
-//         }
-//     }
-//
-//     impl rl3::Step {
-//         pub closed spec fn interp(self, pre: rl3::State, c: Constants, lbl: Lbl) -> rl2::Step {
-//             if pre.hist.happy {
-//                 match self {
-//                     rl3::Step::Invlpg                     => rl2::Step::Invlpg,
-//                     rl3::Step::InvPcid                    => {
-//                         if let Lbl::InvPcid(core, typ) = lbl {
-//                             match typ {
-//                                 InvPcidType::IndividualAddress(d) => {
-//                                     if pre.hist.cr3.pcid == d.pcid {
-//                                         rl2::Step::InvPcid
-//                                     } else {
-//                                         rl2::Step::SadInvPcid
-//                                     }
-//                                 }
-//                                 InvPcidType::SingleContext(d) => {
-//                                     if pre.hist.cr3.pcid == d.pcid {
-//                                         rl2::Step::InvPcid
-//                                     } else {
-//                                         rl2::Step::SadInvPcid
-//                                     }
-//                                 },
-//                                 _ => rl2::Step::InvPcid
-//                             }
-//                         } else {
-//                             arbitrary()
-//                         }
-//                     }
-//                     rl3::Step::WriteCr3                   => {
-//                         if let Lbl::WriteCr3(core, cr3, flush) = lbl {
-//                             if cr3 == pre.hist.cr3 && flush {
-//                                 rl2::Step::WriteCr3
-//                             } else {
-//                                 rl2::Step::SadWriteCr3
-//                             }
-//                         } else {
-//                             arbitrary()
-//                         }
-//                     }
-//                     rl3::Step::MemOpNoTr { walk, r }      => rl2::Step::MemOpNoTr { walk },
-//                     rl3::Step::MemOpTLB { tlb_va }        => rl2::Step::MemOpTLB { tlb_va },
-//                     rl3::Step::CacheFill { core, walk }   => rl2::Step::Stutter,
-//                     rl3::Step::CacheUse { core, walk }    => rl2::Step::Stutter,
-//                     rl3::Step::CacheEvict { core, pcid, walk }  => rl2::Step::Stutter,
-//                     rl3::Step::WalkInit { core, vaddr }   => rl2::Step::WalkInit { core, vaddr },
-//                     rl3::Step::WalkStep { core, walk, r } => rl2::Step::WalkStep { core, walk },
-//                     rl3::Step::WalkAbort { core, walk }   => rl2::Step::Stutter,
-//                     rl3::Step::TLBFill { core, walk, r }  => rl2::Step::TLBFill { core, walk },
-//                     rl3::Step::TLBEvict { core, tlb_pcid, tlb_va }  => rl2::Step::TLBEvict { core, tlb_pcid, tlb_va },
-//                     rl3::Step::Write                      => {
-//                         let (core, addr, value) =
-//                             if let Lbl::Write(core, addr, value) = lbl {
-//                                 (core, addr, value)
-//                             } else { arbitrary() };
-//                         if pre.is_happy_writenonneg(core, addr, value) {
-//                             rl2::Step::WriteNonneg
-//                         } else if pre.is_happy_writenonpos(core, addr, value) {
-//                             rl2::Step::WriteNonpos
-//                         } else if pre.is_happy_writeprotect(core, addr, value) {
-//                             rl2::Step::WriteProtect
-//                         } else {
-//                             rl2::Step::SadWrite
-//                         }
-//                     },
-//                     rl3::Step::Writeback { core } => rl2::Step::Writeback { core },
-//                     rl3::Step::Read { r }         => rl2::Step::Read,
-//                     rl3::Step::Barrier            => rl2::Step::Barrier,
-//                     rl3::Step::Stutter            => rl2::Step::Stutter,
-//                 }
-//             } else {
-//                 rl2::Step::Sadness
-//             }
-//         }
-//     }
-//
-//     broadcast proof fn lemma_mask_dirty_access_after_xor(v: usize, r: usize)
-//         ensures
-//             #[trigger] (v ^ (r & MASK_DIRTY_ACCESS)) & MASK_NEG_DIRTY_ACCESS
-//                             == v & MASK_NEG_DIRTY_ACCESS
-//     {
-//         assert((v ^ (r & ((bit!(5) | bit!(6))))) & (!(bit!(5) | bit!(6)))
-//                 == v & (!(bit!(5) | bit!(6)))) by (bit_vector);
-//     }
-//
-//     /// The value of r is irrelevant, so we can just ignore it.
-//     broadcast proof fn rl3_walk_next_is_rl2_walk_next(state: rl3::State, core: Core, walk: Walk, r: usize)
-//         requires walk.path.len() <= 3,
-//             state.cores.contains_key(core),
-//             state.cores[core].cr3.pml4 == state.pt_mem.pml4
-//         ensures
-//         #[trigger] rl3::walk_next(state, core, walk, r)
-//                 == rl2::walk_next(state.interp().core_mem(core), walk)
-//     {
-//
-//         reveal(rl2::walk_next);
-//         state.pt_mem.lemma_write_seq(state.interp().cores[core].stbuf);
-//         broadcast use
-//             lemma_mask_dirty_access_after_xor,
-//             PDE::lemma_view_unchanged_dirty_access;
-//     }
-//
-//     #[verifier(spinoff_prover)]
-//     proof fn next_step_refines(pre: rl3::State, post: rl3::State, c: Constants, step: rl3::Step, lbl: Lbl)
-//         requires
-//             pre.inv(c),
-//             rl3::next_step(pre, post, c, step, lbl),
-//         ensures rl2::next_step(pre.interp(), post.interp(), c, step.interp(pre, c, lbl), lbl)
-//     {
-//         if pre.hist.happy {
-//             assert(pre.interp().cores.dom() == post.interp().cores.dom());
-//             match step {
-//                 rl3::Step::Invlpg => {
-//                     let core = lbl->Invlpg_0;
-//                     assert(post.interp().cores == pre.interp().cores.insert(core, rl2::CoreState {
-//                         walks: iset![], cr3: pre.interp().cores[core].cr3, tlb: pre.interp().cores[core].tlb,
-//                         stbuf: pre.interp().cores[core].stbuf}));
-//                     assert(rl2::step_Invlpg(pre.interp(), post.interp(), c, lbl));
-//                 },
-//                 rl3::Step::InvPcid => {
-//                     let core = lbl->InvPcid_0;
-//                     let typ = lbl->InvPcid_1;
-//                     match typ {
-//                         InvPcidType::IndividualAddress(d) => {
-//                             assert(pre.hist.cr3 == pre.interp().hist.cr3);
-//                             if d.pcid == pre.hist.cr3.pcid {
-//                                 assert(post.interp().cores == pre.interp().cores.insert(core,
-//                                     pre.interp().cores[core].walks_clear()
-//                                 ));
-//                                 assert(rl2::step_InvPcid(pre.interp(), post.interp(), c, lbl));
-//                             } else {
-//                                 assert(!post.hist.happy);
-//                                 assert(rl2::step_InvPcidSad(pre.interp(), post.interp(), c, lbl));
-//                             }
-//                         }
-//                         InvPcidType::SingleContext(d) => {
-//                             if d.pcid == pre.hist.cr3.pcid {
-//                                 assert(post.interp().cores == pre.interp().cores.insert(core,
-//                                     pre.interp().cores[core].walks_clear()
-//                                 ));
-//                                 assert(rl2::step_InvPcid(pre.interp(), post.interp(), c, lbl));
-//                             } else {
-//                                 assert(!post.interp().happy);
-//                                 assert(rl2::step_InvPcidSad(pre.interp(), post.interp(), c, lbl));
-//                             }
-//                         }
-//                         _ => {
-//                             assert(post.interp().cores == pre.interp().cores.insert(core,
-//                                 pre.interp().cores[core].walks_clear()
-//                             ));
-//                             assert(rl2::step_InvPcid(pre.interp(), post.interp(), c, lbl));
-//                         }
-//                     }
-//                 }
-//                 rl3::Step::WriteCr3 => {
-//                     let core = lbl->WriteCr3_0;
-//                     let cr3 = lbl->WriteCr3_1;
-//                     let flush = lbl->WriteCr3_2;
-//                     if (cr3 == pre.hist.cr3 && flush) {
-//                         assert(post.interp().cores == pre.interp().cores.insert(core,
-//                                 pre.interp().cores[core].cr3_set(cr3).walks_clear()
-//                             ));
-//                         // if flush {
-//
-//                         // } else {
-//                         //     assert(post.interp().cores == pre.interp().cores.insert(core,
-//                         //         pre.interp().cores[core].cr3_set(cr3)
-//                         //     ));
-//                         // }
-//                         assert(rl2::step_WriteCr3(pre.interp(), post.interp(), c, lbl));
-//                     } else {
-//                         assert(!post.interp().happy);
-//                         assert(rl2::step_SadWriteCr3(pre.interp(), post.interp(), c, lbl));
-//                     }
-//                 }
-//                 rl3::Step::MemOpNoTr { walk, r } => {
-//                     let core = lbl->MemOp_0;
-//                     rl3_walk_next_is_rl2_walk_next(pre, core, walk, r);
-//                     assert(post.interp().cores == pre.interp().cores);
-//                     assert(rl2::step_MemOpNoTr(pre.interp(), post.interp(), c, walk, lbl));
-//                 },
-//                 rl3::Step::MemOpTLB { tlb_va } => {
-//                     assert(rl2::step_MemOpTLB(pre.interp(), post.interp(), c, tlb_va, lbl));
-//                 },
-//                 rl3::Step::CacheFill { core, walk } => {
-//                     assert(post.interp().cores == pre.interp().cores);
-//                     assert(rl2::step_Stutter(pre.interp(), post.interp(), c, lbl));
-//                 },
-//                 rl3::Step::CacheUse { core, walk } => {
-//                     assert(post.interp().cores == pre.interp().cores);
-//                     assert(rl2::step_Stutter(pre.interp(), post.interp(), c, lbl));
-//                 },
-//                 rl3::Step::CacheEvict { core, pcid, walk } => {
-//                     assert(post.interp().cores == pre.interp().cores);
-//                     assert(rl2::step_Stutter(pre.interp(), post.interp(), c, lbl));
-//                 },
-//                 rl3::Step::WalkInit { core, vaddr } => {
-//                     assert(post.interp().cores == pre.interp().cores.insert(core, rl2::CoreState {
-//                         walks: pre.interp().cores[core].walks.insert(Walk { vaddr, path: seq![], complete: false }),
-//                         cr3: pre.interp().cores[core].cr3, tlb: pre.interp().cores[core].tlb,
-//                         stbuf: pre.interp().cores[core].stbuf}));
-//                     assert(rl2::step_WalkInit(pre.interp(), post.interp(), c, core, vaddr, lbl))
-//                 },
-//                 rl3::Step::WalkStep { core, walk, r } => {
-//                     rl3_walk_next_is_rl2_walk_next(pre, core, walk, r);
-//                     assert(post.interp().cores == pre.interp().cores.insert(core, rl2::CoreState {
-//                         walks: pre.interp().cores[core].walks.insert(crate::spec_t::cas_mmu::rl3::walk_next(pre, core, walk, r)),
-//                         cr3: pre.interp().cores[core].cr3, tlb: pre.interp().cores[core].tlb,
-//                         stbuf: pre.interp().cores[core].stbuf}));
-//                     assert(rl2::step_WalkStep(pre.interp(), post.interp(), c, core, walk, lbl));
-//                 },
-//                 rl3::Step::WalkAbort { core, walk } => {
-//                     assert(post.interp().cores == pre.interp().cores);
-//                     assert(rl2::step_Stutter(pre.interp(), post.interp(), c, lbl));
-//                 },
-//                 rl3::Step::TLBFill { core, walk, r } => {
-//                     rl3_walk_next_is_rl2_walk_next(pre, core, walk, r);
-//                     let wnext = crate::spec_t::cas_mmu::rl3::walk_next(pre, core, walk, r);
-//                     let vbase = wnext.result()->Valid_vbase;
-//                     let pte = wnext.result()->Valid_pte;
-//                     assert(post.interp().cores == pre.interp().cores.insert(core,
-//                             pre.interp().cores[core].tlb_fill( vbase, pte)));
-//                     assert(rl2::step_TLBFill(pre.interp(), post.interp(), c, core, walk, lbl));
-//                 },
-//                 rl3::Step::TLBEvict { core, tlb_pcid, tlb_va } => {
-//                     assert(post.interp().cores == pre.interp().cores.insert(core, pre.interp().cores[core].tlb_evict(tlb_pcid, tlb_va)));
-//                     assert(rl2::step_TLBEvict(pre.interp(), post.interp(), c, core, tlb_pcid, tlb_va, lbl));
-//                 },
-//                 rl3::Step::Write => {
-//
-//                     let (core, addr, value) =
-//                         if let Lbl::Write(core, addr, value) = lbl {
-//                             (core, addr, value)
-//                         } else { arbitrary() };
-//
-//                     assert(post.interp().cores == pre.interp().cores.insert(core, pre.interp().cores[core].stbuf_push(addr, value)));
-//                     assert(post.hist.pending_maps == post.interp().hist.pending_maps);
-//
-//
-//                     assert(post.interp().writes.core == post.hist.writes.core);
-//                     if pre.is_happy_writenonneg(core, addr, value) {
-//                         lemma_bits_misc();
-//                         assert(!pre.writer_mem().is_prot_write(addr, value));
-//                         assert(rl2::step_WriteNonneg(pre.interp(), post.interp(), c, lbl));
-//                     } else if pre.is_happy_writenonpos(core, addr, value) {
-//                         assert(rl2::step_WriteNonpos(pre.interp(), post.interp(), c, lbl));
-//                     } else if pre.is_happy_writeprotect(core, addr, value) {
-//                         pre.lemma_prot_write_not_nonpos_or_nonneg(addr, value);
-//                         assert(rl2::step_WriteProtect(pre.interp(), post.interp(), c, lbl));
-//                     } else {
-//                         assert(rl2::step_SadWrite(pre.interp(), post.interp(), c, lbl));
-//                     }
-//                 },
-//                 rl3::Step::Writeback { core } => {
-//                     assert(post.interp().cores == pre.interp().cores.insert(core, pre.interp().cores[core].stbuf_drop()));
-//                     assert(rl2::step_Writeback(pre.interp(), post.interp(), c, core, lbl));
-//                 },
-//                 rl3::Step::Read { r } => {
-//                     broadcast use lemma_mask_dirty_access_after_xor;
-//                     assert(rl2::step_Read(pre.interp(), post.interp(), c, lbl));
-//                 },
-//                 rl3::Step::Barrier => {
-//                     assert(rl2::step_Barrier(pre.interp(), post.interp(), c, lbl));
-//                 },
-//                 rl3::Step::Stutter => {
-//                     assert(rl2::step_Stutter(pre.interp(), post.interp(), c, lbl));
-//                 },
-//             }
-//         } else {
-//             assert(rl2::step_Sadness(pre.interp(), post.interp(), c, lbl));
-//         }
-//     }
-//
-//     proof fn init_refines(pre: rl3::State, c: Constants)
-//         requires rl3::init(pre, c),
-//         ensures rl2::init(pre.interp(), c),
-//     {
-//         assert(pre.interp().cores === IMap::new(|core| c.valid_core(core), |core| rl2::CoreState::new(c.cr3)));
-//     }
-//
-//     proof fn next_refines(pre: rl3::State, post: rl3::State, c: Constants, lbl: Lbl)
-//         requires
-//             pre.inv(c),
-//             rl3::next(pre, post, c, lbl),
-//         ensures
-//             rl2::next(pre.interp(), post.interp(), c, lbl),
-//     {
-//         let step = choose|step: rl3::Step| rl3::next_step(pre, post, c, step, lbl);
-//         next_step_refines(pre, post, c, step, lbl);
-//     }
-//
-//     pub mod to_rl1 {
-//         //! Machinery to lift rl3 semantics to rl1 (interp twice and corresponding lemmas), which we use for
-//         //! reasoning about the OS state machine.
-//
-//         use crate::spec_t::cas_mmu::*;
-//         use crate::spec_t::cas_mmu::rl3;
-//         use crate::spec_t::cas_mmu::rl1;
-//
-//         impl rl3::State {
-//             pub open spec fn view(self) -> rl1::State {
-//                 self.interp().interp()
-//             }
-//         }
-//
-//         pub proof fn init_implies_inv(pre: rl3::State, c: Constants)
-//             requires rl3::init(pre, c),
-//             ensures
-//                 pre.inv(c),
-//                 pre.interp().inv(c),
-//                 pre@.happy
-//         {
-//             reveal(rl2::State::wf_ptmem_range);
-//         }
-//
-//         pub broadcast proof fn next_preserves_inv(pre: rl3::State, post: rl3::State, c: Constants, lbl: Lbl)
-//             requires
-//                 pre.inv(c),
-//                 pre.interp().inv(c),
-//                 #[trigger] rl3::next(pre, post, c, lbl),
-//             ensures
-//                 post.inv(c),
-//                 post.interp().inv(c),
-//         {
-//             rl3::next_preserves_inv(pre, post, c, lbl);
-//             rl3::refinement::next_refines(pre, post, c, lbl);
-//             rl2::next_preserves_inv(pre.interp(), post.interp(), c, lbl);
-//         }
-//
-//         pub proof fn init_refines(pre: rl3::State, c: Constants)
-//             requires rl3::init(pre, c),
-//             ensures rl1::init(pre@, c),
-//         {
-//             assert(pre@.cores == IMap::new(|core| c.valid_core(core), |core| rl1::CoreState::new(c.cr3.pml4)));
-//
-//         }
-//
-//         pub broadcast proof fn next_refines(pre: rl3::State, post: rl3::State, c: Constants, lbl: Lbl)
-//             requires
-//                 pre.inv(c),
-//                 pre.interp().inv(c),
-//                 #[trigger] rl3::next(pre, post, c, lbl),
-//             ensures
-//                 rl1::next(pre@, post@, c, lbl),
-//         {
-//             rl3::refinement::next_refines(pre, post, c, lbl);
-//             rl2::refinement::next_refines(pre.interp(), post.interp(), c, lbl);
-//         }
-//     }
-// }
+proof fn lemma_mem_view_after_step_write(pre: State, post: State, c: Constants, lbl: Lbl)
+    requires
+        pre.hist.happy,
+        post.hist.happy,
+        pre.wf(c),
+        // pre.inv_sbuf_facts(c),
+        step_Write(pre, post, c, lbl),
+    ensures
+        post.writer_mem().pml4 == pre.pt_mem.pml4,
+        post.writer_mem().mem  == pre.writer_mem().mem.insert(lbl->Write_1, lbl->Write_2),
+{
+    admit();
+    // let (core, wraddr, value) =
+    //     if let Lbl::Write(core, addr, value) = lbl {
+    //         (core, addr, value)
+    //     } else { arbitrary() };
+    // reveal_with_fuel(vstd::seq::Seq::fold_left, 5);
+    // if post.writes.core == pre.writes.core {
+    //     pre.pt_mem.lemma_write_seq_push(pre.writer_sbuf(), wraddr, value);
+    // } else {
+    //     assert_by_contradiction!(pre.writer_sbuf() =~= seq![], {
+    //         assert(pre.writes.tso.contains(pre.writer_sbuf()[0].0));
+    //     });
+    // }
+}
+
+proof fn lemma_step_Writeback_preserves_writer_mem(pre: State, post: State, c: Constants, core: Core, lbl: Lbl)
+    requires
+        // pre.inv_sbuf_facts(c),
+        step_Writeback(pre, post, c, core, lbl),
+    ensures post.writer_mem() == pre.writer_mem()
+{
+    // assert(post.writes.core == core);
+    pt_mem::PTMem::lemma_write_seq_first(pre.pt_mem, pre.cores[core].stbuf);
+}
+
+
+pub mod refinement {
+    use vstd::pervasive::arbitrary;
+
+    #[cfg(verus_keep_ghost)]
+    use crate::extra::lemma_bits_misc;
+    use crate::spec_t::cas_mmu::*;
+    use crate::spec_t::cas_mmu::rl1;
+    use crate::spec_t::cas_mmu::rl3;
+    #[cfg(verus_keep_ghost)]
+    use crate::spec_t::cas_mmu::rl3::bit;
+    use crate::spec_t::cas_mmu::translation::{ MASK_DIRTY_ACCESS, MASK_NEG_DIRTY_ACCESS };
+
+    impl rl3::CoreState {
+        #[verifier(inline)]
+        pub open spec fn interp(self, walks: ISet<Walk>) -> rl1::CoreState {
+            rl1::CoreState {
+                cr3: self.cr3.pml4,
+                tlb: self.tlb[self.pcid()],
+            }
+        }
+    }
+
+    impl rl3::State {
+        pub closed spec fn interp(self) -> rl1::State {
+            rl1::State {
+                happy: self.hist.happy,
+                cas: self.hist.cas,
+                cr3: self.hist.cr3,
+                phys_mem: self.phys_mem,
+                pt_mem: self.writer_mem(),
+                cores: self.cores.map_entries(|k, v:rl3::CoreState| v.interp(self.hist.walks[k])),
+            }
+        }
+    }
+
+    impl rl3::Step {
+        pub closed spec fn interp(self, pre: rl3::State, c: Constants, lbl: Lbl) -> rl1::Step {
+            if pre.hist.happy {
+                match self {
+                    rl3::Step::Invlpg                     => rl1::Step::Invlpg,
+                    rl3::Step::InvPcid                    => {
+                        if let Lbl::InvPcid(core, typ) = lbl {
+                            match typ {
+                                InvPcidType::IndividualAddress(d) => {
+                                    if pre.hist.cr3.pcid == d.pcid {
+                                        rl1::Step::InvPcid
+                                    } else {
+                                        rl1::Step::InvPcidSad
+                                    }
+                                }
+                                InvPcidType::SingleContext(d) => {
+                                    if pre.hist.cr3.pcid == d.pcid {
+                                        rl1::Step::InvPcid
+                                    } else {
+                                        rl1::Step::InvPcidSad
+                                    }
+                                },
+                                _ => rl1::Step::InvPcid
+                            }
+                        } else {
+                            arbitrary()
+                        }
+                    }
+                    rl3::Step::WriteCr3                   => {
+                        if let Lbl::WriteCr3(core, cr3, flush) = lbl {
+                            if cr3 == pre.hist.cr3 && flush {
+                                rl1::Step::WriteCr3
+                            } else {
+                                rl1::Step::SadWriteCr3
+                            }
+                        } else {
+                            arbitrary()
+                        }
+                    }
+                    rl3::Step::MemOpNoTr { walk, r }      => rl1::Step::MemOpNoTr,
+                    rl3::Step::MemOpTLB { tlb_va }        => rl1::Step::MemOpTLB { tlb_va },
+                    rl3::Step::CacheFill { core, walk }   => rl1::Step::Stutter,
+                    rl3::Step::CacheUse { core, walk }    => rl1::Step::Stutter,
+                    rl3::Step::CacheEvict { core, pcid, walk }  => rl1::Step::Stutter,
+                    rl3::Step::WalkInit { core, vaddr }   => rl1::Step::Stutter,
+                    rl3::Step::WalkStep { core, walk, r } => rl1::Step::Stutter,
+                    rl3::Step::WalkAbort { core, walk }   => rl1::Step::Stutter,
+                    rl3::Step::TLBFill { core, walk, r }  => {
+                        let walk_na_res = rl3::walk_next(pre, core, walk, r).result();
+                        let vbase = walk_na_res->Valid_vbase;
+                        rl1::Step::TLBFill { core, vaddr: vbase }
+                    },
+                    rl3::Step::TLBEvict { core, tlb_pcid, tlb_va }  => {
+                        if tlb_pcid == pre.hist.cr3.pcid {
+                            rl1::Step::TLBEvict { core, tlb_va }
+                        } else {
+                            rl1::Step::Stutter
+                        }
+                    },
+                    rl3::Step::Write                      => {
+                        let (core, addr, value) =
+                            if let Lbl::Write(core, addr, value) = lbl {
+                                (core, addr, value)
+                            } else { arbitrary() };
+
+                        if pre.is_happy_write(core, addr, value) {
+                            rl1::Step::CASWrite
+                        } else {
+                            rl1::Step::SadWrite
+                        }
+                    },
+                    rl3::Step::Writeback { core } => rl1::Step::Stutter,
+                    rl3::Step::Read { r }         => {
+                        let core = lbl->Read_0;
+                        let addr = lbl->Read_1;
+                        if pre.hist.cas is NextRead && pre.hist.cas.core() == core && pre.hist.cas.addr() == addr {
+                            rl1::Step::CASRead
+                        } else {
+                            rl1::Step::Read
+                        }
+                    },
+                    rl3::Step::Barrier            => rl1::Step::Barrier,
+                    rl3::Step::Lock { addr, expect, new } => {
+                        if pre.hist.cas is NoOngoingCAS {
+                            rl1::Step::Lock { addr, expect, new }
+                        } else {
+                            rl1::Step::SadLock
+                        }
+                    },
+                    rl3::Step::Unlock             => {
+                        if pre.hist.cas matches rl3::CASProgress::Done { core, .. } && core == lbl->Unlock_0 {
+                            rl1::Step::Unlock
+                        } else {
+                            rl1::Step::SadUnlock
+                        }
+                    },
+                    rl3::Step::Stutter            => rl1::Step::Stutter,
+                }
+            } else {
+                rl1::Step::Sadness
+            }
+        }
+    }
+
+    broadcast proof fn lemma_mask_dirty_access_after_xor(v: usize, r: usize)
+        ensures
+            #[trigger] (v ^ (r & MASK_DIRTY_ACCESS)) & MASK_NEG_DIRTY_ACCESS
+                            == v & MASK_NEG_DIRTY_ACCESS
+    {
+        assert((v ^ (r & ((bit!(5) | bit!(6))))) & (!(bit!(5) | bit!(6)))
+                == v & (!(bit!(5) | bit!(6)))) by (bit_vector);
+    }
+
+    // /// The value of r is irrelevant, so we can just ignore it.
+    // broadcast proof fn rl3_walk_next_is_rl1_walk_next(state: rl3::State, core: Core, walk: Walk, r: usize)
+    //     requires walk.path.len() <= 3,
+    //         state.cores.contains_key(core),
+    //         state.cores[core].cr3.pml4 == state.pt_mem.pml4
+    //     ensures
+    //     #[trigger] rl3::walk_next(state, core, walk, r)
+    //             == rl1::walk_next(state.interp().core_mem(core), walk)
+    // {
+    //
+    //     reveal(rl1::walk_next);
+    //     state.pt_mem.lemma_write_seq(state.interp().cores[core].stbuf);
+    //     broadcast use
+    //         lemma_mask_dirty_access_after_xor,
+    //         PDE::lemma_view_unchanged_dirty_access;
+    // }
+
+    #[verifier(spinoff_prover)]
+    proof fn next_step_refines(pre: rl3::State, post: rl3::State, c: Constants, step: rl3::Step, lbl: Lbl)
+        requires
+            pre.inv(c),
+            rl3::next_step(pre, post, c, step, lbl),
+        ensures rl1::next_step(pre.interp(), post.interp(), c, step.interp(pre, c, lbl), lbl)
+    {
+        if pre.hist.happy {
+            assert(pre.interp().cores.dom() == post.interp().cores.dom());
+            match step {
+                rl3::Step::Invlpg => {
+                    assert(rl1::step_Invlpg(pre.interp(), post.interp(), c, lbl));
+                },
+                rl3::Step::InvPcid => {
+                    let core = lbl->InvPcid_0;
+                    let typ = lbl->InvPcid_1;
+                    match typ {
+                        InvPcidType::IndividualAddress(d) => {
+                            if d.pcid == pre.hist.cr3.pcid {
+                                assert(rl1::step_InvPcid(pre.interp(), post.interp(), c, lbl));
+                            } else {
+                                assert(!post.hist.happy);
+                                assert(rl1::step_InvPcidSad(pre.interp(), post.interp(), c, lbl));
+                            }
+                        }
+                        InvPcidType::SingleContext(d) => {
+                            if d.pcid == pre.hist.cr3.pcid {
+                                assert(rl1::step_InvPcid(pre.interp(), post.interp(), c, lbl));
+                            } else {
+                                assert(!post.interp().happy);
+                                assert(rl1::step_InvPcidSad(pre.interp(), post.interp(), c, lbl));
+                            }
+                        }
+                        _ => {
+                            // assert(post.interp().cores == pre.interp().cores.insert(core,
+                            //     pre.interp().cores[core].walks_clear()
+                            // ));
+                            assert(rl1::step_InvPcid(pre.interp(), post.interp(), c, lbl));
+                        }
+                    }
+                }
+                rl3::Step::WriteCr3 => {
+                    let core = lbl->WriteCr3_0;
+                    let cr3 = lbl->WriteCr3_1;
+                    let flush = lbl->WriteCr3_2;
+                    if cr3 == pre.hist.cr3 && flush {
+                        assert(post.cores =~= pre.cores);
+                        assert(rl1::step_WriteCr3(pre.interp(), post.interp(), c, lbl));
+                    } else {
+                        assert(!post.interp().happy);
+                        assert(rl1::step_SadWriteCr3(pre.interp(), post.interp(), c, lbl));
+                    }
+                }
+                rl3::Step::MemOpNoTr { walk, r } => {
+                    let core = lbl->MemOp_0;
+                    // rl3_walk_next_is_rl1_walk_next(pre, core, walk, r);
+                    assume(pre.hist.cas is NoOngoingCAS <==> pre.lock is None);
+                    admit(); // TODO: needs some work, check rl2
+
+                    assert(post.interp().cores == pre.interp().cores);
+                    assert(rl1::step_MemOpNoTr(pre.interp(), post.interp(), c, lbl));
+                },
+                rl3::Step::MemOpTLB { tlb_va } => {
+                    assert(rl1::step_MemOpTLB(pre.interp(), post.interp(), c, tlb_va, lbl));
+                },
+                rl3::Step::CacheFill { core, walk } => {
+                    assert(post.interp().cores == pre.interp().cores);
+                    assert(rl1::step_Stutter(pre.interp(), post.interp(), c, lbl));
+                },
+                rl3::Step::CacheUse { core, walk } => {
+                    assert(post.interp().cores == pre.interp().cores);
+                    assert(rl1::step_Stutter(pre.interp(), post.interp(), c, lbl));
+                },
+                rl3::Step::CacheEvict { core, pcid, walk } => {
+                    assert(post.interp().cores == pre.interp().cores);
+                    assert(rl1::step_Stutter(pre.interp(), post.interp(), c, lbl));
+                },
+                rl3::Step::WalkInit { core, vaddr } => {
+                    assert(post.interp().cores =~= pre.interp().cores);
+                    assert(rl1::step_Stutter(pre.interp(), post.interp(), c, lbl));
+                },
+                rl3::Step::WalkStep { core, walk, r } => {
+                    assert(post.interp().cores =~= pre.interp().cores);
+                    assert(rl1::step_Stutter(pre.interp(), post.interp(), c, lbl));
+                },
+                rl3::Step::WalkAbort { core, walk } => {
+                    assert(post.interp().cores == pre.interp().cores);
+                    assert(rl1::step_Stutter(pre.interp(), post.interp(), c, lbl));
+                },
+                rl3::Step::TLBFill { core, walk, r } => {
+                    admit();
+                    // rl3_walk_next_is_rl1_walk_next(pre, core, walk, r);
+                    let wnext = crate::spec_t::cas_mmu::rl3::walk_next(pre, core, walk, r);
+                    let vbase = wnext.result()->Valid_vbase;
+                    let pte = wnext.result()->Valid_pte;
+                    assert(post.interp().cores == pre.interp().cores.insert(core,
+                            pre.interp().cores[core].tlb_fill(vbase, pte)));
+                    assert(rl1::step_TLBFill(pre.interp(), post.interp(), c, core, vbase, lbl));
+                },
+                rl3::Step::TLBEvict { core, tlb_pcid, tlb_va } => {
+                    if tlb_pcid == pre.hist.cr3.pcid {
+                        assert(post.interp().cores == pre.interp().cores.insert(core, pre.interp().cores[core].tlb_evict(tlb_va)));
+                        assert(rl1::step_TLBEvict(pre.interp(), post.interp(), c, core, tlb_va, lbl));
+                    } else {
+                        assert(post.interp().cores =~= pre.interp().cores);
+                        assert(rl1::step_Stutter(pre.interp(), post.interp(), c, lbl));
+                    }
+                },
+                rl3::Step::Write => {
+                    let (core, addr, value) =
+                        if let Lbl::Write(core, addr, value) = lbl {
+                            (core, addr, value)
+                        } else { arbitrary() };
+
+                    if pre.is_happy_write(core, addr, value) {
+                        assume(pre.lock == Some(core));
+                        // lemma_bits_misc();
+                        pre.pt_mem.lemma_write_seq(pre.cores[core].stbuf);
+                        rl3::lemma_mem_view_after_step_write(pre, post, c, lbl);
+                        assert(post.interp().cores =~= pre.interp().cores);
+                        assert(rl1::step_CASWrite(pre.interp(), post.interp(), c, lbl));
+                    } else {
+                        assert(rl1::step_SadWrite(pre.interp(), post.interp(), c, lbl));
+                    }
+                },
+                rl3::Step::Writeback { core } => {
+                    assert(post.interp().cores =~= pre.interp().cores);
+                    rl3::lemma_step_Writeback_preserves_writer_mem(pre, post, c, core, lbl);
+                    assert(rl1::step_Stutter(pre.interp(), post.interp(), c, lbl));
+                },
+                rl3::Step::Read { r } => {
+                    let core = lbl->Read_0;
+                    let addr = lbl->Read_1;
+                    broadcast use lemma_mask_dirty_access_after_xor;
+
+                    if pre.hist.cas is NextRead && pre.hist.cas.core() == core && pre.hist.cas.addr() == addr {
+                        assert(rl1::step_CASRead(pre.interp(), post.interp(), c, lbl));
+                    } else {
+                        assert(rl1::step_Read(pre.interp(), post.interp(), c, lbl));
+                    }
+                },
+                rl3::Step::Barrier => {
+                    assert(rl1::step_Barrier(pre.interp(), post.interp(), c, lbl));
+                },
+                rl3::Step::Lock { addr, expect, new } => {
+                    if pre.hist.cas is NoOngoingCAS {
+                        assert(post.hist.happy);
+                        assert(rl1::step_Lock(pre.interp(), post.interp(), c, addr, expect, new, lbl));
+                    } else {
+                        assert(rl1::step_SadLock(pre.interp(), post.interp(), c, lbl));
+                    }
+                },
+                rl3::Step::Unlock => {
+                    if pre.hist.cas matches rl3::CASProgress::Done { core, .. } && core == lbl->Unlock_0 {
+                        assert(rl1::step_Unlock(pre.interp(), post.interp(), c, lbl));
+                    } else {
+                        assert(rl1::step_SadUnlock(pre.interp(), post.interp(), c, lbl));
+                    }
+                },
+                rl3::Step::Stutter => {
+                    assert(rl1::step_Stutter(pre.interp(), post.interp(), c, lbl));
+                },
+            }
+        } else {
+            assert(rl1::step_Sadness(pre.interp(), post.interp(), c, lbl));
+        }
+    }
+
+    proof fn init_refines(pre: rl3::State, c: Constants)
+        requires rl3::init(pre, c),
+        ensures rl1::init(pre.interp(), c),
+    {
+        assert(pre.interp().cores === IMap::new(|core| c.valid_core(core), |core| rl1::CoreState::new(c.cr3.pml4)));
+    }
+
+    proof fn next_refines(pre: rl3::State, post: rl3::State, c: Constants, lbl: Lbl)
+        requires
+            pre.inv(c),
+            rl3::next(pre, post, c, lbl),
+        ensures
+            rl1::next(pre.interp(), post.interp(), c, lbl),
+    {
+        let step = choose|step: rl3::Step| rl3::next_step(pre, post, c, step, lbl);
+        next_step_refines(pre, post, c, step, lbl);
+    }
+
+    // pub mod to_rl1 {
+    //     //! Machinery to lift rl3 semantics to rl1 (interp twice and corresponding lemmas), which we use for
+    //     //! reasoning about the OS state machine.
+    //
+    //     use crate::spec_t::cas_mmu::*;
+    //     use crate::spec_t::cas_mmu::rl3;
+    //     use crate::spec_t::cas_mmu::rl1;
+    //
+    //     impl rl3::State {
+    //         pub open spec fn view(self) -> rl1::State {
+    //             self.interp().interp()
+    //         }
+    //     }
+    //
+    //     pub proof fn init_implies_inv(pre: rl3::State, c: Constants)
+    //         requires rl3::init(pre, c),
+    //         ensures
+    //             pre.inv(c),
+    //             pre.interp().inv(c),
+    //             pre@.happy
+    //     {
+    //         reveal(rl2::State::wf_ptmem_range);
+    //     }
+    //
+    //     pub broadcast proof fn next_preserves_inv(pre: rl3::State, post: rl3::State, c: Constants, lbl: Lbl)
+    //         requires
+    //             pre.inv(c),
+    //             pre.interp().inv(c),
+    //             #[trigger] rl3::next(pre, post, c, lbl),
+    //         ensures
+    //             post.inv(c),
+    //             post.interp().inv(c),
+    //     {
+    //         rl3::next_preserves_inv(pre, post, c, lbl);
+    //         rl3::refinement::next_refines(pre, post, c, lbl);
+    //         rl2::next_preserves_inv(pre.interp(), post.interp(), c, lbl);
+    //     }
+    //
+    //     pub proof fn init_refines(pre: rl3::State, c: Constants)
+    //         requires rl3::init(pre, c),
+    //         ensures rl1::init(pre@, c),
+    //     {
+    //         assert(pre@.cores == IMap::new(|core| c.valid_core(core), |core| rl1::CoreState::new(c.cr3.pml4)));
+    //
+    //     }
+    //
+    //     pub broadcast proof fn next_refines(pre: rl3::State, post: rl3::State, c: Constants, lbl: Lbl)
+    //         requires
+    //             pre.inv(c),
+    //             pre.interp().inv(c),
+    //             #[trigger] rl3::next(pre, post, c, lbl),
+    //         ensures
+    //             rl1::next(pre@, post@, c, lbl),
+    //     {
+    //         rl3::refinement::next_refines(pre, post, c, lbl);
+    //         rl2::refinement::next_refines(pre.interp(), post.interp(), c, lbl);
+    //     }
+    // }
+}
 
 
 } // verus!
