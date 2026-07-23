@@ -107,7 +107,7 @@ pub ghost enum Step {
     CASRead,
     Read,
     Barrier,
-    Lock { addr: Paddr, expect: u64, new: u64 },
+    Lock { addr: Paddr, expect: usize, new: usize },
     SadLock,
     Unlock,
     SadUnlock,
@@ -316,7 +316,7 @@ pub open spec fn step_CASWrite(pre: State, post: State, c: Constants, lbl: Lbl) 
 
     &&& post == State {
         pt_mem: pre.pt_mem.write(addr, value),
-        cas: CASProgress::Done { core, addr },
+        cas: CASProgress::Done { core, addr, new: value },
         ..pre
     }
 }
@@ -351,7 +351,7 @@ pub open spec fn step_CASRead(pre: State, post: State, c: Constants, lbl: Lbl) -
     &&& post == State {
         cas: if pre.cas->NextRead_expect == value {
             CASProgress::NextWrite { core, addr, new: pre.cas->NextRead_new }
-        } else { CASProgress::Done { core, addr } },
+        } else { CASProgress::Done { core, addr, new: pre.cas->NextRead_new } },
         ..pre
     }
 }
@@ -366,7 +366,7 @@ pub open spec fn step_Barrier(pre: State, post: State, c: Constants, lbl: Lbl) -
 }
 
 /// Indicates start of a CAS instruction
-pub open spec fn step_Lock(pre: State, post: State, c: Constants, addr: Paddr, expect: u64, new: u64, lbl: Lbl) -> bool {
+pub open spec fn step_Lock(pre: State, post: State, c: Constants, addr: Paddr, expect: usize, new: usize, lbl: Lbl) -> bool {
     &&& lbl matches Lbl::Lock(core)
 
     &&& c.valid_core(core)
