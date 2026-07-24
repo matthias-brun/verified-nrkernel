@@ -1,11 +1,3 @@
-// #![cfg_attr(verus_keep_ghost, verus::trusted)]
-// Trusted: This file defines the assumed semantics of the memory translation hardware as a state
-// machine.
-// TODO: manually applying ranges here because the refinement proofs should be counted normally as
-// spec and proof, not trusted
-
-// $line_count$Trusted${$
-
 use vstd::prelude::*;
 use vstd::assert_by_contradiction;
 
@@ -20,11 +12,9 @@ use crate::spec_t::cas_mmu::translation::{ l0_bits, l1_bits, l2_bits, l3_bits, M
 
 verus! {
 
-// This file contains refinement layer 3 of the MMU. This is the most concrete MMU model, i.e. the
-// behavior we assume of the hardware.
-//
-// Most of the definitions in this file are `closed`. We reason about the behavior of this state
-// machine exclusively in terms of the more abstract MMU models it refines.
+// Hardware model which includes support for atomics/CAS, using the lock/unlock modeling from the paper 
+// "A Better x86 Memory Model: x86-TSO" by Sewell et al.
+// Refines directly to rl1, without the intermediate rl2 in the main development.
 
 
 /// Represents the Per-Core State
@@ -365,8 +355,6 @@ pub struct History {
     pub happy: bool,
     pub cr3: Cr3,
     pub cas: CASProgress,
-    /// All partial walks since the last invlpg
-    pub walks: IMap<Core, ISet<Walk>>,
 }
 
 /// Any transition that reads from page table memory takes an arbitrary usize `r`, which is used to
@@ -474,8 +462,6 @@ pub closed spec fn step_WriteCr3(pre: State, post: State, c: Constants, lbl: Lbl
         cores: pre.cores.insert(core, pre.cores[core].cr3_set(cr3)),
         hist: History {
             happy: pre.hist.happy && cr3 == pre.hist.cr3 && flush,
-            // if there was a flush, then we clear the walks since last invlpg
-            walks: if flush { pre.hist.walks.insert(core, iset![]) } else { pre.hist.walks },
             ..pre.hist
         },
         ..pre
@@ -502,13 +488,7 @@ pub closed spec fn step_Invlpg(pre: State, post: State, c: Constants, lbl: Lbl) 
     // invlpg with lock prefix causes exception
     &&& pre.lock != Some(core)
 
-    &&& post == State {
-        hist: History {
-            walks: pre.hist.walks.insert(core, iset![]),
-            ..pre.hist
-        },
-        ..pre
-    }
+    &&& post == pre
 }
 
 
@@ -568,7 +548,6 @@ pub closed spec fn step_InvPcid(pre: State, post: State, c: Constants, lbl: Lbl)
                 InvPcidType::SingleContext(d) => { pre.hist.cr3.pcid == d.pcid },
                 _ => true
             },
-            walks: pre.hist.walks.insert(core, iset![]),
             ..pre.hist
         },
         ..pre
@@ -710,10 +689,6 @@ pub closed spec fn step_WalkInit(pre: State, post: State, c: Constants, core: Co
 
     &&& post == State {
         cores: pre.cores.insert(core, pre.cores[core].walks_insert(walk)),
-        hist: History {
-            walks: pre.hist.walks.insert(core, pre.hist.walks[core].insert(walk)),
-            ..pre.hist
-        },
         ..pre
     }
 }
@@ -759,10 +734,6 @@ pub closed spec fn step_WalkStep(
 
     &&& post == State {
         cores: pre.cores.insert(core, pre.cores[core].walks_replace(walk, walk_next)),
-        hist: History {
-            walks: pre.hist.walks.insert(core, pre.hist.walks[core].insert(walk_next)),
-            ..pre.hist
-        },
         ..pre
     }
 }
@@ -967,7 +938,6 @@ pub closed spec fn init(pre: State, c: Constants) -> bool {
 
     // the PMl4 must match
     &&& pre.hist.happy == true
-    &&& pre.hist.walks === IMap::new(|core| c.valid_core(core), |core| iset![])
     &&& pre.hist.cr3 == c.cr3
     &&& pre.hist.cas == CASProgress::NoOngoingCAS
 
@@ -993,10 +963,8 @@ pub open spec fn next(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
 impl State {
     pub closed spec fn wf(self, c: Constants) -> bool {
         &&& forall|core| #[trigger] c.valid_core(core) <==> self.cores.contains_key(core)
-        &&& forall|core| #[trigger] c.valid_core(core) <==> self.hist.walks.contains_key(core)
         // &&& forall|core| #[trigger] c.valid_core(core) ==> self.cores[core].wf()
         &&& forall|core| #[trigger] self.cores.contains_key(core) ==> self.cores[core].wf()
-        &&& forall|core| #[trigger] c.valid_core(core) ==> self.hist.walks[core].finite()
         &&& self.lock matches Some(core) ==> c.valid_core(core)
         &&& aligned(self.pt_mem.pml4 as nat, 4096)
         &&& c.in_ptmem_range(self.pt_mem.pml4 as nat, 4096)
@@ -1031,17 +999,6 @@ impl State {
             &&& !walk.complete
             &&& is_iter_walk_prefix(self.core_mem(core), walk)
         }
-    }
-
-    pub closed spec fn inv_walks_subset_of_hist_walks(self, c: Constants) -> bool {
-        forall|core| #[trigger] c.valid_core(core) ==> self.cores[core].walks.subset_of(self.hist.walks[core])
-    }
-
-    // phrase this only for the current pcid.
-    pub closed spec fn inv_cache_subset_of_hist_walks(self, c: Constants) -> bool {
-        forall|core, walk|
-            c.valid_core(core) && #[trigger] self.cores[core].psc_contains(walk)
-                ==> #[trigger] self.hist.walks[core].contains(walk)
     }
 
     pub closed spec fn inv_cache_no_other_entries(self, c: Constants) -> bool {
@@ -1090,8 +1047,6 @@ impl State {
             &&& forall|core| #[trigger] c.valid_core(core) ==> self.cores[core].inv()
             &&& forall|core| #[trigger] c.valid_core(core) ==> self.cores[core].cr3 == self.hist.cr3
             &&& forall|core| #[trigger] c.valid_core(core) ==> self.hist.cr3.pml4 == self.pt_mem.pml4
-            &&& self.inv_walks_subset_of_hist_walks(c)
-            &&& self.inv_cache_subset_of_hist_walks(c)
             &&& self.inv_inflight_walks_are_prefixes(c)
             &&& self.inv_valid_is_not_in_sbuf(c)
             &&& self.inv_cache_no_other_entries(c)
@@ -1405,8 +1360,6 @@ proof fn next_step_preserves_wf(pre: State, post: State, c: Constants, step: Ste
     };
 }
 
-// $line_count$}$
-
 
 proof fn lemma_mem_view_after_step_write(pre: State, post: State, c: Constants, lbl: Lbl)
     requires
@@ -1420,11 +1373,7 @@ proof fn lemma_mem_view_after_step_write(pre: State, post: State, c: Constants, 
         post.writer_mem().pml4 == pre.pt_mem.pml4,
         post.writer_mem().mem  == pre.writer_mem().mem.insert(lbl->Write_1, lbl->Write_2),
 {
-    // let core = lbl->Write_0;
-    // let addr = lbl->Write_1;
-    // let value = lbl->Write_2;
     reveal_with_fuel(vstd::seq::Seq::fold_left, 5);
-    // pre.pt_mem.lemma_write_seq_push(pre.cores[core].stbuf, addr, value);
 }
 
 proof fn lemma_step_Writeback_preserves_writer_mem(pre: State, post: State, c: Constants, core: Core, lbl: Lbl)
@@ -1540,20 +1489,6 @@ broadcast proof fn lemma_walk_next_is_walk_next_alt(state: State, core: Core, wa
         lemma_core_mem_pml4,
         lemma_mask_dirty_access_after_xor,
         PDE::lemma_view_unchanged_dirty_access;
-    // let mem = state.core_mem(core);
-    // let addr = add(mem.pml4, mul(l0_bits!(walk.vaddr), WORD_SIZE));
-    // let v1 = mem.read(addr);
-    // let v2 = state.read_from_mem_tso(core, addr, r);
-    // assert(state.core_mem(core).pml4 == state.cores[core].cr3.pml4);
-    // if walk.path.len() == 0 {
-    //     // state.pt_mem.lemma_write_seq(state.cores[core].stbuf);
-    //     // assert(v1 & MASK_NEG_DIRTY_ACCESS == v2 & MASK_NEG_DIRTY_ACCESS);
-    //     // assert(state.core_mem(core).read(addr) == 
-    // } else if walk.path.len() == 1 {
-    // } else if walk.path.len() == 2 {
-    // } else if walk.path.len() == 3 {
-    // } else {
-    // }
 }
 
 // MB: Ideally this would be some one liner `walk.path.is_prefix_of(..)`. But that doesn't seem to work well.
@@ -1758,7 +1693,7 @@ pub mod refinement {
 
     impl rl3::CoreState {
         #[verifier(inline)]
-        pub open spec fn interp(self, walks: ISet<Walk>) -> rl1::CoreState {
+        pub open spec fn interp(self) -> rl1::CoreState {
             rl1::CoreState {
                 cr3: self.cr3.pml4,
                 tlb: self.tlb[self.pcid()],
@@ -1774,7 +1709,7 @@ pub mod refinement {
                 cr3: self.hist.cr3,
                 phys_mem: self.phys_mem,
                 pt_mem: self.writer_mem(),
-                cores: self.cores.map_entries(|k, v:rl3::CoreState| v.interp(self.hist.walks[k])),
+                cores: self.cores.map_entries(|k, v:rl3::CoreState| v.interp()),
             }
         }
     }
@@ -1883,23 +1818,6 @@ pub mod refinement {
         }
     }
 
-    // /// The value of r is irrelevant, so we can just ignore it.
-    // broadcast proof fn rl3_walk_next_is_rl1_walk_next(state: rl3::State, core: Core, walk: Walk, r: usize)
-    //     requires walk.path.len() <= 3,
-    //         state.cores.contains_key(core),
-    //         state.cores[core].cr3.pml4 == state.pt_mem.pml4
-    //     ensures
-    //     #[trigger] rl3::walk_next(state, core, walk, r)
-    //             == rl1::walk_next(state.interp().core_mem(core), walk)
-    // {
-    //
-    //     reveal(rl1::walk_next);
-    //     state.pt_mem.lemma_write_seq(state.interp().cores[core].stbuf);
-    //     broadcast use
-    //         lemma_mask_dirty_access_after_xor,
-    //         PDE::lemma_view_unchanged_dirty_access;
-    // }
-
     #[verifier(spinoff_prover)]
     proof fn next_step_refines(pre: rl3::State, post: rl3::State, c: Constants, step: rl3::Step, lbl: Lbl)
         requires
@@ -1954,10 +1872,16 @@ pub mod refinement {
                     }
                 }
                 rl3::Step::MemOpNoTr { walk, r } => {
-                    let core = lbl->MemOp_0;
-                    // rl3_walk_next_is_rl1_walk_next(pre, core, walk, r);
-                    // assert(pre.hist.cas is NoOngoingCAS <==> pre.lock is None);
-                    admit(); // TODO: needs some work, check rl2
+                    broadcast use rl3::lemma_walk_next_is_walk_next_alt;
+                    let walk = step->MemOpNoTr_walk;
+                    let (core, memop_vaddr, memop) = if let Lbl::MemOp(core, vaddr, memop) = lbl {
+                            (core, vaddr, memop)
+                        } else { arbitrary() };
+                    let core_mem = pre.core_mem(core);
+                    let writer_mem = pre.writer_mem();
+
+                    rl3::lemma_iter_walk_equals_pt_walk(core_mem, walk.vaddr);
+                    rl3::lemma_iter_walk_equals_pt_walk(writer_mem, walk.vaddr);
 
                     assert(post.interp().cores == pre.interp().cores);
                     assert(rl1::step_MemOpNoTr(pre.interp(), post.interp(), c, lbl));
@@ -2096,65 +2020,6 @@ pub mod refinement {
         let step = choose|step: rl3::Step| rl3::next_step(pre, post, c, step, lbl);
         next_step_refines(pre, post, c, step, lbl);
     }
-
-    // pub mod to_rl1 {
-    //     //! Machinery to lift rl3 semantics to rl1 (interp twice and corresponding lemmas), which we use for
-    //     //! reasoning about the OS state machine.
-    //
-    //     use crate::spec_t::cas_mmu::*;
-    //     use crate::spec_t::cas_mmu::rl3;
-    //     use crate::spec_t::cas_mmu::rl1;
-    //
-    //     impl rl3::State {
-    //         pub open spec fn view(self) -> rl1::State {
-    //             self.interp().interp()
-    //         }
-    //     }
-    //
-    //     pub proof fn init_implies_inv(pre: rl3::State, c: Constants)
-    //         requires rl3::init(pre, c),
-    //         ensures
-    //             pre.inv(c),
-    //             pre.interp().inv(c),
-    //             pre@.happy
-    //     {
-    //         reveal(rl2::State::wf_ptmem_range);
-    //     }
-    //
-    //     pub broadcast proof fn next_preserves_inv(pre: rl3::State, post: rl3::State, c: Constants, lbl: Lbl)
-    //         requires
-    //             pre.inv(c),
-    //             pre.interp().inv(c),
-    //             #[trigger] rl3::next(pre, post, c, lbl),
-    //         ensures
-    //             post.inv(c),
-    //             post.interp().inv(c),
-    //     {
-    //         rl3::next_preserves_inv(pre, post, c, lbl);
-    //         rl3::refinement::next_refines(pre, post, c, lbl);
-    //         rl2::next_preserves_inv(pre.interp(), post.interp(), c, lbl);
-    //     }
-    //
-    //     pub proof fn init_refines(pre: rl3::State, c: Constants)
-    //         requires rl3::init(pre, c),
-    //         ensures rl1::init(pre@, c),
-    //     {
-    //         assert(pre@.cores == IMap::new(|core| c.valid_core(core), |core| rl1::CoreState::new(c.cr3.pml4)));
-    //
-    //     }
-    //
-    //     pub broadcast proof fn next_refines(pre: rl3::State, post: rl3::State, c: Constants, lbl: Lbl)
-    //         requires
-    //             pre.inv(c),
-    //             pre.interp().inv(c),
-    //             #[trigger] rl3::next(pre, post, c, lbl),
-    //         ensures
-    //             rl1::next(pre@, post@, c, lbl),
-    //     {
-    //         rl3::refinement::next_refines(pre, post, c, lbl);
-    //         rl2::refinement::next_refines(pre.interp(), post.interp(), c, lbl);
-    //     }
-    // }
 }
 
 

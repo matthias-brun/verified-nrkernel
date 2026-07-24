@@ -9,10 +9,6 @@ use crate::spec_t::cas_mmu::translation::{ MASK_NEG_DIRTY_ACCESS };
 
 verus! {
 
-// This file contains refinement layer 1 of the MMU. Compared to layer 2, it removes store buffers
-// and defines an atomic semantics to page table walks. This is the most abstract version of the
-// MMU model.
-
 /// Represents the Per-Core State.
 pub ghost struct CoreState {
     /// the CR3 register containing the pml4 pointer (we abstract away the PCID here)
@@ -467,18 +463,6 @@ pub open spec fn init(pre: State, c: Constants) -> bool {
     &&& pre.phys_mem.len() == c.range_mem.1
     &&& c.in_ptmem_range(pre.pt_mem.pml4 as nat, 4096)
 }
-
-//proof fn init_implies_inv(pre: State, c: Constants)
-//    requires init(pre, c)
-//    ensures pre.inv(c)
-//{}
-//
-//proof fn next_step_preserves_inv(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
-//    requires
-//        pre.inv(c),
-//        next_step(pre, post, c, step, lbl),
-//    ensures post.inv(c)
-//{}
 
 
 } // verus!
