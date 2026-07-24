@@ -12,6 +12,8 @@ use crate::theorem::RLbl;
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::rl3::refinement::to_rl1;
 
+use super::mmu::defs::PKEY_MAX;
+
 verus! {
 
 pub enum Progress {
@@ -28,6 +30,7 @@ impl os::Step {
         match self {
             os::Step::MMU => false,
             os::Step::MemOp { core, .. } |
+            os::Step::WrPkru { core, .. } |
             os::Step::ReadPTMem { core, .. } |
             os::Step::Barrier { core, .. } |
             os::Step::Invlpg { core, .. } |
@@ -147,7 +150,7 @@ pub proof fn lemma_concurrent_trs_no_lock(pre: os::State, post: os::State, c: os
         if pre.inv(c) {
             os_invariant::next_preserves_inv(c, mid, post, lbl);
             match step { // Broadcasting these is very slow
-                os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
+                os::Step::MemOp { .. } | os::Step::WrPkru {..} | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
                 | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
                 | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
                 | os::Step::ProtectOpChange { .. } => {
@@ -212,7 +215,7 @@ pub proof fn lemma_concurrent_trs_during_shootdown(pre: os::State, post: os::Sta
         {
             os_invariant::next_preserves_inv(c, mid, post, lbl);
             match step { // Broadcasting these is very slow
-                os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. }  | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
+                os::Step::MemOp { .. } | os::Step::WrPkru {..} | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. }  | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
                 | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
                 | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
                 | os::Step::ProtectOpChange { .. } => {
@@ -257,7 +260,7 @@ pub proof fn lemma_concurrent_trs(pre: os::State, post: os::State, c: os::Consta
         if pre.inv(c) && pre.os_ext.lock == Some(core) {
             os_invariant::next_preserves_inv(c, mid, post, lbl);
             match step { // Broadcasting these is very slow
-                os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
+                os::Step::MemOp { .. } | os::Step::WrPkru {..} | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
                 | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
                 | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
                 | os::Step::ProtectOpChange { .. } => {
@@ -520,6 +523,7 @@ pub trait CodeVC {
             tok.progress() is Unready,
             // Caller preconditions
             cr3.wf(),
+            pte.wf(),
             tok.st().mmu@.pt_mem.pml4 == cr3.pml4(),
             tok.st().mmu@.cr3 == cr3@,
         ensures
@@ -564,6 +568,7 @@ pub trait CodeVC {
         cr3: Cr3RegVal,
         vaddr: usize,
         flags: &Flags,
+        pkey: u8,
         // Ghost(frame): Ghost<MemRegion>,
     ) -> (res: (Result<(),()>, Tracked<Token>))
         requires
@@ -573,7 +578,7 @@ pub trait CodeVC {
             tok.consts().valid_ult(tok.thread()),
             tok.st().core_states[tok.core()] is Idle,
             tok.steps() === seq![
-                RLbl::ProtectStart { thread_id: tok.thread(), vaddr: vaddr as nat, flags: *flags},
+                RLbl::ProtectStart { thread_id: tok.thread(), vaddr: vaddr as nat, flags: *flags, pkey: pkey as nat},
                 RLbl::ProtectEnd { thread_id: tok.thread(), vaddr: vaddr as nat, result: arbitrary() }
             ],
             tok.steps_taken() === seq![],
@@ -581,6 +586,7 @@ pub trait CodeVC {
             tok.progress() is Unready,
             // Caller preconditions
             cr3.wf(),
+            pkey < PKEY_MAX,
             tok.st().mmu@.pt_mem.pml4 == cr3.pml4(),
             tok.st().mmu@.cr3 == cr3@,
         ensures

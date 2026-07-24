@@ -20,6 +20,8 @@ pub ghost struct CoreState {
     pub cr3: Paddr,
     /// the cores's TLB. Note: technically it's the VPN there, but we're using the full Vaddr
     pub tlb: IMap<Vaddr, PTE>,
+    /// Protection Key Rights for User Page register
+    pub pkru: PkruRegister
 }
 
 /// Represents the Per-Core State
@@ -28,12 +30,19 @@ impl CoreState {
     pub open spec fn new(cr3: Paddr) -> CoreState {
         CoreState {
             cr3,
-            tlb: imap![]
+            tlb: imap![],
+            pkru: PkruRegister::new()
         }
     }
 
     pub open spec fn init(self) -> bool {
-        self.tlb == imap![]
+        &&& self.tlb == imap![]
+        &&& self.pkru == PkruRegister::new()
+    }
+
+    pub open spec fn wf(self) -> bool {
+        // the pkru register is wf
+        &&& self.pkru.wf()
     }
 
     pub open spec fn cr3_set(self, cr3: Paddr) -> CoreState
@@ -73,6 +82,22 @@ impl CoreState {
             tlb: self.tlb.remove(va),
             ..self
         }
+    }
+
+    #[verifier(inline)]
+    pub open spec fn pkru_set(self, pkru: PkruRegister) -> CoreState {
+        CoreState { pkru, ..self }
+    }
+
+
+    #[verifier(inline)]
+    pub open spec fn pkru_writable(self, pkey: nat) -> bool {
+        self.pkru.allows_writes(pkey)
+    }
+
+    #[verifier(inline)]
+    pub open spec fn pkru_readable(self, pkey: nat) -> bool {
+        self.pkru.allows_reads(pkey)
     }
 }
 
@@ -124,6 +149,7 @@ pub ghost enum Step {
     WriteProtect,
     Read,
     Barrier,
+    WrPkru,
     SadWrite,
     Sadness,
     Stutter,
@@ -350,7 +376,7 @@ pub open spec fn step_MemOpTLB(
     &&& tlb_va <= memop_vaddr < tlb_va + pte.frame.size
     &&& match memop {
         MemOp::Store { new_value, result } => {
-            if paddr < c.phys_mem_size && !pte.flags.is_supervisor && pte.flags.is_writable {
+            if paddr < c.phys_mem_size && !pte.flags.is_supervisor && pte.flags.is_writable && pre.cores[core].pkru_writable(pte.pkey) {
                 &&& result is Ok
                 &&& post.phys_mem === update_range(pre.phys_mem, paddr, new_value)
             } else {
@@ -359,7 +385,7 @@ pub open spec fn step_MemOpTLB(
             }
         },
         MemOp::Load { is_exec, result, .. } => {
-            if paddr < c.phys_mem_size && !pte.flags.is_supervisor && (is_exec ==> !pte.flags.disable_execute) {
+            if paddr < c.phys_mem_size && !pte.flags.is_supervisor && (is_exec ==> !pte.flags.disable_execute) && (!is_exec ==> pre.cores[core].pkru_readable(pte.pkey)) {
                 &&& result == LoadResult::Value(pre.phys_mem.subrange(paddr, paddr + memop.op_size()))
                 &&& post.phys_mem === pre.phys_mem
             } else {
@@ -564,6 +590,19 @@ pub open spec fn step_Barrier(pre: State, post: State, c: Constants, lbl: Lbl) -
     }
 }
 
+pub open spec fn step_WrPkru(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+    &&& lbl matches Lbl::WrPkru(core, regval)
+
+    &&& pre.happy
+    &&& c.valid_core(core)
+    &&& regval.wf()
+
+    &&& post == State {
+        cores: pre.cores.insert(core, pre.cores[core].pkru_set(regval)),
+        ..pre
+    }
+}
+
 pub open spec fn step_Stutter(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
     &&& lbl is Tau
     &&& post == pre
@@ -605,6 +644,7 @@ pub open spec fn next_step(pre: State, post: State, c: Constants, step: Step, lb
         Step::WriteProtect               => step_WriteProtect(pre, post, c, lbl),
         Step::Read                       => step_Read(pre, post, c, lbl),
         Step::Barrier                    => step_Barrier(pre, post, c, lbl),
+        Step::WrPkru                     => step_WrPkru(pre, post, c, lbl),
         Step::SadWrite                   => step_SadWrite(pre, post, c, lbl),
         Step::Sadness                    => step_Sadness(pre, post, c, lbl),
         Step::Stutter                    => step_Stutter(pre, post, c, lbl),

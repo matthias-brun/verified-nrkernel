@@ -106,11 +106,12 @@ pub extern "C" fn veros_unmap_frame(
 pub extern "C" fn veros_mprotect_frame(
     cr3: Cr3RegVal,
     vaddr: u64,
-    flags: &Flags) -> i64
+    flags: &Flags,
+    pkey: u8,) -> i64
 {
     let token: Tracked<Token> = Tracked::assume_new();
 
-    let (res, _tok) = impl_u::verified_impl::PTImpl::sys_do_protect(token, cr3, vaddr as usize, flags);
+    let (res, _tok) = impl_u::verified_impl::PTImpl::sys_do_protect(token, cr3, vaddr as usize, flags, pkey);
     match res {
         Ok(frame) => {
             return 0;

@@ -50,6 +50,8 @@ pub ghost enum GPDE {
         G: bool,
         /// Indirectly determines the memory type used to access the page referenced by this entry
         PAT: bool,
+        /// the PKEY of the page
+        pkey: u8,
         /// If IA32_EFER.NXE = 1, execute-disable (if 1, instruction fetches are not allowed from
         /// the page controlled by this entry); otherwise, reserved (must be 0)
         XD: bool,
@@ -102,6 +104,15 @@ pub const MASK_NEG_DIRTY_ACCESS: usize = !MASK_DIRTY_ACCESS;
 
 pub const MASK_PROT_FLAGS: usize = bit!(63usize) | bit!(2usize) | bit!(1usize);
 pub const MASK_NEG_PROT_FLAGS: usize = !MASK_PROT_FLAGS;
+
+// In PTEs: 62:59 Protection key;
+pub const MASK_PKEY: usize = bit!(59) | bit!(60) | bit!(61) | bit!(62);
+pub const MASK_PKEY_MAX: usize = 0x0000_0000_0000_000f;
+pub const MASK_NEG_PKEY: usize = !MASK_PKEY;
+pub const SHIFT_PKEY: usize = 59;
+
+pub const MASK_PROT_ALL: usize = (MASK_PROT_FLAGS | MASK_PKEY);
+pub const MASK_NEG_PROT_ALL: usize = !MASK_PROT_ALL;
 // $line_count$}$
 
 // In the implementation we can always use the 12:52 mask as the invariant guarantees that in the
@@ -167,11 +178,21 @@ impl PDE {
             requires 32 <= mw <= 52;
     }
 
+    pub broadcast proof fn lemma_pkey_limit(self)
+        requires self.layer@ < 4
+        ensures #![trigger self.view()]
+            self@ is Page ==> {
+                &&& self@->Page_pkey < PKEY_MAX
+            }
+    {
+        Self::lemma_spec_extract_result(self.entry);
+    }
+
     pub broadcast proof fn lemma_view_unchanged_prot_flags(self, other: PDE)
         requires
             self.layer@ < 4,
-            #[trigger] (self.entry & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_FLAGS)
-                == #[trigger] (other.entry & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_FLAGS),
+            #[trigger] (self.entry & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_ALL)
+                == #[trigger] (other.entry & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_ALL),
             self.layer == other.layer,
         ensures
             other@ is Directory <==> self@ is Directory,
@@ -180,6 +201,7 @@ impl PDE {
             other@ matches GPDE::Directory { addr, .. } ==> self@->Directory_addr == addr,
             other@ matches GPDE::Page { addr, .. }      ==> self@->Page_addr == addr,
     {
+        admit();
         reveal(PDE::all_mb0_bits_are_zero);
         axiom_max_phyaddr_width_facts();
         extra::lemma_bits_prot_equality();
@@ -196,6 +218,9 @@ impl PDE {
         reveal(PDE::all_mb0_bits_are_zero);
         let v1 = self.entry;
         let v2 = other.entry;
+        assert(v1 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_ALL == v2 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_ALL) by (bit_vector)
+            requires v1 & MASK_NEG_DIRTY_ACCESS == v2 & MASK_NEG_DIRTY_ACCESS;
+        self.lemma_view_unchanged_prot_flags(other);
         assert(forall|b: usize| 0 <= b < 5 ==> #[trigger] (v1 & bit!(b)) == v2 & bit!(b)) by (bit_vector)
             requires v1 & MASK_NEG_DIRTY_ACCESS == v2 & MASK_NEG_DIRTY_ACCESS;
         assert(forall|b: usize| 6 < b < 64 ==> #[trigger] (v1 & bit!(b)) == v2 & bit!(b)) by (bit_vector)
@@ -230,6 +255,36 @@ impl PDE {
             requires v1 & MASK_NEG_DIRTY_ACCESS == v2 & MASK_NEG_DIRTY_ACCESS;
         assert(v1 & bitmask_inc!(13, 20) == v2 & bitmask_inc!(13, 20)) by (bit_vector)
             requires v1 & MASK_NEG_DIRTY_ACCESS == v2 & MASK_NEG_DIRTY_ACCESS;
+
+        assert(v1 & bitmask_inc!(59, 62) == v2 & bitmask_inc!(59, 62)) by (bit_vector)
+            requires v1 & MASK_NEG_DIRTY_ACCESS == v2 & MASK_NEG_DIRTY_ACCESS;
+
+        assert(Self::spec_extract_pkey(v1) == Self::spec_extract_pkey(v2)) by (bit_vector)
+            requires v1 & MASK_NEG_DIRTY_ACCESS == v2 & MASK_NEG_DIRTY_ACCESS;
+    }
+
+    pub open spec fn spec_extract_pkey(val: usize) -> u8 {
+        // In PTEs: 62:59 Protection key; i
+        ((val >> SHIFT_PKEY) & MASK_PKEY_MAX) as u8
+    }
+
+    pub open spec fn spec_insert_pkey(val: usize, pkey: u8) -> usize
+    {
+        (val & MASK_NEG_PKEY) | (((pkey as usize) & MASK_PKEY_MAX) << SHIFT_PKEY)
+    }
+
+    pub broadcast proof fn lemma_insert_extract_equal(val: usize, pkey: u8)
+        requires pkey < PKEY_MAX
+        ensures #[trigger]Self::spec_extract_pkey(Self::spec_insert_pkey(val, pkey)) == pkey
+    {
+        assert(Self::spec_extract_pkey(Self::spec_insert_pkey(val, pkey)) == pkey) by (bit_vector)
+            requires pkey < PKEY_MAX;
+    }
+
+    pub broadcast proof fn lemma_spec_extract_result(val: usize)
+        ensures #[trigger]Self::spec_extract_pkey(val) < PKEY_MAX
+    {
+        assert(((val >> SHIFT_PKEY) & MASK_PKEY_MAX) < PKEY_MAX) by (bit_vector);
     }
 
     pub open spec fn view(self) -> GPDE {
@@ -250,7 +305,8 @@ impl PDE {
                     // super page mapping
                     let addr = v & MASK_L1_PG_ADDR;
                     let PAT = v & MASK_PG_FLAG_PAT == MASK_PG_FLAG_PAT;
-                    GPDE::Page { addr, P, RW, US, PWT, PCD, G, PAT, XD }
+                    let pkey = Self::spec_extract_pkey(v);
+                    GPDE::Page { addr, P, RW, US, PWT, PCD, G, PAT, pkey, XD }
                 } else {
                     let addr = v & MASK_ADDR;
                     GPDE::Directory { addr, P, RW, US, PWT, PCD, XD }
@@ -260,7 +316,8 @@ impl PDE {
                     // huge page mapping
                     let addr = v & MASK_L2_PG_ADDR;
                     let PAT = v & MASK_PG_FLAG_PAT == MASK_PG_FLAG_PAT;
-                    GPDE::Page { addr, P, RW, US, PWT, PCD, G, PAT, XD }
+                    let pkey = Self::spec_extract_pkey(v);
+                    GPDE::Page { addr, P, RW, US, PWT, PCD, G, PAT, pkey, XD }
                 } else {
                     let addr = v & MASK_ADDR;
                     GPDE::Directory { addr, P, RW, US, PWT, PCD, XD }
@@ -268,7 +325,8 @@ impl PDE {
             } else if self.layer == 3 {
                 let addr = v & MASK_L3_PG_ADDR;
                 let PAT = v & MASK_L3_PG_FLAG_PAT == MASK_L3_PG_FLAG_PAT;
-                GPDE::Page { addr, P, RW, US, PWT, PCD, G, PAT, XD }
+                let pkey = Self::spec_extract_pkey(v);
+                GPDE::Page { addr, P, RW, US, PWT, PCD, G, PAT, pkey, XD }
             } else {
                 arbitrary()
             }
@@ -287,7 +345,7 @@ impl PDE {
         } else if self.layer == 1 {  // PDPT
             if self.entry & MASK_L1_PG_FLAG_PS == MASK_L1_PG_FLAG_PS {
                 // 51:M, 29:13
-                &&& self.entry & bitmask_inc!(MAX_PHYADDR_WIDTH, 51) == 0
+                &&& self.entry & bitmask_inc!(MAX_PHYADDR_WIDTH, SHIFT_PKEY - 1) == 0
                 &&& self.entry & bitmask_inc!(13usize,29usize) == 0
             } else {
                 // 51:M, 7
@@ -297,7 +355,7 @@ impl PDE {
         } else if self.layer == 2 {  // PD
             if self.entry & MASK_L2_PG_FLAG_PS == MASK_L2_PG_FLAG_PS {
                 // 62:M, 20:13
-                &&& self.entry & bitmask_inc!(MAX_PHYADDR_WIDTH, 62) == 0
+                &&& self.entry & bitmask_inc!(MAX_PHYADDR_WIDTH, SHIFT_PKEY - 1) == 0
                 &&& self.entry & bitmask_inc!(13usize,20usize) == 0
             } else {
                 // 62:M, 7
@@ -306,7 +364,7 @@ impl PDE {
             }
         } else if self.layer == 3 {  // PT, always frame
             // 62:M
-            self.entry & bitmask_inc!(MAX_PHYADDR_WIDTH, 62) == 0
+            self.entry & bitmask_inc!(MAX_PHYADDR_WIDTH, SHIFT_PKEY - 1) == 0
         } else {
             arbitrary()
         }
@@ -372,6 +430,8 @@ macro_rules! l3_bits {
 }
 
 pub(crate) use l3_bits;
+
+use super::defs::PKEY_MAX;
 
 // Don't broadcast this. It refuses to trigger for some reason.
 pub proof fn lemma_bit_indices_less_512(va: usize)

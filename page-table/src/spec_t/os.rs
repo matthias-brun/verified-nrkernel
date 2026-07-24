@@ -2,6 +2,7 @@
 // not trusted:
 // describes how the whole system behaves
 
+use vstd::pervasive::arbitrary;
 use vstd::prelude::*;
 
 use crate::spec_t::mmu::{ rl3, rl1 };
@@ -20,7 +21,7 @@ use crate::theorem::RLbl;
 use crate::spec_t::os_ext;
 use crate::impl_u::{ wrapped_token, l2_impl::PT };
 
-use super::mmu::defs::InvPcidDescriptor;
+use super::mmu::defs::{InvPcidDescriptor, PkruRegister};
 use super::os_ext::code::VirtAddr;
 
 verus! {
@@ -53,10 +54,10 @@ pub ghost enum CoreState {
     UnmapExecuting          { ult_id: nat, vaddr: nat, result: Option<Result<PTE, ()>> },
     UnmapOpDone             { ult_id: nat, vaddr: nat, result: Result<PTE, ()> },
     UnmapShootdownWaiting   { ult_id: nat, vaddr: nat, result: Result<PTE, ()> },
-    ProtectWaiting          { ult_id: nat, vaddr: nat, flags: Flags },
-    ProtectExecuting        { ult_id: nat, vaddr: nat, flags: Flags, result: Option<Result<PTE, ()>> },
-    ProtectOpDone           { ult_id: nat, vaddr: nat, flags: Flags, result: Result<PTE, ()> },
-    ProtectShootdownWaiting { ult_id: nat, vaddr: nat, flags: Flags, result: Result<PTE, ()> },
+    ProtectWaiting          { ult_id: nat, vaddr: nat, flags: Flags, pkey: nat },
+    ProtectExecuting        { ult_id: nat, vaddr: nat, flags: Flags, pkey: nat, result: Option<Result<PTE, ()>> },
+    ProtectOpDone           { ult_id: nat, vaddr: nat, flags: Flags, pkey: nat, result: Result<PTE, ()> },
+    ProtectShootdownWaiting { ult_id: nat, vaddr: nat, flags: Flags, pkey: nat, result: Result<PTE, ()> },
 }
 
 #[allow(inconsistent_fields)]
@@ -67,6 +68,7 @@ pub ghost enum Step {
     Barrier { core: Core },
     Invlpg { core: Core },
     InvPcid { core: Core },
+    WrPkru { core: Core },
     // ReloadCr3 { core: Core },
     // Map
     MapStart { core: Core },
@@ -242,10 +244,11 @@ pub open spec fn step_MMU(c: Constants, s1: State, s2: State, lbl: RLbl) -> bool
     &&& s2.sound == s1.sound
 }
 
-pub open spec fn step_MemOp(c: Constants, s1: State, s2: State, core: Core, lbl: RLbl) -> bool {
-    &&& lbl matches RLbl::MemOp { thread_id, vaddr, op }
+pub open spec fn step_MemOp(c: Constants, s1: State, s2: State, core_step: Core, lbl: RLbl) -> bool {
+    &&& lbl matches RLbl::MemOp { thread_id, core, vaddr, op }
     &&& aligned(vaddr, 8)
     &&& vaddr <= usize::MAX
+    &&& core_step == core
     &&& core == c.ult2core[thread_id]
     &&& c.valid_ult(thread_id)
     &&& s1.core_states[core] is Idle
@@ -317,6 +320,20 @@ pub open spec fn step_InvPcid(c: Constants, s1: State, s2: State, core: Core, lb
 //     &&& s2.sound == s1.sound
 // }
 
+pub open spec fn step_WrPkru(c: Constants, s1: State, s2: State, core_step: Core, lbl: RLbl) -> bool {
+    &&& lbl matches RLbl::WrPkru { thread_id, core, val }
+    &&& core == c.ult2core[thread_id]
+    &&& core_step == core
+    &&& c.valid_ult(thread_id)
+    &&& s1.core_states[core] is Idle
+    &&& val.wf()
+    // mmu statemachine steps
+    &&& rl3::next(s1.mmu, s2.mmu, c.common, mmu::Lbl::WrPkru(core, val))
+
+    &&& s2.os_ext == s1.os_ext
+    &&& s2.core_states == s1.core_states
+    &&& s2.sound == s1.sound
+}
 
 ///////////////////////////////////////////////////////////////////////////////////////////////
 // Map
@@ -697,7 +714,7 @@ pub open spec fn step_Protect_enabled(vaddr: nat) -> bool {
 }
 
 pub open spec fn step_ProtectStart(c: Constants, s1: State, s2: State, core: Core, lbl: RLbl) -> bool {
-    &&& lbl matches RLbl::ProtectStart { thread_id, vaddr, flags }
+    &&& lbl matches RLbl::ProtectStart { thread_id, vaddr, flags, pkey }
     &&& {
     let pt = s1.interp_pt_mem();
     let pte_size = if pt.contains_key(vaddr) { pt[vaddr].frame.size } else { 0 };
@@ -710,7 +727,7 @@ pub open spec fn step_ProtectStart(c: Constants, s1: State, s2: State, core: Cor
     &&& s2.mmu == s1.mmu
     &&& s2.os_ext == s1.os_ext
     // new state
-    &&& s2.core_states == s1.core_states.insert(core, CoreState::ProtectWaiting { ult_id: thread_id, vaddr, flags })
+    &&& s2.core_states == s1.core_states.insert(core, CoreState::ProtectWaiting { ult_id: thread_id, vaddr, flags, pkey })
     &&& s2.sound == (s1.sound && step_Protect_sound(s1, vaddr, pte_size))
     }
 }
@@ -719,12 +736,12 @@ pub open spec fn step_ProtectOpStart(c: Constants, s1: State, s2: State, core: C
     &&& lbl is Tau
     // enabling conditions
     &&& c.valid_core(core)
-    &&& s1.core_states[core] matches CoreState::ProtectWaiting { ult_id, vaddr, flags }
+    &&& s1.core_states[core] matches CoreState::ProtectWaiting { ult_id, vaddr, pkey, flags }
     // mmu statemachine steps
     &&& s2.mmu == s1.mmu
     &&& os_ext::next(s1.os_ext, s2.os_ext, c.common, os_ext::Lbl::AcquireLock { core })
     // new state
-    &&& s2.core_states == s1.core_states.insert(core, CoreState::ProtectExecuting { ult_id, vaddr, flags, result: None })
+    &&& s2.core_states == s1.core_states.insert(core, CoreState::ProtectExecuting { ult_id, vaddr, flags, pkey, result: None })
     &&& s2.sound == s1.sound
 }
 
@@ -732,17 +749,17 @@ pub open spec fn step_ProtectOpChange(c: Constants, s1: State, s2: State, core: 
     &&& lbl is Tau
     // enabling conditions
     &&& c.valid_core(core)
-    &&& s1.core_states[core] matches CoreState::ProtectExecuting { ult_id, vaddr, flags, result: None }
+    &&& s1.core_states[core] matches CoreState::ProtectExecuting { ult_id, vaddr, flags, pkey, result: None }
     &&& s1.mmu@.pt_mem.is_prot_write(paddr, value)
     // mmu statemachine steps
     &&& rl3::next(s1.mmu, s2.mmu, c.common, mmu::Lbl::Write(core, paddr, value))
     &&& s2.mmu@.happy == s1.mmu@.happy
     &&& s1.os_ext.is_in_allocated_region(paddr as nat)
     &&& s1.interp_pt_mem().contains_key(vaddr)
-    &&& s2.interp_pt_mem() == s1.interp_pt_mem().insert(vaddr, PTE { flags, ..s1.interp_pt_mem()[vaddr] })
+    &&& s2.interp_pt_mem() == s1.interp_pt_mem().insert(vaddr, PTE { flags, pkey, ..s1.interp_pt_mem()[vaddr] })
     &&& s2.core_states == s1.core_states.insert(
         core,
-        CoreState::ProtectExecuting { ult_id, vaddr, flags, result: Some(Ok(s1.interp_pt_mem()[vaddr])) }
+        CoreState::ProtectExecuting { ult_id, vaddr, flags, pkey, result: Some(Ok(s1.interp_pt_mem()[vaddr])) }
     )
 
     &&& s2.os_ext == s1.os_ext
@@ -753,7 +770,7 @@ pub open spec fn step_ProtectOpFail(c: Constants, s1: State, s2: State, core: Co
     &&& lbl is Tau
     // enabling conditions
     &&& c.valid_core(core)
-    &&& s1.core_states[core] matches CoreState::ProtectExecuting { ult_id, vaddr, flags, result: None }
+    &&& s1.core_states[core] matches CoreState::ProtectExecuting { ult_id, vaddr, flags, pkey, result: None }
     &&& !s1.interp_pt_mem().contains_key(vaddr)
     // mmu statemachine steps
     &&& s2.mmu == s1.mmu
@@ -761,7 +778,7 @@ pub open spec fn step_ProtectOpFail(c: Constants, s1: State, s2: State, core: Co
     // new state
     &&& s2.core_states == s1.core_states.insert(
         core,
-        CoreState::ProtectOpDone { ult_id, vaddr, flags, result: Err(()) }
+        CoreState::ProtectOpDone { ult_id, vaddr, flags, pkey, result: Err(()) }
     )
     &&& s2.sound == s1.sound
 }
@@ -770,7 +787,7 @@ pub open spec fn step_ProtectInitiateShootdown(c: Constants, s1: State, s2: Stat
     &&& lbl is Tau
     // enabling conditions
     &&& c.valid_core(core)
-    &&& s1.core_states[core] matches CoreState::ProtectExecuting { ult_id, vaddr, flags, result: Some(Ok(pte)) }
+    &&& s1.core_states[core] matches CoreState::ProtectExecuting { ult_id, vaddr, flags, pkey, result: Some(Ok(pte)) }
     &&& s1.mmu@.writes.tso === iset![]
     // mmu statemachine steps
     &&& s2.mmu == s1.mmu
@@ -778,7 +795,7 @@ pub open spec fn step_ProtectInitiateShootdown(c: Constants, s1: State, s2: Stat
     // new state
     &&& s2.core_states == s1.core_states.insert(
         core,
-        CoreState::ProtectShootdownWaiting { ult_id, vaddr, flags, result: Ok(pte) },
+        CoreState::ProtectShootdownWaiting { ult_id, vaddr, flags, pkey, result: Ok(pte) },
     )
     &&& s2.sound == s1.sound
 }
@@ -824,6 +841,7 @@ pub open spec fn next_step(c: Constants, s1: State, s2: State, step: Step, lbl: 
         Step::Invlpg { core }                         => step_Invlpg(c, s1, s2, core, lbl),
         Step::InvPcid { core }                        => step_InvPcid(c, s1, s2, core, lbl),
         // Step::ReloadCr3 { core}                       => step_ReloadCr3(c, s1, s2, core, lbl),
+        Step::WrPkru { core  }                        => step_WrPkru(c, s1, s2, core, lbl),
         // Map steps
         Step::MapStart { core }                       => step_MapStart(c, s1, s2, core, lbl),
         Step::MapOpStart { core }                     => step_MapOpStart(c, s1, s2, core, lbl),
@@ -1122,9 +1140,9 @@ impl State {
 
     pub open spec fn inflight_protect_core_get_pte(self, core: Core) -> PTE {
         match self.core_states[core] {
-            CoreState::ProtectWaiting { vaddr, flags, .. }
-            | CoreState::ProtectExecuting { vaddr, flags, result: None, .. }
-                => PTE { frame: self.interp_pt_mem()[vaddr].frame, flags },
+            CoreState::ProtectWaiting { vaddr, flags, pkey, .. }
+            | CoreState::ProtectExecuting { vaddr, flags, pkey, result: None, .. }
+                => PTE { frame: self.interp_pt_mem()[vaddr].frame, flags, pkey },
             CoreState::ProtectExecuting { vaddr, result: Some(Ok(pte)), .. }
             | CoreState::ProtectOpDone { vaddr, result: Ok(pte), .. }
             | CoreState::ProtectShootdownWaiting { vaddr, result: Ok(pte), .. }
@@ -1336,22 +1354,22 @@ impl State {
                                 hlspec::ThreadState::Idle
                             }
                         },
-                        CoreState::ProtectWaiting { ult_id, vaddr, flags }
-                        | CoreState::ProtectExecuting { ult_id, vaddr, flags, result: None } => {
+                        CoreState::ProtectWaiting { ult_id, vaddr, flags, pkey }
+                        | CoreState::ProtectExecuting { ult_id, vaddr, flags, pkey, result: None } => {
                             let pte = if self.interp_pt_mem().contains_key(vaddr) {
                                 Some(self.interp_pt_mem()[vaddr])
                             } else {
                                 None
                             };
                             if ult_id == ult_id2 {
-                                hlspec::ThreadState::Protect { vaddr, flags, pte }
+                                hlspec::ThreadState::Protect { vaddr, flags, pte, pkey }
                             } else {
                                 hlspec::ThreadState::Idle
                             }
                         },
-                        CoreState::ProtectExecuting { ult_id, vaddr, flags, result: Some(result) }
-                        | CoreState::ProtectOpDone { ult_id, vaddr, flags, result }
-                        | CoreState::ProtectShootdownWaiting { ult_id, vaddr, flags, result } => {
+                        CoreState::ProtectExecuting { ult_id, vaddr, flags, pkey, result: Some(result) }
+                        | CoreState::ProtectOpDone { ult_id, vaddr, flags, pkey, result }
+                        | CoreState::ProtectShootdownWaiting { ult_id, vaddr, flags, pkey, result } => {
                             if ult_id == ult_id2 {
                                 // Some day we can again use .ok() instead of this
                                 // https://github.com/verus-lang/verus/issues/2123
@@ -1359,7 +1377,7 @@ impl State {
                                     Ok(t) => Some(t),
                                     Err(_) => None,
                                 };
-                                hlspec::ThreadState::Protect { vaddr, flags, pte }
+                                hlspec::ThreadState::Protect { vaddr, flags, pkey, pte }
                             } else {
                                 hlspec::ThreadState::Idle
                             }
@@ -1375,7 +1393,8 @@ impl State {
         let mem = self.interp_vmem(c);
         let thread_state = self.interp_thread_state(c);
         let sound = self.sound;
-        hlspec::State { mem, mappings, thread_state, sound }
+        let pkrus = self.mmu@.cores.map_values(|v: rl1::CoreState| v.pkru );
+        hlspec::State { mem, mappings, thread_state, sound, pkrus }
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////////////
@@ -1600,11 +1619,11 @@ impl State {
         forall|core: Core| #[trigger] c.valid_core(core) ==>
             match self.core_states[core] {
                 // succeeded
-                CoreState::ProtectExecuting { vaddr, flags, result: Some(Ok(pte)), .. }
-                | CoreState::ProtectOpDone { vaddr, flags, result: Ok(pte), .. }
-                | CoreState::ProtectShootdownWaiting { vaddr, flags, result: Ok(pte), .. } => {
+                CoreState::ProtectExecuting { vaddr, flags, pkey, result: Some(Ok(pte)), .. }
+                | CoreState::ProtectOpDone { vaddr, flags, pkey, result: Ok(pte), .. }
+                | CoreState::ProtectShootdownWaiting { vaddr, flags, pkey, result: Ok(pte), .. } => {
                     &&& self.interp_pt_mem().contains_key(vaddr)
-                    &&& self.interp_pt_mem()[vaddr] == PTE { flags, ..pte }
+                    &&& self.interp_pt_mem()[vaddr] == PTE { flags, pkey, ..pte }
                 },
                 // failed
                 CoreState::ProtectOpDone { vaddr, result: Err(_), .. }
@@ -1913,6 +1932,9 @@ impl Step {
                     _ => arbitrary(),
                 }
             },
+            Step::WrPkru { core } => {
+                hlspec::Step::WrPkru
+            }
             // Map steps
             Step::MapStart { .. } => hlspec::Step::MapStart,
             Step::MapEnd { .. } => hlspec::Step::MapEnd,
@@ -1930,6 +1952,7 @@ impl Step {
     pub open spec fn mmu_lbl(self, pre: State, lbl: RLbl) -> mmu::Lbl {
         match self {
             Step::MemOp { core }                         => mmu::Lbl::MemOp(core, lbl->MemOp_vaddr as usize, lbl->MemOp_op),
+            Step::WrPkru { core }                        => mmu::Lbl::WrPkru(core, lbl->WrPkru_val),
             Step::ReadPTMem { core, paddr, value }       => mmu::Lbl::Read(core, paddr, value),
             Step::Barrier { core }                       => mmu::Lbl::Barrier(core),
             Step::Invlpg { core }                        => mmu::Lbl::Invlpg(core, pre.os_ext.shootdown_vec.vaddr),

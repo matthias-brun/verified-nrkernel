@@ -149,11 +149,14 @@ impl CodeVC for PTImpl {
         cr3:Cr3RegVal,
         vaddr: usize,
         flags: &Flags,
+        pkey: u8
     ) -> (res: (Result<(),()>, Tracked<Token>))
     {
         let tracked mut tok = tok;
 
-        wrapped_token::start_protect_and_acquire_lock(Tracked(&mut tok), Ghost(vaddr as nat), Ghost(*flags));
+        let ghost pte: nat = 0;
+
+        wrapped_token::start_protect_and_acquire_lock(Tracked(&mut tok), Ghost(vaddr as nat), Ghost(*flags), Ghost(pkey as nat));
         let tracked wtok = WrappedProtectToken::new(tok);
         proof {
             wtok.lemma_regions_derived_from_view();
@@ -172,7 +175,7 @@ impl CodeVC for PTImpl {
         let ghost wtok_before = wtok@;
         let ghost pt_before = pt@;
 
-        let res = protect(Tracked(&mut wtok), &mut pt, cr3.pml4_val(), vaddr, flags);
+        let res = protect(Tracked(&mut wtok), &mut pt, cr3.pml4_val(), vaddr, flags, pkey);
         assert(PT::inv_and_nonempty(wtok@, pt@));
         assert forall|wtokp: WrappedTokenView| ({
             &&& wtokp.pt_mem == wtok@.pt_mem

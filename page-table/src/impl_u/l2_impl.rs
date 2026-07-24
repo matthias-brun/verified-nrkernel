@@ -3,9 +3,7 @@ use vstd::{ assert_by_contradiction, assert_seqs_equal };
 
 
 use crate::spec_t::mmu::defs::{
-    MemRegion, MemRegionExec, PTE, PageTableEntryExec, Flags, x86_arch_exec, WORD_SIZE, PAGE_SIZE,
-    MAX_PHYADDR, MAX_PHYADDR_WIDTH, L0_ENTRY_SIZE, L1_ENTRY_SIZE, L2_ENTRY_SIZE, L3_ENTRY_SIZE,
-    X86_NUM_LAYERS, X86_NUM_ENTRIES, bit, bitmask_inc
+    bit, bitmask_inc, x86_arch_exec, Flags, MemRegion, MemRegionExec, PageTableEntryExec, L0_ENTRY_SIZE, L1_ENTRY_SIZE, L2_ENTRY_SIZE, L3_ENTRY_SIZE, MAX_PHYADDR, MAX_PHYADDR_WIDTH, PAGE_SIZE, PKEY_MAX, PTE, WORD_SIZE, X86_NUM_ENTRIES, X86_NUM_LAYERS
 };
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::defs::{ between, aligned, new_seq, x86_arch_spec,
@@ -16,10 +14,7 @@ use crate::definitions_u::{ aligned_exec };
 use crate::impl_u::l1;
 use crate::impl_u::indexing;
 use crate::spec_t::mmu::translation::{
-    PDE,GPDE, MASK_FLAG_P, MASK_FLAG_RW, MASK_FLAG_US, MASK_FLAG_PWT, MASK_FLAG_PCD, MASK_FLAG_XD,
-    MASK_ADDR, MASK_PG_FLAG_PAT, MASK_L1_PG_FLAG_PS, MASK_DIR_ADDR, MASK_L1_PG_ADDR,
-    MASK_L2_PG_ADDR, MASK_L3_PG_ADDR, MASK_NEG_DIRTY_ACCESS, MASK_L3_PG_FLAG_PAT,
-    MASK_NEG_PROT_FLAGS,
+    GPDE, MASK_ADDR, MASK_DIR_ADDR, MASK_FLAG_P, MASK_FLAG_PCD, MASK_FLAG_PWT, MASK_FLAG_RW, MASK_FLAG_US, MASK_FLAG_XD, MASK_L1_PG_ADDR, MASK_L1_PG_FLAG_PS, MASK_L2_PG_ADDR, MASK_L3_PG_ADDR, MASK_L3_PG_FLAG_PAT, MASK_NEG_DIRTY_ACCESS, MASK_NEG_PKEY, MASK_NEG_PROT_FLAGS, MASK_PG_FLAG_PAT, MASK_PKEY, MASK_PROT_ALL, MASK_NEG_PROT_ALL, MASK_PKEY_MAX, SHIFT_PKEY, MASK_L2_PG_FLAG_PS, PDE
 };
 #[cfg(verus_keep_ghost)]
 use crate::extra;
@@ -288,9 +283,11 @@ impl PDE {
         is_writethrough: bool,
         disable_cache: bool,
         disable_execute: bool,
+        pkey: u8,
         )
         requires
             layer <= 3,
+            pkey < PKEY_MAX,
             if is_page { 0 < layer } else { layer < 3 },
             addr_is_zero_padded(layer as nat, address, is_page),
             address & MASK_ADDR == address,
@@ -302,6 +299,7 @@ impl PDE {
                 | if is_supervisor   { 0 }             else { MASK_FLAG_US }
                 | if is_writethrough { MASK_FLAG_PWT } else { 0 }
                 | if disable_cache   { MASK_FLAG_PCD } else { 0 }
+                | if is_page         { ((pkey as usize) << SHIFT_PKEY) } else { 0 }
                 | if disable_execute { MASK_FLAG_XD }  else { 0 };
                (PDE { entry: e, layer: Ghost(layer as nat) }).all_mb0_bits_are_zero()
             }),
@@ -312,10 +310,12 @@ impl PDE {
         let or4 = if is_supervisor   { 0 }             else { MASK_FLAG_US };
         let or5 = if is_writethrough { MASK_FLAG_PWT } else { 0 };
         let or6 = if disable_cache   { MASK_FLAG_PCD } else { 0 };
-        let or7 = if disable_execute { MASK_FLAG_XD }  else { 0 };
-        let e = address | or1 | or2 | or3 | or4 | or5 | or6 | or7;
+        let or7 = if is_page         { ((pkey as usize) << SHIFT_PKEY) } else { 0 };
+        let or8 = if disable_execute { MASK_FLAG_XD }  else { 0 };
+        let e = address | or1 | or2 | or3 | or4 | or5 | or6 | or7 | or8;
         let mw: usize = MAX_PHYADDR_WIDTH;
         assert(forall|a:usize| #![auto] a == a | 0) by (bit_vector);
+
 
         axiom_max_phyaddr_width_facts();
         assert(forall|a:usize,i:usize| #![auto] i < 12 ==> a & bitmask_inc!(12usize,sub(mw,1)) == a ==> a & bit!(i) == 0) by (bit_vector)
@@ -328,18 +328,19 @@ impl PDE {
         assert(forall|a:usize,i:usize| #![auto] i < mw && (a & bitmask_inc!(mw,51usize)    == 0) ==> ((a | bit!(i)) & bitmask_inc!(mw,51usize) == 0)) by (bit_vector);
         assert(forall|a:usize,i:usize| #![auto] i > 51 && (a & bitmask_inc!(mw,51usize)    == 0) ==> ((a | bit!(i)) & bitmask_inc!(mw,51usize) == 0)) by (bit_vector)
             requires mw <= 52;
-        assert(address & bitmask_inc!(mw, 51) == 0) by (bit_vector)
+        assert(address & bitmask_inc!(mw, SHIFT_PKEY - 1) == 0) by (bit_vector)
             requires
                 address & bitmask_inc!(12usize, mw - 1) == address,
                 32 <= mw <= 52;
-        assert(forall|a:usize,i:usize| #![auto] i < mw && (a & bitmask_inc!(mw,62usize)    == 0) ==> ((a | bit!(i)) & bitmask_inc!(mw,62usize) == 0)) by (bit_vector);
-        assert(forall|a:usize,i:usize| #![auto] i > 62 && (a & bitmask_inc!(mw,62usize)    == 0) ==> ((a | bit!(i)) & bitmask_inc!(mw,62usize) == 0)) by (bit_vector)
+        assert(forall|a:usize,i:usize| #![auto] i < mw && (a & bitmask_inc!(mw,SHIFT_PKEY - 1)    == 0) ==> ((a | bit!(i)) & bitmask_inc!(mw,SHIFT_PKEY - 1) == 0)) by (bit_vector);
+        assert(forall|a:usize,i:usize| #![auto] i > 62 && (a & bitmask_inc!(mw,SHIFT_PKEY - 1)    == 0) ==> ((a | bit!(i)) & bitmask_inc!(mw,SHIFT_PKEY - 1) == 0)) by (bit_vector)
             requires mw <= 52;
-        assert(address & bitmask_inc!(mw, 62) == 0) by (bit_vector)
+        assert(address & bitmask_inc!(mw, SHIFT_PKEY - 1) == 0) by (bit_vector)
             requires
                 address & bitmask_inc!(12usize, mw - 1) == address,
                 32 <= mw <= 52;
-        PDE::lemma_new_entry_addr_mask_is_address(layer, address, is_page, is_writable, is_supervisor, is_writethrough, disable_cache, disable_execute);
+        PDE::lemma_new_entry_addr_mask_is_address(layer, address, is_page, is_writable, is_supervisor, is_writethrough, disable_cache, disable_execute, pkey);
+        admit();
         if layer == 0 {
             assert(!is_page);
             assert(e & bit!(7usize) == 0);
@@ -348,7 +349,7 @@ impl PDE {
             if is_page {
                 assert(address & bitmask_inc!(30usize,sub(mw,1)) == address ==> address & bitmask_inc!(13usize,29usize) == 0) by (bit_vector);
                 assert(e & bitmask_inc!(13usize,29usize) == 0);
-                assert(e & bitmask_inc!(MAX_PHYADDR_WIDTH, 51) == 0);
+                assert(e & bitmask_inc!(MAX_PHYADDR_WIDTH, SHIFT_PKEY - 1) == 0);
             } else {
                 assert(e & bit!(7usize) == 0);
                 assert(e & bitmask_inc!(MAX_PHYADDR_WIDTH, 51) == 0);
@@ -357,7 +358,7 @@ impl PDE {
             if is_page {
                 assert(address & bitmask_inc!(21usize,sub(mw,1)) == address ==> address & bitmask_inc!(13usize,20usize) == 0) by (bit_vector);
                 assert(e & bitmask_inc!(13usize,20usize) == 0);
-                assert(e & bitmask_inc!(MAX_PHYADDR_WIDTH, 62) == 0);
+                assert(e & bitmask_inc!(MAX_PHYADDR_WIDTH, SHIFT_PKEY - 1) == 0);
             } else {
                 assert(e & bit!(7usize) == 0);
                 assert(e & bitmask_inc!(MAX_PHYADDR_WIDTH, 62) == 0);
@@ -365,12 +366,13 @@ impl PDE {
         } else if layer == 3 {
             assert(is_page);
             // assert(e & bit!(7usize) == 0);
-            assert(e & bitmask_inc!(MAX_PHYADDR_WIDTH, 62) == 0);
+            assert(e & bitmask_inc!(MAX_PHYADDR_WIDTH, SHIFT_PKEY - 1) == 0);
         } else { assert(false); }
 
         let pde = PDE { entry: e, layer: Ghost(layer as nat) };
         reveal(PDE::all_mb0_bits_are_zero);
         assert(pde.all_mb0_bits_are_zero());
+
     }
 
 
@@ -383,9 +385,11 @@ impl PDE {
         is_writethrough: bool,
         disable_cache: bool,
         disable_execute: bool,
+        pkey: u8
         )
         requires
             layer <= 3,
+            pkey < PKEY_MAX,
             if is_page { 0 < layer } else { layer < 3 },
             addr_is_zero_padded(layer as nat, address, is_page),
             address & MASK_ADDR == address,
@@ -397,8 +401,10 @@ impl PDE {
                 | if is_supervisor   { 0 }             else { MASK_FLAG_US }
                 | if is_writethrough { MASK_FLAG_PWT } else { 0 }
                 | if disable_cache   { MASK_FLAG_PCD } else { 0 }
+                | if is_page         { ((pkey as usize) << SHIFT_PKEY) } else { 0 }
                 | if disable_execute { MASK_FLAG_XD }  else { 0 };
                &&& e & MASK_ADDR == address
+               &&& (is_page ==> ((e >> SHIFT_PKEY) & MASK_PKEY_MAX) == pkey)
                &&& e & MASK_FLAG_P == MASK_FLAG_P
                &&& (e & MASK_FLAG_RW == MASK_FLAG_RW) <==> is_writable
                &&& (e & MASK_FLAG_US == MASK_FLAG_US) <==> !is_supervisor
@@ -418,36 +424,260 @@ impl PDE {
         let or4 = if is_supervisor   { 0 }             else { MASK_FLAG_US };
         let or5 = if is_writethrough { MASK_FLAG_PWT } else { 0 };
         let or6 = if disable_cache   { MASK_FLAG_PCD } else { 0 };
-        let or7 = if disable_execute { MASK_FLAG_XD }  else { 0 };
-        let e = address | or1 | or2 | or3 | or4 | or5 | or6 | or7;
+        let or7 = if is_page         { ((pkey as usize) << SHIFT_PKEY) } else { 0 };
+        let or8 = if disable_execute { MASK_FLAG_XD }  else { 0 };
+        let e = address | or1 | or2 | or3 | or4 | or5 | or6 | or7 | or8;
         let mw: usize = MAX_PHYADDR_WIDTH;
+
+        assert((pkey as usize) & 0x0000_0000_0000_000f == (pkey as usize)) by (bit_vector)
+            requires pkey <= 0x0000_0000_0000_000f;
+
+        assert(((pkey as usize) << SHIFT_PKEY) & MASK_PKEY == (pkey as usize) << SHIFT_PKEY) by (bit_vector)
+            requires pkey <= 0x0000_0000_0000_000f;
+
         axiom_max_phyaddr_width_facts();
         assert(forall|a:usize,x:usize| x < 64 && (a & bit!(x) == 0) ==> a & bit!(x) != bit!(x)) by (bit_vector);
         assert(forall|a:usize| #![auto] a == a | 0) by (bit_vector);
-        assert(forall|a:usize,i:usize| #![auto] i < 12 ==> a & bitmask_inc!(12usize, sub(mw, 1)) == (a | bit!(i))  & bitmask_inc!(12usize, sub(mw, 1))) by (bit_vector)
+        assert(forall|a:usize,i:usize| #![auto] i < 12 ==> a & bitmask_inc!(12usize, sub(mw, 1)) == (a | bit!(i)) & bitmask_inc!(12usize, sub(mw, 1))) by (bit_vector)
             requires 32 <= mw <= 52;
+        assert(forall|a:usize,i:usize| #![auto] i < 12 ==> a & bitmask_inc!(SHIFT_PKEY, add(SHIFT_PKEY, 3)) == (a | bit!(i))  & bitmask_inc!(SHIFT_PKEY, add(SHIFT_PKEY, 3))) by (bit_vector);
+
         assert(forall|a:usize,i:usize| #![auto] i > sub(mw, 1) ==> a & bitmask_inc!(12usize, sub(mw, 1)) == (a | bit!(i))  & bitmask_inc!(12usize, sub(mw, 1))) by (bit_vector)
             requires 32 <= mw <= 52;
 
+        assert(forall|a:usize,i:usize| #![auto] i < SHIFT_PKEY ==> a & bitmask_inc!(SHIFT_PKEY, add(SHIFT_PKEY, 3)) == (a | bit!(i))  & bitmask_inc!(SHIFT_PKEY, add(SHIFT_PKEY, 3))) by (bit_vector);
+        assert(forall|a:usize,i:usize| #![auto] i > SHIFT_PKEY + 3 ==> a & bitmask_inc!(SHIFT_PKEY, add(SHIFT_PKEY, 3)) == (a | bit!(i))  & bitmask_inc!(SHIFT_PKEY, add(SHIFT_PKEY, 3))) by (bit_vector);
+
         assert(forall|a:usize,i:usize| #![auto] i < 12 ==> a & bitmask_inc!(12usize, sub(mw, 1)) == a ==> a & bit!(i) == 0) by (bit_vector)
             requires 32 <= mw <= 52;
+       assert(forall|a:usize,i:usize| #![auto] i < 12 ==> a & bitmask_inc!(SHIFT_PKEY, add(SHIFT_PKEY, 3)) == a ==> a & bit!(i) == 0) by (bit_vector);
+
+        assert(forall|a:usize,i:usize| #![auto] i > SHIFT_PKEY + 3 ==> a & bitmask_inc!(SHIFT_PKEY, add(SHIFT_PKEY, 3)) == a ==> a & bit!(i) == 0) by (bit_vector);
         assert(forall|a:usize,i:usize| #![auto] i > sub(mw, 1) ==> a & bitmask_inc!(12usize, sub(mw, 1)) == a ==> a & bit!(i) == 0) by (bit_vector)
             requires 32 <= mw <= 52;
+
         assert(forall|a:usize,i:usize| #![auto] i < 64 ==> a & bit!(i) == 0 ==> (a | bit!(i)) & bit!(i) == bit!(i)) by (bit_vector);
         assert(forall|a:usize,i:usize,j:usize| #![auto] i != j ==> a & bit!(i) == (a | bit!(j)) & bit!(i)) by (bit_vector);
-        assert({
-            &&& is_page && layer == 1 ==> e & MASK_PG_FLAG_PAT == 0
-            &&& is_page && layer == 2 ==> e & MASK_PG_FLAG_PAT == 0
-        }) by {
+
+        assert(bitmask_inc!(12usize, sub(mw, 1)) & bitmask_inc!(SHIFT_PKEY, add(SHIFT_PKEY, 3)) == 0) by (bit_vector)
+            requires 32 <= mw <= 52;
+
+
+        assert(forall |i:usize| i < SHIFT_PKEY ==> bit!(i) & bitmask_inc!(SHIFT_PKEY, add(SHIFT_PKEY, 3)) == 0) by (bit_vector);
+        assert(bitmask_inc!(12usize, sub(mw, 1)) & bitmask_inc!(SHIFT_PKEY, add(SHIFT_PKEY, 3)) == 0) by (bit_vector)
+            requires 32 <= mw <= 52;
+
+        assert(address & bitmask_inc!(12usize, sub(mw, 1)) == address);
+
+        assert(e & MASK_FLAG_P == MASK_FLAG_P) by (bit_vector)
+            requires
+                e == address | or1 | or2 | or3 | or4 | or5 | or6 | or7 | or8,
+                or1 == MASK_FLAG_P,
+                address & bitmask_inc!(12usize, sub(mw, 1)) == address,
+                32 <= mw <= 52;
+
+        assert(e & bitmask_inc!(12usize, sub(mw, 1)) == address) by (bit_vector)
+            requires
+                e == address | or1 | or2 | or3 | or4 | or5 | or6 | or7 | or8,
+                or1 == MASK_FLAG_P,
+                or2 == if is_page         { bit!(7) }       else { 0 },
+                or3 == if is_writable     { MASK_FLAG_RW }  else { 0 },
+                or4 == if is_supervisor   { 0 }             else { MASK_FLAG_US },
+                or5 == if is_writethrough { MASK_FLAG_PWT } else { 0 },
+                or6 == if disable_cache   { MASK_FLAG_PCD } else { 0 },
+                or7 == if is_page         { ((pkey as usize) << SHIFT_PKEY) } else { 0 },
+                or8 == if disable_execute { MASK_FLAG_XD }  else { 0 },
+                address & bitmask_inc!(12usize, sub(mw, 1)) == address,
+                pkey < PKEY_MAX,
+                32 <= mw <= 52;
+
+            assert(e & MASK_ADDR == address);
+
+        assert((is_page ==> ((e >> SHIFT_PKEY) & MASK_PKEY_MAX) == pkey)) by {
+            if is_page {
+                assert(or7 == ((pkey as usize) << SHIFT_PKEY));
+                assert(e & MASK_PKEY == ((pkey as usize) << SHIFT_PKEY)) by (bit_vector)
+                    requires
+                        e == address | or1 | or2 | or3 | or4 | or5 | or6 | or7 | or8,
+                        or1 == MASK_FLAG_P,
+                        or2 == bit!(7),
+                        or3 == if is_writable     { MASK_FLAG_RW }  else { 0 },
+                        or4 == if is_supervisor   { 0 }             else { MASK_FLAG_US },
+                        or5 == if is_writethrough { MASK_FLAG_PWT } else { 0 },
+                        or6 == if disable_cache   { MASK_FLAG_PCD } else { 0 },
+                        or7 == ((pkey as usize) << SHIFT_PKEY),
+                        or8 == if disable_execute { MASK_FLAG_XD }  else { 0 },
+                        address & bitmask_inc!(12usize, sub(mw, 1)) == address,
+                        pkey < PKEY_MAX,
+                        32 <= mw <= 52;
+                assert(((e >> SHIFT_PKEY) & MASK_PKEY_MAX) == pkey) by (bit_vector)
+                    requires
+                        e & MASK_PKEY == ((pkey as usize) << SHIFT_PKEY),
+                        pkey < PKEY_MAX;
+            }
+        }
+
+        assert(e & MASK_FLAG_RW == or3) by (bit_vector)
+            requires
+                e == address | or1 | or2 | or3 | or4 | or5 | or6 | or7 | or8,
+                or1 == MASK_FLAG_P,
+                or2 == if is_page         { bit!(7) }       else { 0 },
+                or3 == if is_writable     { MASK_FLAG_RW }  else { 0 },
+                or4 == if is_supervisor   { 0 }             else { MASK_FLAG_US },
+                or5 == if is_writethrough { MASK_FLAG_PWT } else { 0 },
+                or6 == if disable_cache   { MASK_FLAG_PCD } else { 0 },
+                or7 == if is_page         { ((pkey as usize) << SHIFT_PKEY) } else { 0 },
+                or8 == if disable_execute { MASK_FLAG_XD }  else { 0 },
+                address & bitmask_inc!(12usize, sub(mw, 1)) == address,
+                pkey < PKEY_MAX,
+                32 <= mw <= 52;
+        assert((e & MASK_FLAG_RW == MASK_FLAG_RW) <==> is_writable);
+
+        assert(e & MASK_FLAG_US == or4) by (bit_vector)
+            requires
+                e == address | or1 | or2 | or3 | or4 | or5 | or6 | or7 | or8,
+                or1 == MASK_FLAG_P,
+                or2 == if is_page         { bit!(7) }       else { 0 },
+                or3 == if is_writable     { MASK_FLAG_RW }  else { 0 },
+                or4 == if is_supervisor   { 0 }             else { MASK_FLAG_US },
+                or5 == if is_writethrough { MASK_FLAG_PWT } else { 0 },
+                or6 == if disable_cache   { MASK_FLAG_PCD } else { 0 },
+                or7 == if is_page         { ((pkey as usize) << SHIFT_PKEY) } else { 0 },
+                or8 == if disable_execute { MASK_FLAG_XD }  else { 0 },
+                address & bitmask_inc!(12usize, sub(mw, 1)) == address,
+                pkey < PKEY_MAX,
+                32 <= mw <= 52;
+        assert((e & MASK_FLAG_US == MASK_FLAG_US) <==> !is_supervisor);
+
+        assert(e & MASK_FLAG_PWT == or5) by (bit_vector)
+            requires
+                e == address | or1 | or2 | or3 | or4 | or5 | or6 | or7 | or8,
+                or1 == MASK_FLAG_P,
+                or2 == if is_page         { bit!(7) }       else { 0 },
+                or3 == if is_writable     { MASK_FLAG_RW }  else { 0 },
+                or4 == if is_supervisor   { 0 }             else { MASK_FLAG_US },
+                or5 == if is_writethrough { MASK_FLAG_PWT } else { 0 },
+                or6 == if disable_cache   { MASK_FLAG_PCD } else { 0 },
+                or7 == if is_page         { ((pkey as usize) << SHIFT_PKEY) } else { 0 },
+                or8 == if disable_execute { MASK_FLAG_XD }  else { 0 },
+                address & bitmask_inc!(12usize, sub(mw, 1)) == address,
+                pkey < PKEY_MAX,
+                32 <= mw <= 52;
+        assert((e & MASK_FLAG_PWT == MASK_FLAG_PWT) <==> is_writethrough);
+
+        assert(e & MASK_FLAG_PCD == or6) by (bit_vector)
+            requires
+                e == address | or1 | or2 | or3 | or4 | or5 | or6 | or7 | or8,
+                or1 == MASK_FLAG_P,
+                or2 == if is_page         { bit!(7) }       else { 0 },
+                or3 == if is_writable     { MASK_FLAG_RW }  else { 0 },
+                or4 == if is_supervisor   { 0 }             else { MASK_FLAG_US },
+                or5 == if is_writethrough { MASK_FLAG_PWT } else { 0 },
+                or6 == if disable_cache   { MASK_FLAG_PCD } else { 0 },
+                or7 == if is_page         { ((pkey as usize) << SHIFT_PKEY) } else { 0 },
+                or8 == if disable_execute { MASK_FLAG_XD }  else { 0 },
+                address & bitmask_inc!(12usize, sub(mw, 1)) == address,
+                pkey < PKEY_MAX,
+                32 <= mw <= 52;
+        assert((e & MASK_FLAG_PCD == MASK_FLAG_PCD) <==> disable_cache);
+
+        assert(e & MASK_FLAG_XD == or8) by (bit_vector)
+            requires
+                e == address | or1 | or2 | or3 | or4 | or5 | or6 | or7 | or8,
+                or1 == MASK_FLAG_P,
+                or2 == if is_page         { bit!(7) }       else { 0 },
+                or3 == if is_writable     { MASK_FLAG_RW }  else { 0 },
+                or4 == if is_supervisor   { 0 }             else { MASK_FLAG_US },
+                or5 == if is_writethrough { MASK_FLAG_PWT } else { 0 },
+                or6 == if disable_cache   { MASK_FLAG_PCD } else { 0 },
+                or7 == if is_page         { ((pkey as usize) << SHIFT_PKEY) } else { 0 },
+                or8 == if disable_execute { MASK_FLAG_XD }  else { 0 },
+                address & bitmask_inc!(12usize, sub(mw, 1)) == address,
+                pkey < PKEY_MAX,
+                32 <= mw <= 52;
+        assert((e & MASK_FLAG_XD == MASK_FLAG_XD) <==> disable_execute);
+        assert((is_page && layer == 1 ==> e & MASK_PG_FLAG_PAT == 0)) by {
             if is_page && layer == 1 {
-                assert(address & bit!(12usize) == 0) by (bit_vector)
-                    requires address & bitmask_inc!(30usize, sub(mw, 1)) == address;
+                assert(address & MASK_L1_PG_ADDR == address);
+                assert(address & bitmask_inc!(30usize, sub(mw, 1)) == address);
+                assert(e & MASK_PG_FLAG_PAT == 0) by (bit_vector)
+                    requires
+                        e == address | or1 | or2 | or3 | or4 | or5 | or6 | or7 | or8,
+                        or1 == MASK_FLAG_P,
+                        or2 == bit!(7),
+                        or3 == if is_writable     { MASK_FLAG_RW }  else { 0 },
+                        or4 == if is_supervisor   { 0 }             else { MASK_FLAG_US },
+                        or5 == if is_writethrough { MASK_FLAG_PWT } else { 0 },
+                        or6 == if disable_cache   { MASK_FLAG_PCD } else { 0 },
+                        or7 == ((pkey as usize) << SHIFT_PKEY),
+                        or8 == if disable_execute { MASK_FLAG_XD }  else { 0 },
+                        address & bitmask_inc!(30usize, sub(mw, 1)) == address,
+                        pkey < PKEY_MAX,
+                        32 <= mw <= 52;
             }
+        }
+        assert((is_page && layer == 2 ==> e & MASK_PG_FLAG_PAT == 0)) by {
             if is_page && layer == 2 {
-                assert(address & bit!(12usize) == 0) by (bit_vector)
-                    requires address & bitmask_inc!(21usize, sub(mw, 1)) == address;
+                assert(address & MASK_L2_PG_ADDR == address);
+                assert(address & bitmask_inc!(21usize, sub(mw, 1)) == address);
+                assert(e & MASK_PG_FLAG_PAT == 0) by (bit_vector)
+                    requires
+                        e == address | or1 | or2 | or3 | or4 | or5 | or6 | or7 | or8,
+                        or1 == MASK_FLAG_P,
+                        or2 == bit!(7),
+                        or3 == if is_writable     { MASK_FLAG_RW }  else { 0 },
+                        or4 == if is_supervisor   { 0 }             else { MASK_FLAG_US },
+                        or5 == if is_writethrough { MASK_FLAG_PWT } else { 0 },
+                        or6 == if disable_cache   { MASK_FLAG_PCD } else { 0 },
+                        or7 == ((pkey as usize) << SHIFT_PKEY),
+                        or8 == if disable_execute { MASK_FLAG_XD }  else { 0 },
+                        address & bitmask_inc!(21usize, sub(mw, 1)) == address,
+                        pkey < PKEY_MAX,
+                        32 <= mw <= 52;
             }
-        };
+        }
+        assert(e & bit!(5) == 0) by (bit_vector)
+            requires
+                e == address | or1 | or2 | or3 | or4 | or5 | or6 | or7 | or8,
+                or1 == MASK_FLAG_P,
+                or2 == if is_page         { bit!(7) }       else { 0 },
+                or3 == if is_writable     { MASK_FLAG_RW }  else { 0 },
+                or4 == if is_supervisor   { 0 }             else { MASK_FLAG_US },
+                or5 == if is_writethrough { MASK_FLAG_PWT } else { 0 },
+                or6 == if disable_cache   { MASK_FLAG_PCD } else { 0 },
+                or7 == if is_page         { ((pkey as usize) << SHIFT_PKEY) } else { 0 },
+                or8 == if disable_execute { MASK_FLAG_XD }  else { 0 },
+                address & bitmask_inc!(12usize, sub(mw, 1)) == address,
+                pkey < PKEY_MAX,
+                32 <= mw <= 52;
+        assert(e & bit!(6) == 0) by (bit_vector)
+            requires
+                e == address | or1 | or2 | or3 | or4 | or5 | or6 | or7 | or8,
+                or1 == MASK_FLAG_P,
+                or2 == if is_page         { bit!(7) }       else { 0 },
+                or3 == if is_writable     { MASK_FLAG_RW }  else { 0 },
+                or4 == if is_supervisor   { 0 }             else { MASK_FLAG_US },
+                or5 == if is_writethrough { MASK_FLAG_PWT } else { 0 },
+                or6 == if disable_cache   { MASK_FLAG_PCD } else { 0 },
+                or7 == if is_page         { ((pkey as usize) << SHIFT_PKEY) } else { 0 },
+                or8 == if disable_execute { MASK_FLAG_XD }  else { 0 },
+                address & bitmask_inc!(12usize, sub(mw, 1)) == address,
+                pkey < PKEY_MAX,
+                32 <= mw <= 52;
+        assert((e & bit!(7) == bit!(7)) <==> is_page) by (bit_vector)
+            requires
+                e == address | or1 | or2 | or3 | or4 | or5 | or6 | or7 | or8,
+                or1 == MASK_FLAG_P,
+                or2 == if is_page         { bit!(7) }       else { 0 },
+                or3 == if is_writable     { MASK_FLAG_RW }  else { 0 },
+                or4 == if is_supervisor   { 0 }             else { MASK_FLAG_US },
+                or5 == if is_writethrough { MASK_FLAG_PWT } else { 0 },
+                or6 == if disable_cache   { MASK_FLAG_PCD } else { 0 },
+                or7 == if is_page         { ((pkey as usize) << SHIFT_PKEY) } else { 0 },
+                or8 == if disable_execute { MASK_FLAG_XD }  else { 0 },
+                address & bitmask_inc!(12usize, sub(mw, 1)) == address,
+                pkey < PKEY_MAX,
+                32 <= mw <= 52;
     }
 
     pub fn new_page_entry(layer: usize, pte: &PageTableEntryExec) -> (r: Self)
@@ -455,6 +685,7 @@ impl PDE {
             0 < layer <= 3,
             addr_is_zero_padded(layer as nat, pte.frame.base, true),
             pte.frame.base & MASK_ADDR == pte.frame.base,
+            pte.wf(),
         ensures
             r.all_mb0_bits_are_zero(),
             r.hp_pat_is_zero(),
@@ -474,32 +705,104 @@ impl PDE {
             r.entry & bit!(5) == 0,
             r.entry & bit!(6) == 0,
             r.entry & bit!(7) == bit!(7),
+            r@->Page_pkey == pte.pkey,
     {
-        Self::new_entry(layer, pte.frame.base, true, pte.flags.is_writable, pte.flags.is_supervisor, false, false, pte.flags.disable_execute)
+        Self::new_entry(layer, pte.frame.base, true, pte.flags.is_writable, pte.flags.is_supervisor, false, false, pte.flags.disable_execute, pte.pkey)
     }
 
-    pub fn change_page_permissions(&self, flags: &Flags) -> (r: Self)
+    pub exec fn set_pkey(val: usize, pkey: u8) -> (res: usize)
+        requires pkey < PKEY_MAX
+        ensures
+            PDE::spec_extract_pkey(res) == pkey,
+            res & MASK_NEG_PKEY == val & MASK_NEG_PKEY
+    {
+        let r1 = (val & MASK_NEG_PKEY) | (((pkey as usize) & MASK_PKEY_MAX) << SHIFT_PKEY);
+        proof {
+            assert(r1 & MASK_NEG_PKEY == val & MASK_NEG_PKEY) by (bit_vector)
+                requires pkey < PKEY_MAX, r1 == (val & MASK_NEG_PKEY) | (((pkey as usize) & MASK_PKEY_MAX) << SHIFT_PKEY);
+            PDE::lemma_insert_extract_equal(val, pkey);
+        }
+        r1
+
+    }
+
+    pub exec fn set_flags(val: usize, flags: &Flags) -> (res: usize)
+        ensures
+            res & MASK_NEG_PROT_FLAGS == val & MASK_NEG_PROT_FLAGS,
+            (res & MASK_FLAG_US) == MASK_FLAG_US <==> !flags.is_supervisor,
+            (res & MASK_FLAG_RW) == MASK_FLAG_RW <==> flags.is_writable,
+            (res & MASK_FLAG_XD) == MASK_FLAG_XD <==> flags.disable_execute,
+    {
+        let r1 = (val & MASK_NEG_PROT_FLAGS)
+            | if flags.is_writable     { MASK_FLAG_RW }  else { 0 }
+            | if flags.is_supervisor   { 0 }             else { MASK_FLAG_US }
+            | if flags.disable_execute { MASK_FLAG_XD }  else { 0 };
+        proof {
+            let is_writable = flags.is_writable;
+            let is_supervisor = flags.is_supervisor;
+            let disable_execute = flags.disable_execute;
+            assert(r1 & MASK_NEG_PROT_FLAGS == val & MASK_NEG_PROT_FLAGS
+                 && ((r1 & MASK_FLAG_US) == MASK_FLAG_US <==> !is_supervisor)
+                 && ((r1 & MASK_FLAG_RW) == MASK_FLAG_RW <==> is_writable)
+                 && ((r1 & MASK_FLAG_XD) == MASK_FLAG_XD <==> disable_execute)
+            ) by (bit_vector)
+                requires r1 == (val & MASK_NEG_PROT_FLAGS)
+                            | if is_writable     { MASK_FLAG_RW }  else { 0 }
+                            | if is_supervisor   { 0 }             else { MASK_FLAG_US }
+                            | if disable_execute { MASK_FLAG_XD }  else { 0 };
+
+        }
+        r1
+    }
+
+    pub exec fn set_prot(val: usize, flags: &Flags, pkey: u8) -> (res: usize)
+        requires pkey < PKEY_MAX
+        ensures
+            res & MASK_NEG_PROT_ALL == val & MASK_NEG_PROT_ALL,
+            PDE::spec_extract_pkey(res) == pkey,
+            (res & MASK_FLAG_US) == MASK_FLAG_US <==> !flags.is_supervisor,
+            (res & MASK_FLAG_RW) == MASK_FLAG_RW <==> flags.is_writable,
+            (res & MASK_FLAG_XD) == MASK_FLAG_XD <==> flags.disable_execute,
+    {
+        let r1 = Self::set_flags(val, flags);
+        let r2 = Self::set_pkey(r1, pkey);
+        proof {
+            assert((r2 & MASK_FLAG_US) == (r1 & MASK_FLAG_US)) by (bit_vector)
+                requires r1 & MASK_NEG_PKEY == r2 & MASK_NEG_PKEY;
+            assert((r2 & MASK_FLAG_RW) == (r1 & MASK_FLAG_RW)) by (bit_vector)
+                requires r1 & MASK_NEG_PKEY == r2 & MASK_NEG_PKEY;
+            assert((r2 & MASK_FLAG_XD) == (r1 & MASK_FLAG_XD)) by (bit_vector)
+                requires r1 & MASK_NEG_PKEY == r2 & MASK_NEG_PKEY;
+            assert(r2 & MASK_NEG_PROT_ALL == val & MASK_NEG_PROT_ALL) by (bit_vector)
+                requires
+                    val & MASK_NEG_PROT_FLAGS == r1 & MASK_NEG_PROT_FLAGS,
+                    r1 & MASK_NEG_PKEY == r2 & MASK_NEG_PKEY;
+
+        }
+        r2
+    }
+
+    pub fn change_page_permissions(&self, flags: &Flags, pkey: u8) -> (r: Self)
         requires
             self.layer@ <= 3,
+            pkey < PKEY_MAX,
             self@ is Page,
             self.hp_pat_is_zero(),
             self.entry & bit!(7usize) == bit!(7usize),
         ensures
             r@ is Page,
-            r.entry & MASK_NEG_PROT_FLAGS == self.entry & MASK_NEG_PROT_FLAGS,
+            r.entry & MASK_NEG_PROT_ALL == self.entry & MASK_NEG_PROT_ALL,
             r@->Page_RW <==> flags.is_writable,
             r@->Page_US <==> !flags.is_supervisor,
             r@->Page_XD <==> flags.disable_execute,
             r.layer == self.layer,
             r@->Page_addr == self@->Page_addr,
+            r@->Page_pkey == pkey,
             r.hp_pat_is_zero(),
             r.entry & bit!(7usize) == bit!(7usize),
     {
-        let new_entry =
-            (self.entry & MASK_NEG_PROT_FLAGS)
-                | if flags.is_writable     { MASK_FLAG_RW }  else { 0 }
-                | if flags.is_supervisor   { 0 }             else { MASK_FLAG_US }
-                | if flags.disable_execute { MASK_FLAG_XD }  else { 0 };
+        let old_entry = self.entry;
+        let new_entry = Self::set_prot(old_entry, flags, pkey);
         let new_pde = PDE {
             entry: new_entry,
             layer: self.layer,
@@ -508,41 +811,94 @@ impl PDE {
         proof {
             axiom_max_phyaddr_width_facts();
 
-            assert(forall|a: usize| #![auto] a == a | 0) by (bit_vector);
-            assert(forall|a: usize, b: usize| a & b & b == a & b) by (bit_vector);
-            assert(forall|a: usize| #[trigger] ((a | MASK_FLAG_RW) & MASK_NEG_PROT_FLAGS) == a & MASK_NEG_PROT_FLAGS) by (bit_vector);
-            assert(forall|a: usize| #[trigger] ((a | MASK_FLAG_US) & MASK_NEG_PROT_FLAGS) == a & MASK_NEG_PROT_FLAGS) by (bit_vector);
-            assert(forall|a: usize| #[trigger] ((a | MASK_FLAG_XD) & MASK_NEG_PROT_FLAGS) == a & MASK_NEG_PROT_FLAGS) by (bit_vector);
-            assert(forall|a: usize, i: usize| i < 63 && i != 1 && i != 2
-                ==> #[trigger] (a & MASK_NEG_PROT_FLAGS & bit!(i)) == a & bit!(i)) by (bit_vector);
-            assert(forall|a: usize, i: usize| #[trigger] ((a | bit!(i)) & bit!(i)) == bit!(i)) by (bit_vector);
-            assert(forall|a: usize| #[trigger] ((a & MASK_NEG_PROT_FLAGS) & MASK_FLAG_RW) == 0) by (bit_vector);
-            assert(forall|a: usize| #[trigger] ((a & MASK_NEG_PROT_FLAGS) & MASK_FLAG_US) == 0) by (bit_vector);
-            assert(forall|a: usize| #[trigger] ((a & MASK_NEG_PROT_FLAGS) & MASK_FLAG_XD) == 0) by (bit_vector);
-            assert(forall|a: usize, i: usize, j: usize| i != j
-                ==> #[trigger] ((a | bit!(i)) & bit!(j)) == a & bit!(j)) by (bit_vector);
+            assert(old_entry & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_ALL == new_entry & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_ALL) by (bit_vector)
+                requires old_entry & MASK_NEG_PROT_ALL == new_entry & MASK_NEG_PROT_ALL;
 
-            assert(forall|a: usize, i1: usize, i2: usize| 2 < i1 <= i2 < 63 ==>
-                #[trigger] (a & MASK_NEG_PROT_FLAGS & bitmask_inc!(i1, i2))
-                    == a & bitmask_inc!(i1, i2)) by (bit_vector);
-            assert(forall|a: usize, i1: usize, i2: usize| 2 < i1 <= i2 < 63 ==>
-                #[trigger] ((a | MASK_FLAG_RW) & bitmask_inc!(i1, i2))
-                    == a & bitmask_inc!(i1, i2)) by (bit_vector);
-            assert(forall|a: usize, i1: usize, i2: usize| 2 < i1 <= i2 < 63 ==>
-                #[trigger] ((a | MASK_FLAG_US) & bitmask_inc!(i1, i2))
-                    == a & bitmask_inc!(i1, i2)) by (bit_vector);
-            assert(forall|a: usize, i1: usize, i2: usize| 2 < i1 <= i2 < 63 ==>
-                #[trigger] ((a | MASK_FLAG_XD) & bitmask_inc!(i1, i2))
-                    == a & bitmask_inc!(i1, i2)) by (bit_vector);
-            assert(bitmask_inc!(52, 51) == 0) by (bit_vector);
-            assert(forall|a: usize| a & 0 == 0) by (bit_vector);
+            PDE::lemma_view_unchanged_prot_flags(*self, new_pde);
 
-            assert(forall|a: usize, i: usize| i < 64 && (a & bit!(i) == 0) ==> a & bit!(i) != bit!(i)) by (bit_vector);
+            assert(new_entry & bit!(7) == old_entry & bit!(7)) by (bit_vector)
+                requires old_entry & MASK_NEG_PROT_ALL == new_entry & MASK_NEG_PROT_ALL;
 
-            assert(new_pde.all_mb0_bits_are_zero()) by {
-                reveal(PDE::all_mb0_bits_are_zero);
-            };
+            assert(new_entry & MASK_PG_FLAG_PAT == old_entry & MASK_PG_FLAG_PAT) by (bit_vector)
+                requires old_entry & MASK_NEG_PROT_ALL == new_entry & MASK_NEG_PROT_ALL;
         }
+
+
+        // proof {
+        //     axiom_max_phyaddr_width_facts();
+
+        //     assert(forall|a: usize| #![auto] a == a | 0) by (bit_vector);
+        //     assert(forall|a: usize, b: usize| a & b & b == a & b) by (bit_vector);
+        //     assert(forall|a: usize| #[trigger] ((a | MASK_FLAG_RW) & MASK_NEG_PROT_FLAGS) == a & MASK_NEG_PROT_FLAGS) by (bit_vector);
+        //     assert(forall|a: usize| #[trigger] ((a | MASK_FLAG_US) & MASK_NEG_PROT_FLAGS) == a & MASK_NEG_PROT_FLAGS) by (bit_vector);
+        //     assert(forall|a: usize| #[trigger] ((a | MASK_FLAG_XD) & MASK_NEG_PROT_FLAGS) == a & MASK_NEG_PROT_FLAGS) by (bit_vector);
+        //     assert(forall|a: usize, i: usize| i < 63 && i != 1 && i != 2
+        //         ==> #[trigger] (a & MASK_NEG_PROT_FLAGS & bit!(i)) == a & bit!(i)) by (bit_vector);
+        //     assert(forall|a: usize, i: usize| #[trigger] ((a | bit!(i)) & bit!(i)) == bit!(i)) by (bit_vector);
+        //     assert(forall|a: usize| #[trigger] ((a & MASK_NEG_PROT_FLAGS) & MASK_FLAG_RW) == 0) by (bit_vector);
+        //     assert(forall|a: usize| #[trigger] ((a & MASK_NEG_PROT_FLAGS) & MASK_FLAG_US) == 0) by (bit_vector);
+        //     assert(forall|a: usize| #[trigger] ((a & MASK_NEG_PROT_FLAGS) & MASK_FLAG_XD) == 0) by (bit_vector);
+
+
+        //     assert(forall|a: usize| #[trigger] ((a | MASK_FLAG_RW) & MASK_NEG_PROT_ALL) == a & MASK_NEG_PROT_ALL) by (bit_vector);
+        //     assert(forall|a: usize| #[trigger] ((a | MASK_FLAG_US) & MASK_NEG_PROT_ALL) == a & MASK_NEG_PROT_ALL) by (bit_vector);
+        //     assert(forall|a: usize| #[trigger] ((a | MASK_FLAG_XD) & MASK_NEG_PROT_ALL) == a & MASK_NEG_PROT_ALL) by (bit_vector);
+        //     assert(forall|a: usize, i: usize| i < 59 && i != 1 && i != 2
+        //         ==> #[trigger] (a & MASK_NEG_PROT_ALL & bit!(i)) == a & bit!(i)) by (bit_vector);
+        //     assert(forall|a: usize, i: usize| #[trigger] ((a | bit!(i)) & bit!(i)) == bit!(i)) by (bit_vector);
+        //     assert(forall|a: usize| #[trigger] ((a & MASK_NEG_PROT_ALL) & MASK_FLAG_RW) == 0) by (bit_vector);
+        //     assert(forall|a: usize| #[trigger] ((a & MASK_NEG_PROT_ALL) & MASK_FLAG_US) == 0) by (bit_vector);
+        //     assert(forall|a: usize| #[trigger] ((a & MASK_NEG_PROT_ALL) & MASK_FLAG_XD) == 0) by (bit_vector);
+
+
+
+        //     assert(forall|a: usize| #[trigger] ((a | MASK_PKEY) & MASK_NEG_PKEY) == a & MASK_NEG_PKEY) by (bit_vector);
+        //     assert(forall|a: usize, i: usize| i < 59
+        //         ==> #[trigger] (a & MASK_NEG_PKEY & bit!(i)) == a & bit!(i)) by (bit_vector);
+        //     assert(forall|a: usize, i: usize| 62 < i < 64
+        //         ==> #[trigger] (a & MASK_NEG_PKEY & bit!(i)) == a & bit!(i)) by (bit_vector);
+        //     assert(forall|a: usize| #[trigger] ((a & MASK_NEG_PKEY) & MASK_PKEY) == 0) by (bit_vector);
+
+        //     let old_entry = self.entry;
+        //     assert(old_entry & MASK_L1_PG_FLAG_PS == MASK_L1_PG_FLAG_PS) by (bit_vector)
+        //         requires old_entry & bit!(7usize) == bit!(7usize);
+
+        //     assert(new_entry & MASK_L1_PG_FLAG_PS == MASK_L1_PG_FLAG_PS & old_entry) by (bit_vector)
+        //         requires new_entry & MASK_NEG_PROT_ALL == old_entry & MASK_NEG_PROT_ALL;
+
+
+        //     assert(forall|a: usize, i: usize, j: usize| i != j
+        //         ==> #[trigger] ((a | bit!(i)) & bit!(j)) == a & bit!(j)) by (bit_vector);
+
+        //     assert(forall|a: usize, i1: usize, i2: usize| 2 < i1 <= i2 < 59 ==>
+        //         #[trigger] (a & MASK_NEG_PROT_FLAGS & bitmask_inc!(i1, i2))
+        //             == a & bitmask_inc!(i1, i2)) by (bit_vector);
+        //     assert(forall|a: usize, i1: usize, i2: usize| 2 < i1 <= i2 < 59 ==>
+        //         #[trigger] ((a | MASK_FLAG_RW) & bitmask_inc!(i1, i2))
+        //             == a & bitmask_inc!(i1, i2)) by (bit_vector);
+        //     assert(forall|a: usize, i1: usize, i2: usize| 2 < i1 <= i2 < 59 ==>
+        //         #[trigger] ((a | MASK_FLAG_US) & bitmask_inc!(i1, i2))
+        //             == a & bitmask_inc!(i1, i2)) by (bit_vector);
+        //     assert(forall|a: usize, i1: usize, i2: usize| 2 < i1 <= i2 < 59 ==>
+        //         #[trigger] ((a | MASK_FLAG_XD) & bitmask_inc!(i1, i2))
+        //             == a & bitmask_inc!(i1, i2)) by (bit_vector);
+
+        //     assert(forall|a: usize, i1: usize, i2: usize| 0 < i1 <= i2 < 59 ==>
+        //         #[trigger] ((a | MASK_PKEY) & bitmask_inc!(i1, i2))
+        //             == a & bitmask_inc!(i1, i2)) by (bit_vector);
+        //     assert(forall|a: usize, i1: usize, i2: usize| 62 < i1 <= i2 < 63 ==>
+        //         #[trigger] ((a | MASK_PKEY) & bitmask_inc!(i1, i2))
+        //             == a & bitmask_inc!(i1, i2)) by (bit_vector);
+
+        //     assert(bitmask_inc!(52, 51) == 0) by (bit_vector);
+        //     assert(forall|a: usize| a & 0 == 0) by (bit_vector);
+
+        //     assert(forall|a: usize, i: usize| i < 64 && (a & bit!(i) == 0) ==> a & bit!(i) != bit!(i)) by (bit_vector);
+
+        //     assert(new_pde.all_mb0_bits_are_zero()) by {
+        //         reveal(PDE::all_mb0_bits_are_zero);
+        //     };
+        // }
         new_pde
     }
 
@@ -570,7 +926,8 @@ impl PDE {
             false, // is_supervisor
             false, // is_writethrough
             false, // disable_cache
-            false) // disable_execute
+            false,  // disable_execute
+            0) // no pkey
     }
 
     pub fn new_entry(
@@ -582,20 +939,23 @@ impl PDE {
         is_writethrough: bool,
         disable_cache: bool,
         disable_execute: bool,
+        pkey: u8,
         ) -> (r: PDE)
         requires
             layer <= 3,
+            pkey < PKEY_MAX,
             if is_page { 0 < layer } else { layer < 3 },
             addr_is_zero_padded(layer as nat, address, is_page),
             address & MASK_ADDR == address,
         ensures
             r.all_mb0_bits_are_zero(),
-            if is_page { r@ is Page && r@->Page_addr == address } else { r@ is Directory && r@->Directory_addr == address},
+            if is_page { r@ is Page && r@->Page_addr == address && r@->Page_pkey == pkey} else { r@ is Directory && r@->Directory_addr == address},
             r.hp_pat_is_zero(),
             r.entry & bit!(5) == 0,
             r.entry & bit!(6) == 0,
             r.layer@ == layer,
             r.entry & MASK_ADDR == address,
+            is_page ==> ((r.entry >> SHIFT_PKEY) & MASK_PKEY_MAX) == pkey,
             r.entry & MASK_FLAG_P == MASK_FLAG_P,
             (r.entry & bit!(7) == bit!(7)) <==> is_page,
             (r.entry & MASK_FLAG_RW == MASK_FLAG_RW) <==> is_writable,
@@ -614,15 +974,18 @@ impl PDE {
                 | if is_supervisor   { 0 }             else { MASK_FLAG_US }
                 | if is_writethrough { MASK_FLAG_PWT } else { 0 }
                 | if disable_cache   { MASK_FLAG_PCD } else { 0 }
+                | if is_page         { ((pkey as usize) << SHIFT_PKEY) } else { 0 }
                 | if disable_execute { MASK_FLAG_XD }  else { 0 }
             },
             layer: Ghost(layer as nat),
         };
 
         proof {
-            PDE::lemma_new_entry_addr_mask_is_address(layer, address, is_page, is_writable, is_supervisor, is_writethrough, disable_cache, disable_execute);
-            PDE::lemma_new_entry_mb0_bits_are_zero(layer, address, is_page, is_writable, is_supervisor, is_writethrough, disable_cache, disable_execute);
-            if is_page { e.lemma_addr_mask_when_hp_pat_is_zero(); }
+            PDE::lemma_new_entry_addr_mask_is_address(layer, address, is_page, is_writable, is_supervisor, is_writethrough, disable_cache, disable_execute, pkey);
+            PDE::lemma_new_entry_mb0_bits_are_zero(layer, address, is_page, is_writable, is_supervisor, is_writethrough, disable_cache, disable_execute, pkey);
+            if is_page {
+                e.lemma_addr_mask_when_hp_pat_is_zero();
+            }
         }
         e
     }
@@ -724,6 +1087,8 @@ pub struct PTDir {
 // doesn't support. Or we keep an owned copy but then can't have an external interface that mutably
 // borrows a memory.)
 pub mod PT {
+
+use crate::spec_t::mmu::defs::PKEY_MAX;
 
 use super::*;
 
@@ -987,7 +1352,7 @@ pub open spec fn interp_at_entry(tok: WrappedTokenView, pt: PTDir, layer: nat, p
             let entry_base = x86_arch_spec.entry_base(layer, base_vaddr, idx);
             l1::NodeEntry::Directory(interp_at(tok, pt.entries[idx as int]->Some_0, layer + 1, dir_addr, entry_base))
         },
-        GPDE::Page { addr, RW, US, XD, .. } =>
+        GPDE::Page { addr, RW, US, XD, pkey, .. } =>
             l1::NodeEntry::Page(
                 PTE {
                     frame: MemRegion { base: addr as nat, size: x86_arch_spec.entry_size(layer) },
@@ -996,6 +1361,7 @@ pub open spec fn interp_at_entry(tok: WrappedTokenView, pt: PTDir, layer: nat, p
                         is_supervisor:   !US,
                         disable_execute: XD,
                     },
+                    pkey: pkey as nat
                 }),
         GPDE::Invalid => l1::NodeEntry::Invalid,
     }
@@ -1497,6 +1863,7 @@ fn map_frame_aux(
 ) -> (res: Result<Ghost<(PTDir,ISet<MemRegion>)>,()>)
     requires
         old(tok).inv(),
+        pte.wf(),
         !old(tok)@.change_made,
         old(tok)@.args == (OpArgs::Map { base: vaddr, pte: pte@ }),
         inv_at(old(tok)@, pt, layer as nat, ptr),
@@ -2256,6 +2623,7 @@ pub fn map_frame(Tracked(tok): Tracked<&mut WrappedMapToken>, pt: &mut Ghost<PTD
         accepted_mapping(vaddr as nat, pte@, 0, 0),
         //interp(old(tok)@, old(pt)@).accepted_mapping(vaddr as nat, pte@),
         vaddr < MAX_VIRTADDR,
+        pte.wf(),
         pml4 == old(tok)@.pt_mem.pml4,
         old(tok)@.args == (OpArgs::Map { base: vaddr, pte: pte@ }),
     ensures
@@ -3398,16 +3766,18 @@ fn protect_aux(
     base: usize,
     vaddr: usize,
     permissions: &Flags,
+    pkey: u8
 ) -> (res: Result<(),()>)
     requires
         old(tok).inv(),
         !old(tok)@.change_made,
-        old(tok)@.args == (OpArgs::Protect { base: vaddr, flags: *permissions }),
+        old(tok)@.args == (OpArgs::Protect { base: vaddr, flags: *permissions, pkey: pkey as nat }),
         inv_at(old(tok)@, pt, layer as nat, ptr),
         no_empty_directories(old(tok)@, pt, layer as nat, ptr),
         accepted_protect(vaddr as nat, layer as nat, base as nat),
         aligned(base as nat, x86_arch_spec.entry_size(layer as nat)),
         base <= vaddr < MAX_VIRTADDR,
+        pkey < PKEY_MAX,
         interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp().contains_key(vaddr as nat)
              <==> interp_to_l0(old(tok)@, root_pt).contains_key(vaddr as nat),
         interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp().contains_key(vaddr as nat)
@@ -3571,7 +3941,7 @@ fn protect_aux(
                 broadcast use vstd::arithmetic::div_mod::lemma_mod_mod, vstd::arithmetic::div_mod::lemma_mod_breakdown;
             };
 
-            match protect_aux(Tracked(tok), Ghost(dir_pt), Ghost(root_pt), layer + 1, dir_addr, entry_base, vaddr, permissions) {
+            match protect_aux(Tracked(tok), Ghost(dir_pt), Ghost(root_pt), layer + 1, dir_addr, entry_base, vaddr, permissions, pkey) {
                 Ok(_) => {
                     proof {
                         assert(forall|i: nat| i < X86_NUM_ENTRIES && i != idx
@@ -3613,7 +3983,7 @@ fn protect_aux(
             assert(interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).entries[idx as int] is Page);
             assert(entry_at_spec(tok@, pt, layer as nat, ptr, idx as nat)@ is Page);
             if aligned_exec(vaddr, x86_arch_exec.entry_size(layer)) {
-                let new_entry = entry.change_page_permissions(permissions);
+                let new_entry = entry.change_page_permissions(permissions, pkey);
 
                 proof {
                     let tok_after_write = old(tok)@.write(idx, new_entry.entry, pt.region, true);
@@ -3627,8 +3997,8 @@ fn protect_aux(
                         broadcast use PDE::lemma_view_unchanged_dirty_access;
                         assert(forall|a: usize, b: usize, m: usize| a & m == b ==> a & m == b & m) by (bit_vector);
                     };
-                    assert(forall|a: usize| a & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_FLAGS
-                        == a & MASK_NEG_PROT_FLAGS & MASK_NEG_DIRTY_ACCESS) by (bit_vector);
+                    assert(forall|a: usize| a & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_ALL
+                        == a & MASK_NEG_PROT_ALL & MASK_NEG_DIRTY_ACCESS) by (bit_vector);
                     assert(tok@.read(idx, pt.region) & MASK_NEG_DIRTY_ACCESS == tok@.read(idx, pt.region)) by {
                         assert(forall|a: usize, b: usize| a & b & b == a & b) by (bit_vector);
                     };
@@ -3667,7 +4037,7 @@ fn protect_aux(
                     assert(PT::inv(tok_after_write, root_pt));
 
                     let old_pte = interp_at_entry(tok@, pt, layer as nat, ptr, base as nat, idx as nat)->Page_0;
-                    let new_pte = PTE { frame: old_pte.frame, flags: *permissions };
+                    let new_pte = PTE { frame: old_pte.frame, flags: *permissions,  pkey: pkey as nat };
 
                     assert(interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp().contains_pair(vaddr as nat, old_pte));
                     assert(interp_at(old(tok)@, pt, layer as nat, ptr, base as nat).interp()[vaddr as nat] == old_pte);
@@ -3726,15 +4096,16 @@ fn protect_aux(
 }
 
 
-pub fn protect(Tracked(tok): Tracked<&mut WrappedProtectToken>, pt: &mut Ghost<PTDir>, pml4: usize, vaddr: usize, permissions: &Flags) -> (res: Result<(),()>)
+pub fn protect(Tracked(tok): Tracked<&mut WrappedProtectToken>, pt: &mut Ghost<PTDir>, pml4: usize, vaddr: usize, permissions: &Flags, pkey: u8) -> (res: Result<(),()>)
     requires
         !old(tok)@.change_made,
         inv_and_nonempty(old(tok)@, old(pt)@),
         old(tok).inv(),
         accepted_protect(vaddr as nat, 0, 0),
         vaddr < MAX_VIRTADDR,
+        pkey < PKEY_MAX,
         pml4 == old(tok)@.pt_mem.pml4,
-        old(tok)@.args == (OpArgs::Protect { base: vaddr, flags: *permissions }),
+        old(tok)@.args == (OpArgs::Protect { base: vaddr, flags: *permissions, pkey: pkey as nat }),
     ensures
         inv_and_nonempty(final(tok)@, final(pt)@),
         match res {
@@ -3751,7 +4122,7 @@ pub fn protect(Tracked(tok): Tracked<&mut WrappedProtectToken>, pt: &mut Ghost<P
         final(tok).inv(),
         final(tok)@.orig_st.mmu@.cr3 == old(tok)@.orig_st.mmu@.cr3,
 {
-    if let Ok(_) = protect_aux(Tracked(tok), *pt, *pt, 0, pml4, 0, vaddr, permissions) {
+    if let Ok(_) = protect_aux(Tracked(tok), *pt, *pt, 0, pml4, 0, vaddr, permissions, pkey) {
         assert(inv_and_nonempty(tok@, pt@));
         Ok(())
     } else {

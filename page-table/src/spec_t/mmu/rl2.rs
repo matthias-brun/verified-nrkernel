@@ -10,7 +10,7 @@ use crate::spec_t::mmu::defs::{
 use crate::spec_t::mmu::defs::{ Core, PTE };
 use crate::spec_t::mmu::rl3::{ Writes };
 use crate::spec_t::mmu::translation::{
-    MASK_NEG_DIRTY_ACCESS, MASK_NEG_PROT_FLAGS
+    MASK_NEG_DIRTY_ACCESS, MASK_NEG_PROT_ALL,
 };
 use crate::extra;
 
@@ -29,7 +29,9 @@ pub struct CoreState {
     /// Ongoing walks of the core, this is a total
     pub walks: ISet<Walk>,
     /// Store Buffer of the core (for PTMem Updates)
-    pub stbuf: Seq<(Vaddr, usize)>
+    pub stbuf: Seq<(Vaddr, usize)>,
+    /// Ptrotection Key Rights for User Page register
+    pub pkru: PkruRegister
 }
 
 impl CoreState {
@@ -40,6 +42,7 @@ impl CoreState {
             tlb: IMap::total(|k| IMap::empty()),
             walks: iset![],
             stbuf:  seq![],
+            pkru: PkruRegister::new()
         }
     }
 
@@ -48,6 +51,7 @@ impl CoreState {
         &&& self.tlb   === IMap::total(|k| IMap::empty())
         &&& self.walks === iset![]
         &&& self.stbuf  === seq![]
+        &&& self.pkru == PkruRegister::new()
     }
 
     /// Well-formedness Condition
@@ -59,6 +63,9 @@ impl CoreState {
 
         // there is a finite number of ongoing walks
         &&& self.walks.finite()
+
+        // the pkru register is wf
+        &&& self.pkru.wf()
     }
 
     /// Invariant
@@ -227,6 +234,22 @@ impl CoreState {
         self.stbuf.first()
     }
 
+    // -------------------------------------- CR3 -------------------------------------------------
+
+    #[verifier(inline)]
+    pub open spec fn pkru_set(self, pkru: PkruRegister) -> CoreState {
+        CoreState { pkru, ..self }
+    }
+
+    #[verifier(inline)]
+    pub open spec fn pkru_writable(self, pkey: nat) -> bool {
+        self.pkru.allows_writes(pkey)
+    }
+
+    #[verifier(inline)]
+    pub open spec fn pkru_readable(self, pkey: nat) -> bool {
+        self.pkru.allows_reads(pkey)
+    }
 }
 
 
@@ -272,6 +295,7 @@ pub ghost enum Step {
     Writeback { core: Core },
     Read,
     Barrier,
+    WrPkru,
     SadWrite,
     Sadness,
     Stutter,
@@ -575,7 +599,7 @@ pub open spec fn step_MemOpTLB(
     &&& tlb_va <= memop_vaddr < tlb_va + pte.frame.size
     &&& match memop {
         MemOp::Store { new_value, result } => {
-            if paddr < c.phys_mem_size && !pte.flags.is_supervisor && pte.flags.is_writable {
+            if paddr < c.phys_mem_size && !pte.flags.is_supervisor && pte.flags.is_writable && pre.cores[core].pkru_writable(pte.pkey)  {
                 &&& result is Ok
                 &&& post.phys_mem === update_range(pre.phys_mem, paddr, new_value)
             } else {
@@ -584,7 +608,7 @@ pub open spec fn step_MemOpTLB(
             }
         },
         MemOp::Load { is_exec, result, .. } => {
-            if paddr < c.phys_mem_size && !pte.flags.is_supervisor && (is_exec ==> !pte.flags.disable_execute) {
+            if paddr < c.phys_mem_size && !pte.flags.is_supervisor && (is_exec ==> !pte.flags.disable_execute) && (!is_exec ==> pre.cores[core].pkru_readable(pte.pkey)){
                 &&& result == LoadResult::Value(pre.phys_mem.subrange(paddr, paddr + memop.op_size()))
                 &&& post.phys_mem === pre.phys_mem
             } else {
@@ -834,6 +858,19 @@ pub open spec fn step_Barrier(pre: State, post: State, c: Constants, lbl: Lbl) -
     }
 }
 
+pub open spec fn step_WrPkru(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+    &&& lbl matches Lbl::WrPkru(core, regval)
+
+    &&& pre.happy
+    &&& c.valid_core(core)
+    &&& regval.wf()
+
+    &&& post == State {
+        cores: pre.cores.insert(core, pre.cores[core].pkru_set(regval)),
+        ..pre
+    }
+}
+
 pub open spec fn step_SadWrite(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
     // If we do a write without fulfilling the right conditions, we set happy to false.
     &&& lbl matches Lbl::Write(core, addr, value)
@@ -875,6 +912,7 @@ pub open spec fn next_step(pre: State, post: State, c: Constants, step: Step, lb
         Step::Writeback { core }        => step_Writeback(pre, post, c, core, lbl),
         Step::Read                      => step_Read(pre, post, c, lbl),
         Step::Barrier                   => step_Barrier(pre, post, c, lbl),
+        Step::WrPkru                    => step_WrPkru(pre, post, c, lbl),
         Step::SadWrite                  => step_SadWrite(pre, post, c, lbl),
         Step::Sadness                   => step_Sadness(pre, post, c, lbl),
         Step::Stutter                   => step_Stutter(pre, post, c, lbl),
@@ -916,7 +954,7 @@ impl State {
         &&& c.valid_core(self.writes.core)
         &&& self.writes.tso.finite()
         &&& forall|core| #[trigger] c.valid_core(core) <==> self.cores.contains_key(core)
-        &&& forall|core| #[trigger] self.cores.contains_key(core) ==> self.cores[core].wf()
+        &&& forall|core| #[trigger] c.valid_core(core) ==> self.cores[core].wf()
 
         &&& aligned(self.pt_mem.pml4 as nat, 4096)
         &&& c.in_ptmem_range(self.pt_mem.pml4 as nat, 4096)
@@ -2237,8 +2275,8 @@ proof fn next_step_preserves_wf(pre: State, post: State, c: Constants, step: Ste
     ensures post.wf(c)
 {
     reveal(State::wf_ptmem_range);
-    assert forall |c| #[trigger]post.cores.contains_key(c) implies post.cores[c].wf() by {
-        assert(pre.cores[c].tlb.dom() =~= post.cores[c].tlb.dom());
+    assert forall |core| #[trigger]c.valid_core(core) implies post.cores[core].wf() by {
+        assert(pre.cores[core].tlb.dom() =~= post.cores[core].tlb.dom());
     }
     assert(post.pt_mem.mem.dom() =~= pre.pt_mem.mem.dom());
 }
@@ -2339,8 +2377,8 @@ proof fn next_step_preserves_inv_inflight_walks_are_prefixes_during_prot(pre: St
             let wrvalue = lbl->Write_2;
             assert(wrvalue & bit!(7usize) == bit!(7usize)) by {
                 assert(forall|v1: usize, v2: usize|
-                    #[trigger] (v1 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_FLAGS)
-                        == #[trigger] (v2 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_FLAGS)
+                    #[trigger] (v1 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_ALL)
+                        == #[trigger] (v2 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_ALL)
                     ==> v1 & bit!(7usize) == v2 & bit!(7usize)) by (bit_vector);
             };
             assert(post.inv_inflight_walks_are_prefixes(c));
@@ -2381,7 +2419,7 @@ proof fn next_step_preserves_inv_protect__sbuf_implies_bit7(pre: State, post: St
                 broadcast use lemma_writes_tso_empty_implies_sbuf_empty;
             };
             let addr = lbl->Write_1;
-            assert((pre.writer_mem().read(addr) & MASK_NEG_DIRTY_ACCESS) & MASK_NEG_PROT_FLAGS & bit!(7usize) == bit!(7usize));
+            assert((pre.writer_mem().read(addr) & MASK_NEG_DIRTY_ACCESS) & MASK_NEG_PROT_ALL & bit!(7usize) == bit!(7usize));
             assert(post.inv_protect__sbuf_implies_bit7(c));
         },
         Step::Writeback { core } => {
@@ -2922,6 +2960,7 @@ proof fn lemma_valid_not_pending_implies_equal(state: State, c: Constants, core:
     };
     assert(bit!(0usize) == 1) by (bit_vector);
     assert(forall|i| #![auto] 0 <= i < path.len() ==> !state.writer_sbuf().contains_fst(path[i].0));
+
     assert forall|i| #![auto] 0 <= i < path.len()
         implies state.writer_mem().read(path[i].0) == state.core_mem(core).read(path[i].0)
     by { broadcast use pt_mem::PTMem::lemma_write_seq_idle; };
@@ -3329,6 +3368,7 @@ pub mod refinement {
             rl1::CoreState {
                 cr3: self.cr3.pml4,
                 tlb: self.tlb[self.pcid()],
+                pkru: self.pkru
             }
         }
     }
@@ -3406,6 +3446,7 @@ pub mod refinement {
                 rl2::Step::Writeback { core } => rl1::Step::Stutter,
                 rl2::Step::Read => rl1::Step::Read,
                 rl2::Step::Barrier => rl1::Step::Barrier,
+                rl2::Step::WrPkru => rl1::Step::WrPkru,
                 rl2::Step::SadWrite => rl1::Step::SadWrite,
                 rl2::Step::Sadness => rl1::Step::Sadness,
                 rl2::Step::Stutter => rl1::Step::Stutter,
@@ -3505,6 +3546,16 @@ pub mod refinement {
             rl2::Step::Barrier => {
                 assert(rl1::step_Barrier(pre.interp(), post.interp(), c, lbl));
             },
+            rl2::Step::WrPkru => {
+                let core = lbl->WrPkru_0;
+                assert(rl2::step_WrPkru(pre, post, c, lbl));
+                assert(c.valid_core(core));
+                assert(pre.cores.contains_key(core));
+                //assert(post.interp().cores == pre.interp().cores);
+                assert(post.cores == pre.cores.insert(core, pre.cores[core].pkru_set(lbl->WrPkru_1)));
+                assert(post.interp().cores == pre.interp().cores.insert(core, pre.interp().cores[core].pkru_set(lbl->WrPkru_1)));
+                assert(rl1::step_WrPkru(pre.interp(), post.interp(), c, lbl));
+            }
             rl2::Step::SadWrite => {
                 assert(rl1::step_SadWrite(pre.interp(), post.interp(), c, lbl));
             },

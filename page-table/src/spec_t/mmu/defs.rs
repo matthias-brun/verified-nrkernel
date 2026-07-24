@@ -316,6 +316,7 @@ impl Flags {
     }
 }
 
+
 pub struct PTE {
     pub frame: MemRegion,
     /// The `flags` field on a `PTE` denotes the combined flags of the entire
@@ -324,17 +325,28 @@ pub struct PTE {
     /// permissive these flags also correspond to the flags that we set for the frame mapping
     /// corresponding to this `PTE`.
     pub flags: Flags,
+    pub pkey: nat,
+}
+
+impl PTE {
+    pub open spec fn wf(self) -> bool {
+        self.pkey < PKEY_MAX
+    }
 }
 
 #[derive(Copy, Clone)]
 pub struct PageTableEntryExec {
     pub frame: MemRegionExec,
     pub flags: Flags,
+    pub pkey: PKeyExec,
 }
 
 impl PageTableEntryExec {
+    pub open spec fn wf(self) -> bool {
+        self.pkey < PKEY_MAX
+    }
     pub open spec fn view(self) -> PTE {
-        PTE { frame: self.frame@, flags: self.flags }
+        PTE { frame: self.frame@, flags: self.flags, pkey: self.pkey as nat}
     }
 }
 
@@ -515,6 +527,95 @@ pub open spec fn update_range<A>(s: Seq<A>, idx: int, new: Seq<A>) -> Seq<A>
     s.subrange(0, idx)
       + new
       + s.subrange(idx + new.len(), s.len() as int)
+}
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Permission Keys
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+/// represents the maximum number of PKeys
+pub spec const PKEY_MAX: usize = 16;
+
+/// a pkey in spec workd
+type PKey = nat;
+
+type PKeyExec = u8;
+
+/// Represents the rights for a protection key
+pub struct PkruPerms {
+    /// access disable flag
+    pub AD: bool,
+    /// write disable
+    pub WD: bool
+}
+
+impl PkruPerms {
+    pub open spec fn new() -> PkruPerms {
+        PkruPerms { AD: false, WD: false }
+    }
+
+    //
+    pub open spec fn allows_reads(self) -> bool {
+        // to allow reads, access must not be disabled
+        !self.AD
+    }
+
+    pub open spec fn allows_writes(self) -> bool {
+        // to write access and write must not be disabled
+        !self.AD && !self.WD
+    }
+
+    pub open spec fn allows_exec(self) -> bool {
+        true // exec is never prevented by Pkru
+    }
+}
+
+/// The Protection Key Rights Registesr
+pub struct PkruRegister(pub IMap<nat, PkruPerms>);
+impl PkruRegister {
+
+    /// constructs a new PKRU register. it has 16 two-bit permission fields
+    pub open spec fn new() -> Self {
+        PkruRegister(
+            IMap::new(|key:nat| 0 <= key < PKEY_MAX,
+                      |key:nat| PkruPerms { AD: false, WD: false})
+        )
+    }
+
+    // the PKRU has 16 fields holding the permission key rights
+    pub open spec fn wf(self) -> bool {
+        forall |key:nat| 0 <= key < PKEY_MAX <==> self.0.contains_key(key)
+    }
+
+    /// obtains the permissions
+    pub open spec fn perms(self, key: nat) -> PkruPerms
+        recommends self.wf() && 0 <= key < PKEY_MAX
+    {
+        self.0[key]
+    }
+
+    /// returns true if the writes are allowed for the provided key
+    pub open spec fn allows_writes(self, key: nat) -> bool
+        recommends self.wf() && 0 <= key < PKEY_MAX
+    {
+        self.0[key].allows_writes()
+    }
+
+    /// returns true if the reads are allowed for the provided key
+    pub open spec fn allows_reads(self, key: nat) -> bool
+        recommends self.wf() && 0 <= key < PKEY_MAX
+    {
+        self.0[key].allows_reads()
+    }
+
+    /// returns true if exec is allowed
+    pub open spec fn allows_exec(self, key: nat) -> bool
+        recommends self.wf() && 0 <= key < PKEY_MAX
+    {
+        true // exec is never blocked
+    }
+
 }
 
 } // verus!

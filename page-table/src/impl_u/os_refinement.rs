@@ -4,6 +4,7 @@ use vstd::prelude::*;
 use vstd::imap::*;
 use vstd::{ assert_by_contradiction, assert_seqs_equal };
 
+use crate::spec_t::mmu::defs::PkruRegister;
 // use crate::spec_t::hlspec::*;
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::defs::{
@@ -313,6 +314,9 @@ pub proof fn os_init_refines_hl_init(c: os::Constants, s: os::State)
         assert(c.valid_core(core));
         assert(s.core_states[core] === os::CoreState::Idle);  //nn
     };
+    // assert(s.mmu@.cores.dom() == abs_s.pkrus.dom());
+    to_rl1::init_implies_inv(s.mmu, c.common);
+    to_rl1::init_refines(s.mmu, c.common);
     //assert(abs_s.mem === IMap::empty());
     assert(abs_s.mappings =~= IMap::empty()) by {
         lemma_init_implies_empty_map(s, c);
@@ -340,7 +344,7 @@ proof fn next_step_refines_hl_next_step(c: os::Constants, s1: os::State, s2: os:
 {
     if s1.sound {
         match step { // Broadcasting these is very slow
-            os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
+            os::Step::MemOp { .. } | os::Step::WrPkru { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
             | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
             | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
             | os::Step::ProtectOpChange { .. } => {
@@ -349,10 +353,24 @@ proof fn next_step_refines_hl_next_step(c: os::Constants, s1: os::State, s2: os:
             },
             _ => {},
         }
+        assert(s1.mmu@.cores.dom() == s2.mmu@.cores.dom());
+        assert(s1.interp(c).pkrus.dom() == s2.interp(c).pkrus.dom());
+        assert(s1.mmu@.cores.dom() == s1.interp(c).pkrus.dom());
         next_step_preserves_inv(c, s1, s2, step, lbl);
         match step {
             os::Step::MemOp { core, .. } => {
                 step_MemOp_refines(c, s1, s2, step, lbl);
+                assert(hlspec::next_step(c.interp(), s1.interp(c), s2.interp(c), step.interp(s1, s2, c, lbl), lbl));
+            },
+            os::Step::WrPkru { core, .. } => {
+                assert(s2.interp(c).pkrus == s1.interp(c).pkrus.insert(core, lbl->WrPkru_val));
+                assert(s1.effective_mappings() =~= s2.effective_mappings()) by {
+                    assert(s1.inflight_protect_params() =~= s2.inflight_protect_params()) by {
+                        assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
+                            <==> s2.is_inflight_protect_vaddr_core(va, core));
+                    };
+                };
+                extra_mappings_preserved(c, s1, s2);
                 assert(hlspec::next_step(c.interp(), s1.interp(c), s2.interp(c), step.interp(s1, s2, c, lbl), lbl));
             },
             // Map steps
@@ -443,7 +461,8 @@ proof fn next_step_refines_hl_next_step(c: os::Constants, s1: os::State, s2: os:
                 assert(hlspec::next_step(c.interp(), s1.interp(c), s2.interp(c), step.interp(s1, s2, c, lbl), lbl));
             },
             os::Step::Barrier { .. }
-            | os::Step::Invlpg { .. } => {
+            | os::Step::Invlpg { .. }
+            | os::Step::InvPcid { .. } => {
                 assert(s1.effective_mappings() =~= s2.effective_mappings()) by {
                     assert(s1.inflight_protect_params() =~= s2.inflight_protect_params()) by {
                         assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
@@ -454,6 +473,7 @@ proof fn next_step_refines_hl_next_step(c: os::Constants, s1: os::State, s2: os:
                 assert(hlspec::next_step(c.interp(), s1.interp(c), s2.interp(c), hlspec::Step::Stutter, RLbl::Tau));
             },
             _ => {
+                assert(s2.interp(c).pkrus == s1.interp(c).pkrus);
                 assert(s1.effective_mappings() =~= s2.effective_mappings()) by {
                     assert(s1.inflight_protect_params() =~= s2.inflight_protect_params()) by {
                         assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
@@ -651,7 +671,7 @@ proof fn step_MemOp_refines(c: os::Constants, s1: os::State, s2: os::State, step
 
             match op {
                 MemOp::Store { new_value, result } => {
-                    if paddr < d.phys_mem_size && !pte.flags.is_supervisor && pte.flags.is_writable {
+                    if paddr < d.phys_mem_size && !pte.flags.is_supervisor && pte.flags.is_writable && s1.mmu@.cores[core].pkru.allows_writes(pte.pkey) {
                         assert(result is Ok);
                         interp_vmem_update_range(c, s1, tlb_va, pte, vaddr as int, op.op_size() as int, new_value);
                         assert(s2.interp(c).mem === update_range(s1.interp(c).mem, vaddr as int, new_value));
@@ -662,7 +682,7 @@ proof fn step_MemOp_refines(c: os::Constants, s1: os::State, s2: os::State, step
                 },
                 MemOp::Load { is_exec, result, .. } => {
                     assert(s2.interp(c).mem === s1.interp(c).mem);
-                    if paddr < d.phys_mem_size && !pte.flags.is_supervisor && (is_exec ==> !pte.flags.disable_execute) {
+                    if paddr < d.phys_mem_size && !pte.flags.is_supervisor && (is_exec ==> !pte.flags.disable_execute)  && (!is_exec ==> s1.mmu@.cores[core].pkru.allows_reads(pte.pkey)) {
                         assert(result is Value);
                         interp_vmem_subrange(c, s1, tlb_va, pte, vaddr as int, op.op_size() as int);
                         assert(result->0 == s1.interp(c).mem.subrange(vaddr as int, vaddr + op.op_size() as int));
@@ -1031,8 +1051,8 @@ proof fn extra_mappings_preserved_effective_mapping_inserted_protect(
             }),
         s1.core_states.contains_key(this_core),
         match s2.core_states[this_core] {
-            CoreState::ProtectWaiting { vaddr, flags, .. } => {
-                let new_pte = PTE { frame: s1.interp_pt_mem()[vaddr].frame, flags };
+            CoreState::ProtectWaiting { vaddr, flags, pkey, .. } => {
+                let new_pte = PTE { frame: s1.interp_pt_mem()[vaddr].frame, flags, pkey };
                 &&& s1.effective_mappings().contains_key(vaddr)
                 &&& s2.effective_mappings() =~= s1.effective_mappings().insert(vaddr, new_pte)
             }
@@ -1043,7 +1063,8 @@ proof fn extra_mappings_preserved_effective_mapping_inserted_protect(
 {
     let this_vaddr = s2.core_states[this_core]->ProtectWaiting_vaddr;
     let this_flags = s2.core_states[this_core]->ProtectWaiting_flags;
-    let new_pte = PTE { frame: s1.interp_pt_mem()[this_vaddr].frame, flags: this_flags };
+    let this_pkey = s2.core_states[this_core]->ProtectWaiting_pkey;
+    let new_pte = PTE { frame: s1.interp_pt_mem()[this_vaddr].frame, flags: this_flags, pkey: this_pkey };
 
     assert(s1.effective_mappings().contains_key(this_vaddr));
 
@@ -2647,6 +2668,7 @@ proof fn step_ProtectStart_refines(c: os::Constants, s1: os::State, s2: os::Stat
     //label
     let vaddr = lbl->ProtectStart_vaddr;
     let flags = lbl->ProtectStart_flags;
+    let pkey = lbl->ProtectStart_pkey;
     let ult_id = lbl->ProtectStart_thread_id;
 
     //interpretation
@@ -2672,7 +2694,7 @@ proof fn step_ProtectStart_refines(c: os::Constants, s1: os::State, s2: os::Stat
         if hlspec::step_Protect_sound(hl_s1, vaddr, pte_size) {
             assert(hl_s1.sound == hl_s2.sound);
             assert(c.valid_core(c.ult2core[ult_id]));
-            assert(hl_s2.thread_state =~= hl_s1.thread_state.insert(ult_id, hlspec::ThreadState::Protect { vaddr, flags, pte }));
+            assert(hl_s2.thread_state =~= hl_s1.thread_state.insert(ult_id, hlspec::ThreadState::Protect { vaddr, flags, pkey, pte }));
             if pte is None {
                 assert(!s1.interp_pt_mem().contains_key(vaddr));
                 assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
@@ -2682,7 +2704,7 @@ proof fn step_ProtectStart_refines(c: os::Constants, s1: os::State, s2: os::Stat
                 assert(hl_s1.mappings =~= hl_s1.mappings.remove(vaddr));
                 assert(hlspec::step_ProtectStart(c.interp(), s1.interp(c), s2.interp(c), lbl));
             } else {
-                let new_pte = PTE { frame: pte->Some_0.frame, flags };
+                let new_pte = PTE { frame: pte->Some_0.frame, flags,  pkey };
                 assert(s2.effective_mappings() =~= s1.effective_mappings().insert(vaddr, new_pte)) by {
                     assert(forall|va, core| va != vaddr ==>
                         (s1.is_inflight_protect_vaddr_core(va, core) <==> s2.is_inflight_protect_vaddr_core(va, core)));
@@ -2696,9 +2718,9 @@ proof fn step_ProtectStart_refines(c: os::Constants, s1: os::State, s2: os::Stat
                         });
                     };
                     assert(s2.is_inflight_protect_vaddr_core(vaddr, core));
-
                     assert(s2.inflight_protect_params() =~= s1.inflight_protect_params().insert(vaddr, new_pte));
                 };
+                assert(hl_s2.mappings == hl_s1.mappings.insert(vaddr, PTE { frame: pte->Some_0.frame, flags,  pkey }));
                 extra_mappings_preserved_effective_mapping_inserted_protect(c, s1, s2, core);
                 assert(hlspec::step_ProtectStart(c.interp(), s1.interp(c), s2.interp(c), lbl));
             }
@@ -2823,6 +2845,7 @@ proof fn step_ProtectOpChange_refines(
 
     let vaddr = s1.core_states[core]->ProtectExecuting_vaddr;
     let flags = s1.core_states[core]->ProtectExecuting_flags;
+    let pkey = s1.core_states[core]->ProtectExecuting_pkey;
 
     assert forall|key| #[trigger] hl_s1.thread_state.contains_key(key)
         implies hl_s1.thread_state[key] == hl_s2.thread_state[key]
@@ -2855,7 +2878,8 @@ proof fn step_ProtectOpChange_refines(
         }
     }
     assert(hl_s1.thread_state =~= hl_s2.thread_state);
-    assert(s2.interp_pt_mem() =~= s1.interp_pt_mem().insert(vaddr, PTE { flags, ..s1.interp_pt_mem()[vaddr] }));
+
+    assert(s2.interp_pt_mem() =~= s1.interp_pt_mem().insert(vaddr, PTE { flags, pkey, ..s1.interp_pt_mem()[vaddr] }));
     assert(s1.interp_pt_mem().contains_key(vaddr));
     assert(s1.inflight_protect_params() =~= s2.inflight_protect_params()) by {
         assert forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
@@ -2894,7 +2918,7 @@ proof fn step_ProtectOpChange_refines(
     let ult_id = s1.core_states[core]->ProtectExecuting_ult_id;
     extra_mappings_preserved(c, s1, s2);
     assert(s2.mmu@.phys_mem == s1.mmu@.phys_mem);
-    assert(s2.applied_mappings() =~= s1.applied_mappings().insert(vaddr, PTE { flags, ..s1.interp_pt_mem()[vaddr] }));
+    assert(s2.applied_mappings() =~= s1.applied_mappings().insert(vaddr, PTE { flags, pkey, ..s1.interp_pt_mem()[vaddr] }));
 
     assert(s1.applied_mappings().contains_key(vaddr));
     assert(s1.applied_mappings()[vaddr] == s1.interp_pt_mem()[vaddr]);
