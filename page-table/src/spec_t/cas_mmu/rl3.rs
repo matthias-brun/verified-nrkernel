@@ -14,6 +14,12 @@ verus! {
 
 // Hardware model which includes support for atomics/CAS, using the lock/unlock modeling from the paper 
 // "A Better x86 Memory Model: x86-TSO" by Sewell et al.
+// Note: That paper shows that it is sound to model atomic instructions with lock/unlock
+// transitions. We adopt this modeling for kernel and userspace memory accesses but still permit MMU
+// memory reads and other MMU actions to take place, even when the lock is held. This modeling might
+// be overly conservative but as it is sufficient for our purposes, we avoid making a stronger
+// assumption.
+//
 // Refines directly to rl1, without the intermediate rl2 in the main development.
 
 
