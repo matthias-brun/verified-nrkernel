@@ -4,7 +4,7 @@
 use vstd::prelude::*;
 
 use crate::spec_t::mmu::translation::{
-    PDE, GPDE, l0_bits, l1_bits, l2_bits, l3_bits, MASK_NEG_PROT_FLAGS,
+    PDE, GPDE, l0_bits, l1_bits, l2_bits, l3_bits, MASK_NEG_PROT_ALL,
     MASK_NEG_DIRTY_ACCESS,
 };
 use crate::spec_t::mmu::defs::{ PTE, bitmask_inc, WORD_SIZE, bit, PAGE_SIZE,
@@ -77,8 +77,8 @@ impl PTMem {
     /// values. This is necessary because D/A could change between reading and writing, so we
     /// wouldn't be able to prove that we don't change them.
     pub open spec fn is_prot_write(self, addr: usize, value: usize) -> bool {
-        &&& (value & MASK_NEG_DIRTY_ACCESS) & MASK_NEG_PROT_FLAGS
-                == (self.read(addr) & MASK_NEG_DIRTY_ACCESS) & MASK_NEG_PROT_FLAGS
+        &&& (value & MASK_NEG_DIRTY_ACCESS) & MASK_NEG_PROT_ALL
+                == (self.read(addr) & MASK_NEG_DIRTY_ACCESS) & MASK_NEG_PROT_ALL
         &&& self.read(addr) & bit!(7usize) == bit!(7usize)
     }
 
@@ -135,7 +135,7 @@ impl PTMem {
     //    let l3_idx = mul(l3_bits!(vaddr), WORD_SIZE);
     //    let l0_addr = add(self.pml4, l0_idx);
     //    let l0e = PDE { entry: self.read(l0_addr), layer: Ghost(0) };
-    //    let path = 
+    //    let path =
     //        seq![(l0_addr, l0e@)].add(
     //            match l0e@ {
     //                GPDE::Directory { addr: l1_daddr, .. } => {
@@ -298,8 +298,8 @@ impl PTMem {
     {
         if self.is_nonneg_write(addr, value) {
             let old_value = self.read(addr);
-            assert((value & MASK_NEG_DIRTY_ACCESS) & MASK_NEG_PROT_FLAGS
-                    != (old_value & MASK_NEG_DIRTY_ACCESS) & MASK_NEG_PROT_FLAGS) by (bit_vector)
+            assert((value & MASK_NEG_DIRTY_ACCESS) & MASK_NEG_PROT_ALL
+                    != (old_value & MASK_NEG_DIRTY_ACCESS) & MASK_NEG_PROT_ALL) by (bit_vector)
                 requires
                     old_value & 1 == 0,
                     value & 1 == 1;

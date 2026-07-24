@@ -5,6 +5,7 @@
 use vstd::prelude::*;
 use crate::spec_t::mmu::defs::{
     MemRegion, PTE, MemOp, L1_ENTRY_SIZE, L2_ENTRY_SIZE, L3_ENTRY_SIZE, MAX_PHYADDR, Flags,
+    PkruRegister, Core
 };
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::defs::{
@@ -35,6 +36,8 @@ pub struct State {
     /// also makes some of the enabling conditions awkward, e.g. full mappings have the same flags, etc.
     /// But this is *not* a page table. It's not used for any sort of translation.
     pub mappings: IMap<nat, PTE>,
+    /// Per-Core Protection Key Rights for User Pages Register
+    pub pkrus: IMap<Core, PkruRegister>,
     pub sound: bool,
 }
 
@@ -48,6 +51,7 @@ pub enum Step {
     UnmapEnd,
     ProtectStart,
     ProtectEnd,
+    WrPkru,
     Stutter,
 }
 
@@ -57,7 +61,7 @@ pub enum ThreadState {
     Unmap { vaddr: nat, pte: Option<PTE> },
     // Protect takes flags as argument but in the thread state we also track the affected PTE,
     // similar to the Unmap thread state. pte is the old pte.
-    Protect { vaddr: nat, flags: Flags, pte: Option<PTE> },
+    Protect { vaddr: nat, flags: Flags, pkey: nat, pte: Option<PTE> },
     Idle,
 }
 
@@ -104,13 +108,17 @@ impl State {
 
 pub open spec fn wf(c: Constants, s: State) -> bool {
     &&& forall|id: nat| id < c.thread_no <==> s.thread_state.contains_key(id)
+    // &&& forall|core| core < c.thread_no <==> s.pkrus.contains_key(core)
+    // &&& forall|core: nat| #[trigger](s.pkrus[core]).wf()
     &&& s.mappings.dom().finite()
+    // &&& forall|m| s.mappings.contains_key(m) ==> s.mappings[m].wf()
 }
 
 pub open spec fn init(c: Constants, s: State) -> bool {
     &&& s.mem.len() === MAX_VIRTADDR
     &&& s.mappings === imap![]
     &&& forall|id: nat| id < c.thread_no ==> s.thread_state[id] is Idle
+    &&& forall|core| #[trigger]s.pkrus.contains_key(core) ==> s.pkrus[core] == PkruRegister::new()
     &&& wf(c, s)
     &&& s.sound
 }
@@ -129,6 +137,10 @@ impl Constants {
     pub open spec fn valid_thread(self, thread_id: nat) -> bool {
         thread_id < self.thread_no
     }
+
+    // pub open spec fn valid_core(self, core_id: nat) -> bool {
+    //     core_id < self.core_no
+    // }
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////
@@ -142,6 +154,7 @@ pub open spec fn state_unchanged_besides_thread_state_and_mem(
 ) -> bool {
     &&& s2.thread_state === s1.thread_state.insert(thread_id, thread_arguments)
     &&& s2.mappings === s1.mappings
+    &&& s2.pkrus == s1.pkrus
     &&& s2.sound == s1.sound
 }
 
@@ -198,9 +211,10 @@ pub open spec fn candidate_mapping_overlaps_inflight_pmem(
 // MMU atomic ReadWrite
 ///////////////////////////////////////////////////////////////////////////////////////////////
 pub open spec fn step_MemOp(c: Constants, s1: State, s2: State, pte: Option<(nat, PTE)>, lbl: RLbl) -> bool {
-    &&& lbl matches RLbl::MemOp { thread_id, vaddr, op }
+    &&& lbl matches RLbl::MemOp { thread_id, core, vaddr, op }
 
     &&& c.valid_thread(thread_id)
+    &&& s1.pkrus.contains_key(core)
     &&& s1.thread_state[thread_id] is Idle
     &&& aligned(vaddr, op.op_size())
     &&& op.valid_op_size()
@@ -214,7 +228,7 @@ pub open spec fn step_MemOp(c: Constants, s1: State, s2: State, pte: Option<(nat
             // .. and the result depends on the flags.
             &&& match op {
                 MemOp::Store { new_value, result } => {
-                    if paddr < c.phys_mem_size && !pte.flags.is_supervisor && pte.flags.is_writable {
+                    if paddr < c.phys_mem_size && !pte.flags.is_supervisor && pte.flags.is_writable && s1.pkrus[core].allows_writes(pte.pkey) {
                         &&& result is Ok
                         &&& s2.mem === update_range(s1.mem, vaddr as int, new_value)
                     } else {
@@ -224,7 +238,8 @@ pub open spec fn step_MemOp(c: Constants, s1: State, s2: State, pte: Option<(nat
                 },
                 MemOp::Load { is_exec, result, .. } => {
                     &&& s2.mem === s1.mem
-                    &&& if paddr < c.phys_mem_size && !pte.flags.is_supervisor && (is_exec ==> !pte.flags.disable_execute) {
+                    // PKey's do not affect instruction fetches
+                    &&& if paddr < c.phys_mem_size && !pte.flags.is_supervisor && (is_exec ==> !pte.flags.disable_execute)  && (!is_exec ==> s1.pkrus[core].allows_reads(pte.pkey)) {
                         &&& result is Value
                         &&& result->0 == s1.mem.subrange(vaddr as int, vaddr + op.op_size() as int)
                     } else {
@@ -243,15 +258,17 @@ pub open spec fn step_MemOp(c: Constants, s1: State, s2: State, pte: Option<(nat
     }
     &&& s2.mappings === s1.mappings
     &&& s2.thread_state === s1.thread_state
+    &&& s2.pkrus === s1.pkrus
     &&& s2.sound == s1.sound
 }
 
 /// If there's an inflight map/unmap/protect for this virtual address, we might still see a stale
 /// result, based on the previous translation.
 pub open spec fn step_MemOpNA(c: Constants, s1: State, s2: State, lbl: RLbl) -> bool {
-    &&& lbl matches RLbl::MemOp { thread_id, vaddr, op }
+    &&& lbl matches RLbl::MemOp { thread_id, core, vaddr, op }
 
     &&& c.valid_thread(thread_id)
+    &&& s1.pkrus.contains_key(core)
     &&& s1.thread_state[thread_id] is Idle
     &&& aligned(vaddr, op.op_size())
     &&& op.valid_op_size()
@@ -263,7 +280,7 @@ pub open spec fn step_MemOpNA(c: Constants, s1: State, s2: State, lbl: RLbl) -> 
         // the result depends on the flags
         match op {
             MemOp::Store { new_value, result } => {
-                if paddr < c.phys_mem_size && !pte.flags.is_supervisor && pte.flags.is_writable {
+                if paddr < c.phys_mem_size && !pte.flags.is_supervisor && pte.flags.is_writable && s1.pkrus[core].allows_writes(pte.pkey) {
                     &&& result is Ok
                     &&& s2.mem === update_range(s1.mem, vaddr as int, new_value)
                 } else {
@@ -273,7 +290,7 @@ pub open spec fn step_MemOpNA(c: Constants, s1: State, s2: State, lbl: RLbl) -> 
             },
             MemOp::Load { is_exec, result, .. } => {
                 &&& s2.mem === s1.mem
-                &&& if paddr < c.phys_mem_size && !pte.flags.is_supervisor && (is_exec ==> !pte.flags.disable_execute) {
+                &&& if paddr < c.phys_mem_size && !pte.flags.is_supervisor && (is_exec ==> !pte.flags.disable_execute)  && (!is_exec ==> s1.pkrus[core].allows_reads(pte.pkey)) {
                     &&& result is Value
                     &&& result->0 == s1.mem.subrange(vaddr as int, vaddr + op.op_size() as int)
                 } else {
@@ -284,6 +301,7 @@ pub open spec fn step_MemOpNA(c: Constants, s1: State, s2: State, lbl: RLbl) -> 
     }
     &&& s2.mappings === s1.mappings
     &&& s2.thread_state === s1.thread_state
+    &&& s2.pkrus === s1.pkrus
     &&& s2.sound == s1.sound
 
 }
@@ -356,6 +374,7 @@ pub open spec fn step_MapEnd(c: Constants, s1: State, s2: State, lbl: RLbl) -> b
         &&& s2.mappings === s1.mappings.insert(vaddr, pte)
     }
     &&& s2.mem === s1.mem
+    &&& s2.pkrus == s1.pkrus
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////
@@ -387,10 +406,12 @@ pub open spec fn step_UnmapStart(c: Constants, s1: State, s2: State, lbl: RLbl) 
             &&& s2.mappings == if pte is None { s1.mappings } else { s1.mappings.remove(vaddr) }
             &&& s2.sound == s1.sound
             &&& s2.mem === s1.mem
+            &&& s2.pkrus == s1.pkrus
         } else {
             unsound_state(s1, s2)
         }
     }
+
 }
 
 pub open spec fn step_UnmapEnd(c: Constants, s1: State, s2: State, lbl: RLbl) -> bool {
@@ -404,6 +425,7 @@ pub open spec fn step_UnmapEnd(c: Constants, s1: State, s2: State, lbl: RLbl) ->
     &&& s2.thread_state === s1.thread_state.insert(thread_id, ThreadState::Idle)
     &&& s2.sound == s1.sound
     &&& s2.mappings === s1.mappings
+    &&& s2.pkrus === s1.pkrus
     &&& forall|vaddr: nat| #[trigger] is_in_mapped_region(c.phys_mem_size, s2.mappings, vaddr) ==> s2.mem[vaddr as int] === s1.mem[vaddr as int]
 }
 
@@ -424,7 +446,7 @@ pub open spec fn step_Protect_enabled(vaddr: nat) -> bool {
 }
 
 pub open spec fn step_ProtectStart(c: Constants, s1: State, s2: State, lbl: RLbl) -> bool {
-    &&& lbl matches RLbl::ProtectStart { thread_id, vaddr, flags }
+    &&& lbl matches RLbl::ProtectStart { thread_id, vaddr, flags, pkey}
     &&& {
     let pte = if s1.mappings.contains_key(vaddr) { Some(s1.mappings[vaddr]) } else { None };
     let pte_size = if pte is Some { pte->Some_0.frame.size } else { 0 };
@@ -432,10 +454,11 @@ pub open spec fn step_ProtectStart(c: Constants, s1: State, s2: State, lbl: RLbl
     &&& c.valid_thread(thread_id)
     &&& s1.thread_state[thread_id] is Idle
     &&& if step_Protect_sound(s1, vaddr, pte_size) {
-            &&& s2.thread_state === s1.thread_state.insert(thread_id, ThreadState::Protect { vaddr, flags, pte })
-            &&& s2.mappings == if pte is None { s1.mappings } else { s1.mappings.insert(vaddr, PTE { frame: pte->Some_0.frame, flags }) }
+            &&& s2.thread_state === s1.thread_state.insert(thread_id, ThreadState::Protect { vaddr, flags, pkey, pte })
+            &&& s2.mappings == if pte is None { s1.mappings } else { s1.mappings.insert(vaddr, PTE { frame: pte->Some_0.frame, flags,  pkey }) }
             &&& s2.sound == s1.sound
             &&& s2.mem === s1.mem
+            &&& s2.pkrus == s1.pkrus
         } else {
             unsound_state(s1, s2)
         }
@@ -446,7 +469,7 @@ pub open spec fn step_ProtectEnd(c: Constants, s1: State, s2: State, lbl: RLbl) 
     &&& lbl matches RLbl::ProtectEnd { thread_id, vaddr, result }
 
     &&& c.valid_thread(thread_id)
-    &&& s1.thread_state[thread_id] matches ThreadState::Protect { vaddr: v2, flags, pte }
+    &&& s1.thread_state[thread_id] matches ThreadState::Protect { vaddr: v2, flags, pkey, pte }
     &&& vaddr == v2
     &&& pte is Some <==> result is Ok
 
@@ -454,12 +477,38 @@ pub open spec fn step_ProtectEnd(c: Constants, s1: State, s2: State, lbl: RLbl) 
     &&& s2.sound == s1.sound
     &&& s2.mappings === s1.mappings
     &&& s2.mem === s1.mem
+    &&& s2.pkrus == s1.pkrus
 }
+
+///////////////////////////////////////////////////////////////////////////////////////////////
+// Setting the Protection Keys
+///////////////////////////////////////////////////////////////////////////////////////////////
+
+pub open spec fn step_WrPkru(c: Constants, s1: State, s2: State, lbl: RLbl) -> bool {
+    &&& lbl matches RLbl:: WrPkru { thread_id, core,  val}
+
+    &&& c.valid_thread(thread_id)
+    &&& val.wf()
+    &&& s1.pkrus.contains_key(core)
+
+    &&& s2 == State {
+        pkrus: s1.pkrus.insert(core, val),
+        ..s1
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////
+// Stutter Step
+///////////////////////////////////////////////////////////////////////////////////////////////
 
 pub open spec fn step_Stutter(c: Constants, s1: State, s2: State, lbl: RLbl) -> bool {
     &&& lbl is Tau
     &&& s1 === s2
 }
+
+///////////////////////////////////////////////////////////////////////////////////////////////
+// State Machine Transitions
+///////////////////////////////////////////////////////////////////////////////////////////////
 
 pub open spec fn next_step(c: Constants, s1: State, s2: State, step: Step, lbl: RLbl) -> bool {
     if s1.sound {
@@ -472,6 +521,7 @@ pub open spec fn next_step(c: Constants, s1: State, s2: State, step: Step, lbl: 
             Step::UnmapEnd      => step_UnmapEnd(c, s1, s2, lbl),
             Step::ProtectStart  => step_ProtectStart(c, s1, s2, lbl),
             Step::ProtectEnd    => step_ProtectEnd(c, s1, s2, lbl),
+            Step::WrPkru  => step_WrPkru(c, s1, s2, lbl),
             Step::Stutter       => step_Stutter(c, s1, s2, lbl),
         }
     } else {

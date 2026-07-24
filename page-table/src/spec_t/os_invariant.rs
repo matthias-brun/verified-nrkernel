@@ -103,7 +103,7 @@ pub proof fn next_step_preserves_inv_basic(c: os::Constants, s1: os::State, s2: 
     hide(os::State::inv_lock);
 
     match step { // Broadcasting these is very slow
-        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
+        os::Step::MemOp { .. } | os::Step::WrPkru { .. }  |os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
         | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
         | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
         | os::Step::ProtectOpChange { .. } => {
@@ -178,7 +178,7 @@ pub proof fn next_step_preserves_inv_basic_protect(c: os::Constants, s1: os::Sta
         s2.inv_protect_result(c),
 {
     match step { // Broadcasting these is very slow
-        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
+        os::Step::MemOp { .. } | os::Step::WrPkru { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
         | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
         | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
         | os::Step::ProtectOpChange { .. } => {
@@ -222,7 +222,7 @@ pub proof fn next_step_preserves_inv_protect_vaddr_same_core(c: os::Constants, s
         s2.inv_protect_vaddr_same_core(c),
 {
     match step { // Broadcasting these is very slow
-        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid{ .. } | os::Step::Barrier { .. }
+        os::Step::MemOp { .. } | os::Step::WrPkru { .. }  |os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid{ .. } | os::Step::Barrier { .. }
         | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
         | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
         | os::Step::ProtectOpChange { .. } => {
@@ -335,7 +335,7 @@ pub proof fn next_step_preserves_inv_protect_frame_unchanged_1(c: os::Constants,
         s2.inv_protect_frame_unchanged(c),
 {
     match step { // Broadcasting these is very slow
-        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. }  | os::Step::Barrier { .. }
+        os::Step::MemOp { .. } | os::Step::WrPkru { .. }  |os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. }  | os::Step::Barrier { .. }
         | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
         | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
         | os::Step::ProtectOpChange { .. } => {
@@ -346,7 +346,7 @@ pub proof fn next_step_preserves_inv_protect_frame_unchanged_1(c: os::Constants,
     }
 
     match step {
-        os::Step::ProtectOpChange { core, .. } => {
+        os::Step::ProtectOpChange { core, paddr, value } => {
             assert(s1.inflight_protect_params() =~= s2.inflight_protect_params()) by {
                 assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
                     <==> s2.is_inflight_protect_vaddr_core(va, core));
@@ -358,6 +358,7 @@ pub proof fn next_step_preserves_inv_protect_frame_unchanged_1(c: os::Constants,
         os::Step::ProtectStart { core } => {
             let vaddr = lbl->ProtectStart_vaddr;
             let flags = lbl->ProtectStart_flags;
+            let pkey = lbl->ProtectStart_pkey;
             let pt = s1.interp_pt_mem();
             let pte = pt[vaddr];
             let pte_size = if pt.contains_key(vaddr) { pt[vaddr].frame.size } else { 0 };
@@ -379,7 +380,7 @@ pub proof fn next_step_preserves_inv_protect_frame_unchanged_1(c: os::Constants,
                 assert(s2.is_inflight_protect_vaddr_core(vaddr, core));
                 assert(s2.is_inflight_protect_vaddr(vaddr));
                 assert(s2.inflight_protect_params()
-                    =~= s1.inflight_protect_params().insert(vaddr, PTE { frame: pt[vaddr].frame, flags }));
+                    =~= s1.inflight_protect_params().insert(vaddr, PTE { frame: pt[vaddr].frame, flags, pkey }));
             } else {
                 assert(s1.inflight_protect_params() =~= s2.inflight_protect_params()) by {
                     assert(forall|va, core| s1.is_inflight_protect_vaddr_core(va, core)
@@ -426,7 +427,7 @@ pub proof fn next_step_preserves_inv_protect_frame_unchanged_2(c: os::Constants,
         s2.inv_protect_frame_unchanged(c),
 {
     match step { // Broadcasting these is very slow
-        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
+        os::Step::MemOp { .. } | os::Step::WrPkru { .. }  |os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
         | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
         | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
         | os::Step::ProtectOpChange { .. } => {
@@ -530,7 +531,7 @@ pub proof fn next_step_preserves_inv_mmu(c: os::Constants, s1: os::State, s2: os
 {
     x86_arch_spec_upper_bound();
     match step { // Broadcasting these is very slow
-        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
+        os::Step::MemOp { .. } | os::Step::WrPkru { .. }  |os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
         | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
         | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
         | os::Step::ProtectOpChange { .. } => {
@@ -590,7 +591,7 @@ pub proof fn next_step_preserves_inv_pending_maps(c: os::Constants, s1: os::Stat
         s2.inv_pending_maps(c),
 {
     match step { // Broadcasting these is very slow
-        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
+        os::Step::MemOp { .. } | os::Step::WrPkru { .. }  |os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
         | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
         | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
         | os::Step::ProtectOpChange { .. } => {
@@ -649,6 +650,7 @@ pub proof fn next_step_preserves_inv_pending_maps(c: os::Constants, s1: os::Stat
             },
             os::Step::MMU
             | os::Step::MemOp { .. }
+            | os::Step::WrPkru { .. }
             | os::Step::ReadPTMem { .. }
             | os::Step::Barrier { .. }
             | os::Step::Invlpg { .. }
@@ -675,7 +677,7 @@ pub proof fn next_step_preserves_inv_allocated_mem(c: os::Constants, s1: os::Sta
         s2.inv_allocated_mem(c),
 {
     match step { // Broadcasting these is very slow
-        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
+        os::Step::MemOp { .. } | os::Step::WrPkru { .. }  |os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
         | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
         | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
         | os::Step::ProtectOpChange { .. } => {
@@ -765,7 +767,7 @@ pub proof fn next_step_preserves_inv_shootdown(c: os::Constants, s1: os::State, 
         _ => {},
     }
     // match step { // Broadcasting these is very slow
-    //     os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
+    //     os::Step::MemOp { .. } | os::Step::WrPkru { .. }  |os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::Barrier { .. }
     //     | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
     //     | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
     //     | os::Step::ProtectOpChange { .. } => {
@@ -787,7 +789,7 @@ pub proof fn next_step_preserves_inv_writes(c: os::Constants, s1: os::State, s2:
     hide(os::State::inv_tlb);
 
     match step { // Broadcasting these is very slow
-        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
+        os::Step::MemOp { .. } | os::Step::WrPkru { .. }  |os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
         | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
         | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
         | os::Step::ProtectOpChange { .. } => {
@@ -984,7 +986,7 @@ pub proof fn next_step_preserves_inv_tlb_1(
         s2.inv_tlb(c),
 {
     match step { // Broadcasting these is very slow
-        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid{ .. } | os::Step::Barrier { .. }
+        os::Step::MemOp { .. } | os::Step::WrPkru { .. }  |os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid{ .. } | os::Step::Barrier { .. }
         | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
         | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
         | os::Step::ProtectOpChange { .. } => {
@@ -1187,7 +1189,7 @@ pub proof fn next_step_preserves_inv_tlb_2(
         s2.inv_tlb(c),
 {
     match step { // Broadcasting these is very slow
-        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
+        os::Step::MemOp { .. } | os::Step::WrPkru { .. }  |os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
         | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
         | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
         | os::Step::ProtectOpChange { .. } => {
@@ -1359,7 +1361,7 @@ pub proof fn next_step_preserves_inv_tlb_3(
         s2.inv_tlb(c),
 {
     match step { // Broadcasting these is very slow
-        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. }| os::Step::Barrier { .. }
+        os::Step::MemOp { .. } | os::Step::WrPkru { .. }  |os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. }| os::Step::Barrier { .. }
         | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
         | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
         | os::Step::ProtectOpChange { .. } => {
@@ -1489,7 +1491,7 @@ pub proof fn next_step_preserves_inv_tlb(
         s2.inv_tlb(c),
 {
     match step { // Broadcasting these is very slow
-        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
+        os::Step::MemOp { .. } | os::Step::WrPkru { .. }  |os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
         | os::Step::UnmapOpChange { .. } | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
         | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. }
         | os::Step::ProtectOpChange { .. } => {
@@ -1535,6 +1537,7 @@ pub proof fn next_step_preserves_inv_tlb(
             assert(s2.inv_tlb(c));
         },
         os::Step::MemOp { core }
+        | os::Step::WrPkru { core }
         | os::Step::ReadPTMem { core, .. }
         | os::Step::Barrier { core }
         | os::Step::Invlpg { core }
@@ -1589,7 +1592,7 @@ pub proof fn next_step_preserves_overlap_mem_inv(
         s2.inv_overlapping_mem(c),
 {
     match step { // Broadcasting these is very slow
-        os::Step::MemOp { .. } | os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
+        os::Step::MemOp { .. } | os::Step::WrPkru { .. }  |os::Step::ReadPTMem { .. } | os::Step::Invlpg { .. } | os::Step::InvPcid { .. } | os::Step::Barrier { .. }
         | os::Step::MMU { .. } | os::Step::UnmapOpStutter { .. }
         | os::Step::MapOpStutter { .. } | os::Step::MapOpChange { .. } => {
             to_rl1::next_refines(s1.mmu, s2.mmu, c.common, step.mmu_lbl(s1, lbl));
@@ -1664,7 +1667,8 @@ pub proof fn next_step_preserves_overlap_mem_inv(
             let vaddr = if step is UnmapOpStart {s1.core_states[core]->UnmapWaiting_vaddr} else {s1.core_states[core]->ProtectWaiting_vaddr};
             let ult_id = if step is UnmapOpStart {s1.core_states[core]->UnmapWaiting_ult_id} else {s1.core_states[core]->ProtectWaiting_ult_id};
             let flags = s1.core_states[core]->ProtectWaiting_flags;
-            let corestate = if step is UnmapOpStart {os::CoreState::UnmapExecuting { ult_id, vaddr, result: None }} else {os::CoreState::ProtectExecuting { ult_id, vaddr, flags, result: None }};
+            let pkey = s1.core_states[core]->ProtectWaiting_pkey;
+            let corestate = if step is UnmapOpStart {os::CoreState::UnmapExecuting { ult_id, vaddr, result: None }} else {os::CoreState::ProtectExecuting { ult_id, vaddr, flags, pkey, result: None }};
             lemma_insert_preserves_no_overlap(
                 c,
                 s1.core_states,
@@ -1717,7 +1721,8 @@ pub proof fn next_step_preserves_overlap_mem_inv(
             let vaddr = if step is UnmapOpFail {s1.core_states[core]->UnmapExecuting_vaddr} else {s1.core_states[core]->ProtectExecuting_vaddr};
             let ult_id = if step is UnmapOpFail {s1.core_states[core]->UnmapExecuting_ult_id} else { s1.core_states[core]->ProtectExecuting_ult_id};
             let flags = s1.core_states[core]->ProtectExecuting_flags;
-            let corestate = if step is UnmapOpFail {os::CoreState::UnmapOpDone { ult_id, vaddr, result: Err(()) }} else {os::CoreState::ProtectOpDone { ult_id, vaddr, flags, result: Err(()) }};
+            let pkey = s1.core_states[core]->ProtectExecuting_pkey;
+            let corestate = if step is UnmapOpFail {os::CoreState::UnmapOpDone { ult_id, vaddr, result: Err(()) }} else {os::CoreState::ProtectOpDone { ult_id, vaddr, flags, pkey, result: Err(()) }};
             lemma_insert_preserves_no_overlap(
                 c,
                 s1.core_states,
@@ -1734,9 +1739,10 @@ pub proof fn next_step_preserves_overlap_mem_inv(
             let vaddr = if step is UnmapInitiateShootdown {s1.core_states[core]->UnmapExecuting_vaddr} else {s1.core_states[core]->ProtectExecuting_vaddr} ;
             let ult_id = if step is UnmapInitiateShootdown {s1.core_states[core]->UnmapExecuting_ult_id} else {s1.core_states[core]->ProtectExecuting_ult_id};
             let result = if step is UnmapInitiateShootdown {s1.core_states[core]->UnmapExecuting_result} else {s1.core_states[core]->ProtectExecuting_result};
+            let pkey = s1.core_states[core]->ProtectExecuting_pkey;
             let flags = s1.core_states[core]->ProtectExecuting_flags;
             let corestate = if step is UnmapInitiateShootdown {os::CoreState::UnmapShootdownWaiting { ult_id, vaddr, result: result->Some_0 }}
-                        else  {os::CoreState::ProtectShootdownWaiting { ult_id, vaddr, flags, result: result->Some_0 }} ;
+                        else  {os::CoreState::ProtectShootdownWaiting { ult_id, vaddr, flags, pkey, result: result->Some_0 }} ;
             lemma_insert_preserves_no_overlap(c, s1.core_states, s1.interp_pt_mem(), core, corestate);
             lemma_unique_and_overlap_values_implies_overlap_vmem(c, s2);
             assert (s2.inv_inflight_pmem_no_overlap_inflight_pmem(c)) by {
@@ -1779,6 +1785,7 @@ pub proof fn next_step_preserves_overlap_mem_inv(
         },
         os::Step::MMU
         | os::Step::MemOp {.. }
+        | os::Step::WrPkru { .. }
         | os::Step::ReadPTMem { ..}
         | os::Step::Barrier {.. }
         | os::Step::Invlpg {.. }
@@ -2096,10 +2103,11 @@ pub proof fn step_UnmapStart_ProtectStart_preserves_overlap_mem_inv(
         _ => arbitrary(),
     };
     let flags = lbl->ProtectStart_flags;
+    let pkey = lbl-> ProtectStart_pkey;
     let corestate = if lbl is UnmapStart {
         os::CoreState::UnmapWaiting { ult_id, vaddr }
     } else {
-        os::CoreState::ProtectWaiting { ult_id, vaddr, flags }
+        os::CoreState::ProtectWaiting { ult_id, vaddr, flags, pkey }
     };
     let pte_size = if s1.interp_pt_mem().contains_key(vaddr) {
         s1.interp_pt_mem()[vaddr].frame.size

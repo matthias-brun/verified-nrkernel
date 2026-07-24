@@ -6,13 +6,14 @@
 
 // $line_count$Trusted${$
 
+use defs::PkruPerms;
 use vstd::prelude::*;
 
 #[cfg(verus_keep_ghost)]
 use crate::extra::lemma_bits_misc;
 use crate::spec_t::mmu::*;
 use crate::spec_t::mmu::pt_mem::*;
-use crate::spec_t::mmu::defs::{ bit, Core, bitmask_inc, MemOp, LoadResult, PTE, Vpn, Paddr, Vaddr, Pcid, Cr3 };
+use crate::spec_t::mmu::defs::{ bit, Core, bitmask_inc, MemOp, LoadResult, PTE, PkruRegister, Vpn, Paddr, Vaddr, Pcid, Cr3 };
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::defs::{ aligned, update_range, MAX_VIRTADDR };
 use crate::spec_t::mmu::translation::{ l0_bits, l1_bits, l2_bits, l3_bits, MASK_DIRTY_ACCESS };
@@ -37,7 +38,9 @@ pub struct CoreState {
     /// Ongoing walks of the core, this is a total
     pub walks: ISet<Walk>,
     /// Store Buffer of the core (for PTMem Updates)
-    pub stbuf: Seq<(Vaddr, usize)>
+    pub stbuf: Seq<(Vaddr, usize)>,
+    /// Protection Key Rights for User Page register
+    pub pkru: PkruRegister
 }
 
 impl CoreState {
@@ -48,6 +51,7 @@ impl CoreState {
             psc: IMap::total(|k| iset![]),
             walks: iset![],
             stbuf:  seq![],
+            pkru: PkruRegister::new()
         }
     }
 
@@ -57,6 +61,7 @@ impl CoreState {
         &&& self.psc === IMap::total(|k| iset![])
         &&& self.walks === iset![]
         &&& self.stbuf  === seq![]
+        &&& self.pkru == PkruRegister::new()
     }
 
     /// Well-formedness Condition
@@ -74,6 +79,9 @@ impl CoreState {
 
         // there is a finite number of ongoing walks
         &&& self.walks.finite()
+
+        // the pkru register is wf
+        &&& self.pkru.wf()
     }
 
     pub open spec fn walk_valid(walk: Walk) -> bool {
@@ -298,6 +306,23 @@ impl CoreState {
         self.stbuf.first()
     }
 
+
+    // -------------------------------------- CR3 -------------------------------------------------
+
+    #[verifier(inline)]
+    pub open spec fn pkru_set(self, pkru: PkruRegister) -> CoreState {
+        CoreState { pkru, ..self }
+    }
+
+    #[verifier(inline)]
+    pub open spec fn pkru_writable(self, pkey: nat) -> bool {
+        self.pkru.allows_writes(pkey)
+    }
+
+    #[verifier(inline)]
+    pub open spec fn pkru_readable(self, pkey: nat) -> bool {
+        self.pkru.allows_reads(pkey)
+    }
 }
 
 
@@ -368,6 +393,7 @@ pub enum Step {
     Writeback { core: Core },
     Read { r: usize },
     Barrier,
+    WrPkru,
     Stutter,
 }
 
@@ -506,7 +532,6 @@ pub closed spec fn step_InvPcid(pre: State, post: State, c: Constants, lbl: Lbl)
     &&& pre.cores[core].stbuf_empty()
     &&& pre.cores[core].walks_empty()
 
-
     &&& match typ {
         // Individual-address invalidation: If the INVPCID type is 0, the logical processor invalidates
         // mappings—except global translations—for the linear address and PCID specified in the INVPCID
@@ -616,7 +641,7 @@ pub closed spec fn step_MemOpTLB(
         &&& tlb_va <= memop_vaddr < tlb_va + pte.frame.size
         &&& match memop {
             MemOp::Store { new_value, result } => {
-                if paddr < c.phys_mem_size && !pte.flags.is_supervisor && pte.flags.is_writable {
+                if paddr < c.phys_mem_size && !pte.flags.is_supervisor && pte.flags.is_writable && pre.cores[core].pkru_writable(pte.pkey) {
                     &&& result is Ok
                     &&& post.phys_mem === update_range(pre.phys_mem, paddr, new_value)
                 } else {
@@ -625,7 +650,7 @@ pub closed spec fn step_MemOpTLB(
                 }
             },
             MemOp::Load { is_exec, result, .. } => {
-                if paddr < c.phys_mem_size && !pte.flags.is_supervisor && (is_exec ==> !pte.flags.disable_execute) {
+                if paddr < c.phys_mem_size && !pte.flags.is_supervisor && (is_exec ==> !pte.flags.disable_execute) && (!is_exec ==> pre.cores[core].pkru_readable(pte.pkey)) {
                     &&& result == LoadResult::Value(pre.phys_mem.subrange(paddr, paddr + memop.op_size()))
                     &&& post.phys_mem === pre.phys_mem
                 } else {
@@ -909,6 +934,18 @@ pub closed spec fn step_Barrier(pre: State, post: State, c: Constants, lbl: Lbl)
     }
 }
 
+pub closed spec fn step_WrPkru(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
+    &&& lbl matches Lbl::WrPkru(core, regval)
+
+    &&& c.valid_core(core)
+    &&& regval.wf()
+
+    &&& post == State {
+        cores: pre.cores.insert(core, pre.cores[core].pkru_set(regval)),
+        ..pre
+    }
+}
+
 pub closed spec fn step_Stutter(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
     &&& lbl is Tau
     &&& post == pre
@@ -935,6 +972,7 @@ pub open spec fn next_step(pre: State, post: State, c: Constants, step: Step, lb
         Step::Writeback { core }           => step_Writeback(pre, post, c, core, lbl),
         Step::Read { r }                   => step_Read(pre, post, c, r, lbl),
         Step::Barrier                      => step_Barrier(pre, post, c, lbl),
+        Step::WrPkru                       => step_WrPkru(pre, post, c, lbl),
         Step::Stutter                      => step_Stutter(pre, post, c, lbl),
     }
 }
@@ -1053,6 +1091,7 @@ pub proof fn next_preserves_inv(pre: State, post: State, c: Constants, lbl: Lbl)
         pre.cores[c].wf() && post.cores[c].wf() by {
             assert(pre.cores[c].tlb.dom() == post.cores[c].tlb.dom());
             assert(pre.cores[c].psc.dom() == post.cores[c].psc.dom());
+            assert(pre.cores[c].pkru.0.dom() == post.cores[c].pkru.0.dom());
         }
     assert(post.hist.cr3 == pre.hist.cr3);
 
@@ -1107,7 +1146,8 @@ pub mod refinement {
                 cr3: self.cr3,
                 tlb: self.tlb,
                 walks,
-                stbuf: self.stbuf
+                stbuf: self.stbuf,
+                pkru: self.pkru
             }
         }
     }
@@ -1213,6 +1253,7 @@ pub mod refinement {
                     rl3::Step::Writeback { core } => rl2::Step::Writeback { core },
                     rl3::Step::Read { r }         => rl2::Step::Read,
                     rl3::Step::Barrier            => rl2::Step::Barrier,
+                    rl3::Step::WrPkru             => rl2::Step::WrPkru,
                     rl3::Step::Stutter            => rl2::Step::Stutter,
                 }
             } else {
@@ -1261,7 +1302,7 @@ pub mod refinement {
                     let core = lbl->Invlpg_0;
                     assert(post.interp().cores == pre.interp().cores.insert(core, rl2::CoreState {
                         walks: iset![], cr3: pre.interp().cores[core].cr3, tlb: pre.interp().cores[core].tlb,
-                        stbuf: pre.interp().cores[core].stbuf}));
+                        stbuf: pre.interp().cores[core].stbuf, pkru: pre.interp().cores[core].pkru}));
                     assert(rl2::step_Invlpg(pre.interp(), post.interp(), c, lbl));
                 },
                 rl3::Step::InvPcid => {
@@ -1345,7 +1386,7 @@ pub mod refinement {
                     assert(post.interp().cores == pre.interp().cores.insert(core, rl2::CoreState {
                         walks: pre.interp().cores[core].walks.insert(Walk { vaddr, path: seq![], complete: false }),
                         cr3: pre.interp().cores[core].cr3, tlb: pre.interp().cores[core].tlb,
-                        stbuf: pre.interp().cores[core].stbuf}));
+                        stbuf: pre.interp().cores[core].stbuf, pkru:  pre.interp().cores[core].pkru}));
                     assert(rl2::step_WalkInit(pre.interp(), post.interp(), c, core, vaddr, lbl))
                 },
                 rl3::Step::WalkStep { core, walk, r } => {
@@ -1353,7 +1394,7 @@ pub mod refinement {
                     assert(post.interp().cores == pre.interp().cores.insert(core, rl2::CoreState {
                         walks: pre.interp().cores[core].walks.insert(crate::spec_t::mmu::rl3::walk_next(pre, core, walk, r)),
                         cr3: pre.interp().cores[core].cr3, tlb: pre.interp().cores[core].tlb,
-                        stbuf: pre.interp().cores[core].stbuf}));
+                        stbuf: pre.interp().cores[core].stbuf, pkru: pre.interp().cores[core].pkru}));
                     assert(rl2::step_WalkStep(pre.interp(), post.interp(), c, core, walk, lbl));
                 },
                 rl3::Step::WalkAbort { core, walk } => {
@@ -1409,6 +1450,11 @@ pub mod refinement {
                 rl3::Step::Barrier => {
                     assert(rl2::step_Barrier(pre.interp(), post.interp(), c, lbl));
                 },
+                rl3::Step::WrPkru => {
+                    let core = lbl->WrPkru_0;
+                    assert(post.interp().cores == pre.interp().cores.insert(core, pre.interp().cores[core].pkru_set(lbl->WrPkru_1)));
+                    assert(rl2::step_WrPkru(pre.interp(), post.interp(), c, lbl));
+                }
                 rl3::Step::Stutter => {
                     assert(rl2::step_Stutter(pre.interp(), post.interp(), c, lbl));
                 },

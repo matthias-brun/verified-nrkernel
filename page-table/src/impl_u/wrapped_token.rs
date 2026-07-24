@@ -19,7 +19,7 @@ use crate::spec_t::mmu::defs::{
 };
 use crate::spec_t::mmu::translation::{
     MASK_NEG_DIRTY_ACCESS, l0_bits, l1_bits, l2_bits, l3_bits,
-    GPDE, PDE, MASK_NEG_PROT_FLAGS,
+    GPDE, PDE, MASK_NEG_PROT_ALL,
 };
 use crate::theorem::RLbl;
 #[cfg(verus_keep_ghost)]
@@ -34,7 +34,7 @@ verus! {
 pub enum OpArgs {
     Map { base: usize, pte: PTE },
     Unmap { base: usize },
-    Protect { base: usize, flags: Flags },
+    Protect { base: usize, flags: Flags, pkey: nat },
 }
 
 /// We define a view of the wrapped tokens with the memory stuff that the implementation uses to
@@ -85,6 +85,7 @@ impl WrappedTokenView {
         ensures PT::interp(self, pt).interp().dom().subset_of(self.pt_mem@.dom().map(|k| k as nat))
     {
         reveal(crate::spec_t::mmu::pt_mem::PTMem::view);
+
         assert forall|vaddr: nat|
             PT::interp(self, pt).interp().contains_key(vaddr)
                 implies {
@@ -204,6 +205,7 @@ impl WrappedTokenView {
                             let interp_l2 = PT::interp_at(self, l2_ghost_pt, 2, l2_daddr, l2_base);
                             let interp_l2_entry = PT::interp_at_entry(self, l2_ghost_pt, 2, l2_daddr, l2_base, l2_bidx as nat);
                             crate::impl_u::l2_impl::PT::lemma_inv_implies_interp_inv(self, l2_ghost_pt, 2, l2_daddr, l2_base);
+                            assert(interp_l2.interp().contains_key(vaddr as nat));
                             interp_l2.lemma_interp_contains_key_implies_interp_of_entry_contains_key_at_index(vaddr as nat);
                             assert(interp_l2.interp_of_entry(interp_l2.index_for_vaddr(vaddr as nat)).contains_key(vaddr as nat));
 
@@ -1076,7 +1078,7 @@ pub exec fn start_map_and_acquire_lock(Tracked(tok): Tracked<&mut Token>, Ghost(
             sound: new_sound,
             ..tok.st()
         };
-        let lbl = RLbl::MapStart { thread_id: tok.thread(), vaddr, pte };
+        let lbl = RLbl::MapStart { thread_id: tok.thread(), vaddr, pte};
         assert(os::step_MapStart(tok.consts(), tok.st(), post, core, lbl));
         let step = os::Step::MapStart { core };
         assert(os::next_step(tok.consts(), tok.st(), post, step, lbl));
@@ -1749,6 +1751,7 @@ impl WrappedProtectToken {
                 OpArgs::Protect {
                     base: self.orig_st.core_states[self.tok.core()]->ProtectExecuting_vaddr as usize,
                     flags: self.orig_st.core_states[self.tok.core()]->ProtectExecuting_flags,
+                    pkey: self.orig_st.core_states[self.tok.core()]->ProtectExecuting_pkey,
                 },
             change_made: self.change_made,
             regions:
@@ -1780,8 +1783,8 @@ impl WrappedProtectToken {
             res@.orig_st == tok.st(),
             res@.pt_mem == tok.st().mmu@.pt_mem,
             res@.regions.dom() == tok.st().os_ext.allocated,
-            tok.st().core_states[tok.core()] matches os::CoreState::ProtectExecuting { vaddr, flags, .. }
-                && res@.args == (OpArgs::Protect { base: vaddr as usize, flags  }),
+            tok.st().core_states[tok.core()] matches os::CoreState::ProtectExecuting { vaddr, flags, pkey, .. }
+                && res@.args == (OpArgs::Protect { base: vaddr as usize, flags, pkey  }),
             !res@.change_made,
     {
         let tracked t = WrappedProtectToken {
@@ -1813,17 +1816,17 @@ impl WrappedProtectToken {
         &&& self.orig_st.core_states[self.tok.core()]->ProtectExecuting_vaddr == self.tok.steps()[0]->ProtectEnd_vaddr
         &&& self.tok.st().mmu@.cr3 == self.orig_st.mmu@.cr3
         &&& if self.change_made {
-            &&& self.tok.st().core_states[self.tok.core()] matches os::CoreState::ProtectExecuting { vaddr, flags, ult_id, result: Some(Ok(pte)) }
+            &&& self.tok.st().core_states[self.tok.core()] matches os::CoreState::ProtectExecuting { vaddr, flags, ult_id,  pkey, result: Some(Ok(pte)) }
             &&& vaddr == self.tok.steps()[0]->ProtectEnd_vaddr
             &&& ult_id == self.tok.thread()
             &&& pte == self.orig_st.interp_pt_mem()[vaddr]
-            &&& self@.args == OpArgs::Protect { base: vaddr as usize, flags }
+            &&& self@.args == OpArgs::Protect { base: vaddr as usize, flags, pkey }
         } else {
             &&& self.tok.st().mmu@.pt_mem == self.orig_st.mmu@.pt_mem
-            &&& self.tok.st().core_states[self.tok.core()] matches os::CoreState::ProtectExecuting { vaddr, flags, ult_id, result: None }
+            &&& self.tok.st().core_states[self.tok.core()] matches os::CoreState::ProtectExecuting { vaddr, flags, pkey, ult_id, result: None }
             &&& vaddr == self.tok.steps()[0]->ProtectEnd_vaddr
             &&& ult_id == self.tok.thread()
-            &&& self@.args == OpArgs::Protect { base: vaddr as usize, flags }
+            &&& self@.args == OpArgs::Protect { base: vaddr as usize, flags, pkey }
         }
     }
 
@@ -1897,7 +1900,7 @@ impl WrappedProtectToken {
             r.base == pbase,
             idx < 512,
             old(tok).inv(),
-            value & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_FLAGS == old(tok)@.read(idx, r) & MASK_NEG_PROT_FLAGS,
+            value & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_ALL == old(tok)@.read(idx, r) & MASK_NEG_PROT_ALL,
             old(tok)@.read(idx, r) & bit!(7usize) == bit!(7usize),
             PT::interp_to_l0(old(tok)@, root_pt).contains_key(old(tok)@.args->Protect_base as nat),
             PT::inv(old(tok)@, root_pt),
@@ -1909,6 +1912,7 @@ impl WrappedProtectToken {
                             PTE {
                                 frame: PT::interp_to_l0(old(tok)@, root_pt)[old(tok)@.args->Protect_base as nat].frame,
                                 flags: old(tok)@.args->Protect_flags,
+                                pkey: old(tok)@.args->Protect_pkey
                             }),
         ensures
             final(tok)@ == old(tok)@.write(idx, value, r, true),
@@ -1917,6 +1921,7 @@ impl WrappedProtectToken {
 
         proof { lemma_bits_misc(); }
 
+
         let addr = pbase + idx * 8;
         let ghost state1 = tok.tok.st();
         let ghost core = tok.tok.core();
@@ -1924,12 +1929,13 @@ impl WrappedProtectToken {
         //assert(core == tok.tok.core());
         let ghost vaddr = tok.tok.st().core_states[core]->ProtectExecuting_vaddr as usize;
         let ghost flags = tok.tok.st().core_states[core]->ProtectExecuting_flags;
+        let ghost pkey = tok.tok.st().core_states[core]->ProtectExecuting_pkey;
         let ghost pte = PT::interp_to_l0(tok@, root_pt)[old(tok)@.args->Protect_base as nat];
         proof {
-            assert(tok.tok.st().core_states[core] == os::CoreState::ProtectExecuting { vaddr: vaddr as nat, ult_id: tok.tok.thread(), flags, result: None });
+            assert(tok.tok.st().core_states[core] == os::CoreState::ProtectExecuting { vaddr: vaddr as nat, ult_id: tok.tok.thread(), flags, pkey, result: None });
             broadcast use to_rl1::next_refines;
             mmu_tok.prophesy_write(addr, value);
-            let new_cs = os::CoreState::ProtectExecuting { ult_id: tok.tok.thread(), vaddr: vaddr as nat, flags, result: Some(Ok((pte))) };
+            let new_cs = os::CoreState::ProtectExecuting { ult_id: tok.tok.thread(), vaddr: vaddr as nat, flags, pkey, result: Some(Ok((pte))) };
             let post = os::State {
                 core_states: tok.tok.st().core_states.insert(core, new_cs),
                 mmu: mmu_tok.post(),
@@ -2028,6 +2034,7 @@ impl WrappedProtectToken {
         let ghost state1 = tok.tok.st();
         let ghost vaddr = tok.tok.st().core_states[core]->ProtectExecuting_vaddr;
         let ghost flags = tok.tok.st().core_states[core]->ProtectExecuting_flags;
+        let ghost pkey = tok.tok.st().core_states[core]->ProtectExecuting_pkey;
         let ghost result = tok.tok.st().core_states[core]->ProtectExecuting_result;
 
         if let DoShootdown::Yes { vaddr } = shootdown {
@@ -2063,7 +2070,7 @@ impl WrappedProtectToken {
             let tracked mut osext_tok = tok.tok.get_osext_token();
             proof {
                 osext_tok.prophesy_init_shootdown(vaddr.pcid(), vaddr.vaddr());
-                let new_cs = os::CoreState::ProtectShootdownWaiting { ult_id: tok.tok.thread(), vaddr: vaddr.vaddr() as nat, flags, result: result->Some_0 };
+                let new_cs = os::CoreState::ProtectShootdownWaiting { ult_id: tok.tok.thread(), vaddr: vaddr.vaddr() as nat, flags, pkey, result: result->Some_0 };
                 let post = os::State {
                     core_states: tok.tok.st().core_states.insert(core, new_cs),
                     os_ext: osext_tok.post(),
@@ -2180,7 +2187,7 @@ impl WrappedProtectToken {
 
             proof {
                 tok@.lemma_interps_match(root_pt);
-                let new_cs = os::CoreState::ProtectOpDone { ult_id: tok.tok.thread(), vaddr: vaddr as nat, flags, result: Err(()) };
+                let new_cs = os::CoreState::ProtectOpDone { ult_id: tok.tok.thread(), vaddr: vaddr as nat, flags, pkey, result: Err(()) };
                 let post = os::State {
                     core_states: tok.tok.st().core_states.insert(core, new_cs),
                     ..tok.tok.st()
@@ -2336,7 +2343,7 @@ pub exec fn start_unmap_and_acquire_lock(Tracked(tok): Tracked<&mut Token>, Ghos
     }
 }
 
-pub exec fn start_protect_and_acquire_lock(Tracked(tok): Tracked<&mut Token>, Ghost(vaddr): Ghost<nat>, Ghost(flags): Ghost<Flags>)
+pub exec fn start_protect_and_acquire_lock(Tracked(tok): Tracked<&mut Token>, Ghost(vaddr): Ghost<nat>, Ghost(flags): Ghost<Flags>, Ghost(pkey): Ghost<nat>)
     requires
         os::step_Unmap_enabled(vaddr),
         old(tok).consts().valid_ult(old(tok).thread()),
@@ -2344,13 +2351,13 @@ pub exec fn start_protect_and_acquire_lock(Tracked(tok): Tracked<&mut Token>, Gh
         old(tok).st().core_states[old(tok).core()] is Idle,
         old(tok).steps_taken() === seq![],
         old(tok).steps().len() == 2,
-        old(tok).steps().first() == (RLbl::ProtectStart { thread_id: old(tok).thread(), vaddr, flags }),
+        old(tok).steps().first() == (RLbl::ProtectStart { thread_id: old(tok).thread(), vaddr, flags, pkey }),
         old(tok).progress() is Unready,
         old(tok).st().inv(old(tok).consts()),
     ensures
         final(tok).core() == old(tok).core(),
         final(tok).thread() == old(tok).thread(),
-        final(tok).st().core_states[final(tok).core()] == (os::CoreState::ProtectExecuting { ult_id: final(tok).thread(), vaddr, flags, result: None }),
+        final(tok).st().core_states[final(tok).core()] == (os::CoreState::ProtectExecuting { ult_id: final(tok).thread(), vaddr, flags, pkey, result: None }),
         final(tok).progress() is Ready,
         final(tok).st().os_ext.lock == Some(final(tok).core()),
         final(tok).st().inv(final(tok).consts()),
@@ -2373,7 +2380,7 @@ pub exec fn start_protect_and_acquire_lock(Tracked(tok): Tracked<&mut Token>, Gh
     let ghost state2 = tok.st();
     proof {
         lemma_concurrent_trs_no_lock(state1, state2, tok.consts(), core, pidx);
-        let new_cs = os::CoreState::ProtectWaiting { ult_id: tok.thread(), vaddr, flags };
+        let new_cs = os::CoreState::ProtectWaiting { ult_id: tok.thread(), vaddr, flags, pkey };
         let pte_size = if state2.interp_pt_mem().contains_key(vaddr) { state2.interp_pt_mem()[vaddr].frame.size } else { 0 };
         let new_sound = tok.st().sound && os::step_Protect_sound(tok.st(), vaddr, pte_size);
         let post = os::State {
@@ -2381,10 +2388,11 @@ pub exec fn start_protect_and_acquire_lock(Tracked(tok): Tracked<&mut Token>, Gh
             sound: new_sound,
             ..tok.st()
         };
-        let lbl = RLbl::ProtectStart { thread_id: tok.thread(), vaddr, flags };
+        let lbl = RLbl::ProtectStart { thread_id: tok.thread(), vaddr, flags, pkey };
         assert(os::step_ProtectStart(tok.consts(), tok.st(), post, core, lbl));
         let step = os::Step::ProtectStart { core };
         assert(os::next_step(tok.consts(), tok.st(), post, step, lbl));
+        assert(lbl.compatible_with(tok.steps().first()));
         tok.register_external_step(post, step, lbl);
         let state3 = tok.st();
         os_invariant::next_preserves_inv(tok.consts(), state2, state3, lbl);
@@ -2400,7 +2408,7 @@ pub exec fn start_protect_and_acquire_lock(Tracked(tok): Tracked<&mut Token>, Gh
     proof {
         osext_tok.prophesy_acquire_lock();
         let vaddr = tok.st().core_states[core]->ProtectWaiting_vaddr;
-        let new_cs = os::CoreState::ProtectExecuting { ult_id: tok.thread(), vaddr, flags, result: None };
+        let new_cs = os::CoreState::ProtectExecuting { ult_id: tok.thread(), vaddr, flags, pkey, result: None };
         let post = os::State {
             core_states: tok.st().core_states.insert(core, new_cs),
             os_ext: osext_tok.post(),

@@ -4,7 +4,7 @@ use vstd::prelude::*;
 use vstd::imap::*;
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::defs::{ aligned, bit, bitmask_inc };
-use crate::spec_t::mmu::translation::{ MASK_NEG_PROT_FLAGS, MASK_NEG_DIRTY_ACCESS };
+use crate::spec_t::mmu::translation::{ SHIFT_PKEY, MASK_NEG_PROT_FLAGS, MASK_NEG_PROT_ALL, MASK_NEG_DIRTY_ACCESS };
 
 
 verus! {
@@ -20,17 +20,27 @@ pub proof fn lemma_bits_prot()
             ==> #[trigger] (v & MASK_NEG_DIRTY_ACCESS & bitmask_inc!(b1, b2)) == v & bitmask_inc!(b1, b2),
         forall|v: usize, b: usize| b < 63 && b != 1 && b != 2
             ==> #[trigger] (v & MASK_NEG_PROT_FLAGS & bit!(b)) == v & bit!(b),
+        forall|v: usize, b: usize| b < SHIFT_PKEY && b != 1 && b != 2
+            ==> #[trigger] (v & MASK_NEG_PROT_ALL & bit!(b)) == v & bit!(b),
         forall|v: usize, b1: usize, b2: usize| 3 < b1 <= b2 + 1 && 3 < b2 < 63
             ==> #[trigger] (v & MASK_NEG_PROT_FLAGS & bitmask_inc!(b1, b2)) == v & bitmask_inc!(b1, b2),
+        forall|v: usize, b1: usize, b2: usize| 3 < b1 <= b2 + 1 && 3 < b2 < SHIFT_PKEY
+            ==> #[trigger] (v & MASK_NEG_PROT_ALL & bitmask_inc!(b1, b2)) == v & bitmask_inc!(b1, b2),
 {
         assert(forall|v: usize, b: usize| b < 64 && b != 5 && b != 6
             ==> #[trigger] (v & MASK_NEG_DIRTY_ACCESS & bit!(b)) == v & bit!(b)) by (bit_vector);
         assert(forall|v: usize, b: usize| b < 64 && b != 1 && b != 2 && b != 63
             ==> #[trigger] (v & MASK_NEG_PROT_FLAGS & bit!(b)) == v & bit!(b)) by (bit_vector);
+        assert(forall|v: usize, b: usize| b < 64 && b != 1 && b != 2 && b != 63 && b != 62 && b != 61 && b != 60 && b != 59
+            ==> #[trigger] (v & MASK_NEG_PROT_ALL & bit!(b)) == v & bit!(b)) by (bit_vector);
+
         assert(forall|v: usize, b1: usize, b2: usize| 6 < b1 < 64 && 6 < b2 < 64
             ==> #[trigger] (v & MASK_NEG_DIRTY_ACCESS & bitmask_inc!(b1, b2)) == v & bitmask_inc!(b1, b2)) by (bit_vector);
+
         assert(forall|v: usize, b1: usize, b2: usize| 3 < b1 <= b2 + 1 && 3 < b2 < 63
             ==> #[trigger] (v & MASK_NEG_PROT_FLAGS & bitmask_inc!(b1, b2)) == v & bitmask_inc!(b1, b2)) by (bit_vector);
+        assert(forall|v: usize, b1: usize, b2: usize| 3 < b1 <= b2 + 1 && 3 < b2 < SHIFT_PKEY
+            ==> #[trigger] (v & MASK_NEG_PROT_ALL & bitmask_inc!(b1, b2)) == v & bitmask_inc!(b1, b2)) by (bit_vector);
 }
 
 /// These trigger much better in some proofs. I don't quite understand why.
@@ -40,9 +50,17 @@ pub proof fn lemma_bits_prot_equality()
             && #[trigger] (v1 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_FLAGS)
                 == #[trigger] (v2 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_FLAGS)
             ==> #[trigger] (v1 & bit!(b)) == v2 & bit!(b),
+        forall|v1: usize, v2: usize, b: usize| b < SHIFT_PKEY && b != 1 && b != 2 && b != 5 && b != 6
+            && #[trigger] (v1 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_ALL)
+                == #[trigger] (v2 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_ALL)
+            ==> #[trigger] (v1 & bit!(b)) == v2 & bit!(b),
         forall|v1: usize, v2: usize, b1: usize, b2: usize| 6 < b1 <= b2 + 1 && 6 < b2 < 63
             && #[trigger] (v1 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_FLAGS)
                 == #[trigger] (v2 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_FLAGS)
+            ==> #[trigger] (v1 & bitmask_inc!(b1, b2)) == v2 & bitmask_inc!(b1, b2),
+        forall|v1: usize, v2: usize, b1: usize, b2: usize| 6 < b1 <= b2 + 1 && 6 < b2 < SHIFT_PKEY
+            && #[trigger] (v1 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_ALL)
+                == #[trigger] (v2 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_ALL)
             ==> #[trigger] (v1 & bitmask_inc!(b1, b2)) == v2 & bitmask_inc!(b1, b2),
 {
     lemma_bits_prot();
@@ -54,6 +72,15 @@ pub proof fn lemma_bits_prot_equality()
     by {
         assert(v1 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_FLAGS & bit!(b) == v1 & bit!(b));
     };
+
+    assert forall|v1: usize, v2: usize, b: usize| b < SHIFT_PKEY && b != 1 && b != 2 && b != 5 && b != 6
+        && #[trigger] (v1 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_ALL)
+            == #[trigger] (v2 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_ALL)
+        implies #[trigger] (v1 & bit!(b)) == v2 & bit!(b)
+    by {
+        assert(v1 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_ALL & bit!(b) == v1 & bit!(b))
+    };
+
     assert forall|v1: usize, v2: usize, b1: usize, b2: usize| 6 < b1 <= b2 + 1 && 6 < b2 < 63
         && #[trigger] (v1 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_FLAGS)
             == #[trigger] (v2 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_FLAGS)
@@ -61,6 +88,15 @@ pub proof fn lemma_bits_prot_equality()
     by {
         assert(6 < b2 < 64);
         assert(v1 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_FLAGS & bitmask_inc!(b1, b2) == v1 & bitmask_inc!(b1, b2));
+    };
+
+    assert forall|v1: usize, v2: usize, b1: usize, b2: usize| 6 < b1 <= b2 + 1 && 6 < b2 < SHIFT_PKEY
+        && #[trigger] (v1 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_ALL)
+            == #[trigger] (v2 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_ALL)
+        implies #[trigger] (v1 & bitmask_inc!(b1, b2)) == v2 & bitmask_inc!(b1, b2)
+    by {
+        assert(6 < b2 < 64);
+        assert(v1 & MASK_NEG_DIRTY_ACCESS & MASK_NEG_PROT_ALL & bitmask_inc!(b1, b2) == v1 & bitmask_inc!(b1, b2));
     };
 }
 
@@ -70,12 +106,19 @@ pub proof fn lemma_bits_misc()
         forall|v: usize| v & bit!(0) == #[trigger] (v & MASK_NEG_DIRTY_ACCESS & bit!(0)),
         forall|v1: usize, v2: usize| #![auto]
             (v2 & 1) != (v1 & 1) ==> v2 & MASK_NEG_PROT_FLAGS != v1 & MASK_NEG_PROT_FLAGS,
+        forall|v1: usize, v2: usize| #![auto]
+            (v2 & 1) != (v1 & 1) ==> v2 & MASK_NEG_PROT_ALL != v1 & MASK_NEG_PROT_ALL,
 {
         assert(bit!(0usize) == 1) by (bit_vector);
         assert(forall|v: usize| v & bit!(0) == #[trigger] (v & MASK_NEG_DIRTY_ACCESS & bit!(0))) by (bit_vector);
         assert(forall|v1: usize, v2: usize| #![auto] (v2 & 1) != (v1 & 1) ==>
             v2 & !(bit!(63usize) | bit!(2usize) | bit!(1usize)) !=
             v1 & !(bit!(63usize) | bit!(2usize) | bit!(1usize))) by (bit_vector);
+        assert( !(bit!(63usize) | bit!(62usize) | bit!(61usize) | bit!(60usize) | bit!(59usize) | bit!(2usize) | bit!(1usize)) == MASK_NEG_PROT_ALL)
+            by (bit_vector);
+        assert(forall|v1: usize, v2: usize| #![auto] (v2 & 1) != (v1 & 1) ==>
+            v2 & !(bit!(63usize) | bit!(62usize) | bit!(61usize) | bit!(60usize) | bit!(59usize) | bit!(2usize) | bit!(1usize)) !=
+            v1 & !(bit!(63usize) | bit!(62usize) | bit!(61usize) | bit!(60usize) | bit!(59usize) | bit!(2usize) | bit!(1usize))) by (bit_vector);
 }
 
 
@@ -125,12 +168,12 @@ pub proof fn lemma_subset_is_finite<A>(
     a: ISet<A>,
     b: ISet<A>,
 )
-    requires 
+    requires
         a.finite(),
         b.subset_of(a),
     ensures
         b.finite(),
-{   let c = a.difference(b);   
+{   let c = a.difference(b);
     assert (a.difference(c).finite());
     assert (a.difference(c) === b);
 }
@@ -139,9 +182,9 @@ pub proof fn lemma_set_of_first_n_nat_is_finite( n: nat, )
     requires
     ensures ISet::new(|i: nat| i < n).finite()
     decreases n
-{   
+{
     let b = ISet::new(|i: nat| i < n);
-    if (n == 0) {    
+    if (n == 0) {
         assert(ISet::new(|i: nat| i < 0) === ISet::empty());
         assert(ISet::new(|i: nat| i < 0).finite());
     } else {
