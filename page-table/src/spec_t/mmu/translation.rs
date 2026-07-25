@@ -201,7 +201,6 @@ impl PDE {
             other@ matches GPDE::Directory { addr, .. } ==> self@->Directory_addr == addr,
             other@ matches GPDE::Page { addr, .. }      ==> self@->Page_addr == addr,
     {
-        admit();
         reveal(PDE::all_mb0_bits_are_zero);
         axiom_max_phyaddr_width_facts();
         extra::lemma_bits_prot_equality();
@@ -359,7 +358,7 @@ impl PDE {
                 &&& self.entry & bitmask_inc!(13usize,20usize) == 0
             } else {
                 // 62:M, 7
-                &&& self.entry & bitmask_inc!(MAX_PHYADDR_WIDTH, 62) == 0
+                &&& self.entry & bitmask_inc!(MAX_PHYADDR_WIDTH, 51) == 0
                 &&& self.entry & bit!(7usize) == 0
             }
         } else if self.layer == 3 {  // PT, always frame
