@@ -2597,6 +2597,7 @@ broadcast proof fn lemma_step_writeprotect_walk_mostly_unchanged(pre: State, pos
     post.pt_mem.lemma_write_seq(post.writer_sbuf());
     lemma_mem_view_after_step_write(pre, post, c, lbl);
     broadcast use PDE::lemma_view_unchanged_prot_flags;
+    // broadcast use PDE::lemma_view_unchanged_prot_flags_page;
 }
 
 broadcast proof fn lemma_step_writenonneg_valid_walk_unchanged(pre: State, post: State, c: Constants, lbl: Lbl, va: usize)
