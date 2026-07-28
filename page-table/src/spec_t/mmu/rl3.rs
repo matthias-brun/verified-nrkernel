@@ -1089,6 +1089,7 @@ pub proof fn next_preserves_inv(pre: State, post: State, c: Constants, lbl: Lbl)
 
 
 pub mod refinement {
+    #[cfg(verus_keep_ghost)]
     use vstd::pervasive::arbitrary;
 
     #[cfg(verus_keep_ghost)]

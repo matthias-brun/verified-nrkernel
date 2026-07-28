@@ -7,12 +7,12 @@ use crate::spec_t::cas_mmu::*;
 use crate::spec_t::cas_mmu::pt_mem::*;
 use crate::spec_t::cas_mmu::defs::{ bit, Core, bitmask_inc, MemOp, LoadResult, PTE, Vpn, Paddr, Vaddr, Pcid, Cr3 };
 #[cfg(verus_keep_ghost)]
-use crate::spec_t::cas_mmu::defs::{ aligned, update_range, MAX_VIRTADDR, MAX_PHYADDR_WIDTH, axiom_max_phyaddr_width_facts };
+use crate::spec_t::cas_mmu::defs::{ aligned, update_range, MAX_PHYADDR_WIDTH, MAX_VIRTADDR, axiom_max_phyaddr_width_facts };
 use crate::spec_t::cas_mmu::translation::{ l0_bits, l1_bits, l2_bits, l3_bits, MASK_DIRTY_ACCESS, MASK_NEG_DIRTY_ACCESS };
 
 verus! {
 
-// Hardware model which includes support for atomics/CAS, using the lock/unlock modeling from the paper 
+// Hardware model which includes support for atomics/CAS, using the lock/unlock modeling from the paper
 // "A Better x86 Memory Model: x86-TSO" by Sewell et al.
 // Note: That paper shows that it is sound to model atomic instructions with lock/unlock
 // transitions. We adopt this modeling for kernel and userspace memory accesses but still permit MMU
@@ -1685,6 +1685,7 @@ proof fn lemma_valid_implies_equal_walks(state: State, c: Constants, core: Core,
 }
 
 pub mod refinement {
+    #[cfg(verus_keep_ghost)]
     use vstd::pervasive::arbitrary;
 
     #[cfg(verus_keep_ghost)]
@@ -1695,6 +1696,7 @@ pub mod refinement {
     #[cfg(verus_keep_ghost)]
     use crate::spec_t::cas_mmu::rl3::bit;
     use crate::spec_t::cas_mmu::translation::{ MASK_DIRTY_ACCESS, MASK_NEG_DIRTY_ACCESS };
+    #[cfg(verus_keep_ghost)]
     use crate::spec_t::cas_mmu::defs::{ MAX_VIRTADDR };
 
     impl rl3::CoreState {

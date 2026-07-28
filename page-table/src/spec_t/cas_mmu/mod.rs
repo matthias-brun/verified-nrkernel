@@ -12,9 +12,9 @@ use vstd::prelude::*;
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::cas_mmu::defs::{
     Flags, L1_ENTRY_SIZE, L2_ENTRY_SIZE, L3_ENTRY_SIZE, MemRegion, bitmask_inc,
-    align_to_usize, WORD_SIZE, PAGE_SIZE, MAX_PHYADDR, Vpn, Cr3,
+    align_to_usize, WORD_SIZE, PAGE_SIZE, MAX_PHYADDR,
 };
-use crate::spec_t::cas_mmu::defs::{ Core, PTE, MemOp, InvPcidType };
+use crate::spec_t::cas_mmu::defs::{ Core, PTE, MemOp, InvPcidType, Cr3, Vpn };
 use crate::spec_t::cas_mmu::translation::{ PDE, GPDE, l0_bits, l1_bits, l2_bits, l3_bits };
 
 verus! {

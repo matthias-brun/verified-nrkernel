@@ -219,7 +219,9 @@ pub open spec fn next(pre: State, post: State, c: Constants, lbl: Lbl) -> bool {
 pub mod code {
     use vstd::prelude::*;
     use crate::spec_t::os_ext;
-    use crate::spec_t::mmu::defs::{ Core, MemRegionExec, PAGE_SIZE, Pcid, Vaddr, InvPcidDescriptor, MAX_PCID, MAX_VIRTADDR };
+    use crate::spec_t::mmu::defs::{ Core, MemRegionExec, PAGE_SIZE, Pcid, Vaddr, InvPcidDescriptor, MAX_PCID };
+    #[cfg(verus_keep_ghost)]
+    use crate::spec_t::mmu::defs::{ MAX_VIRTADDR };
     use crate::theorem::TokState;
 
     #[verifier(external_body)]
@@ -535,7 +537,7 @@ pub mod code {
             // unsafe { print(">>>>>>>>>>>>>>>>>>>>:\0".as_ptr() as *const c_char, vaddr); }
             // unsafe { print("Initiating shootdown for vaddr:\0".as_ptr() as *const c_char, vaddr); }
 
-            SHOOTDOWN_VADDR.store(vaddr, Ordering::Relaxed);
+            SHOOTDOWN_VADDR.store(vaddr.0 as usize, Ordering::Relaxed);
 
             let num_cpus = unsafe { get_num_cpus() } as usize;
             for cpu_id in 0..num_cpus {
@@ -544,7 +546,7 @@ pub mod code {
 
             // unsafe { print("Send IPIs to all CPUs:\0".as_ptr() as *const c_char, vaddr); }
 
-            unsafe { smp_call_function(PTImpl::handle_shootdown_ipi as u64 , vaddr, 0); }
+            unsafe { smp_call_function(PTImpl::handle_shootdown_ipi as u64 , vaddr.0 as usize, 0); }
         }
 
         // #[cfg(not(feature="linuxmodule"))]

@@ -17,10 +17,12 @@ use crate::impl_u::l1;
 use crate::impl_u::indexing;
 use crate::spec_t::mmu::translation::{
     PDE,GPDE, MASK_FLAG_P, MASK_FLAG_RW, MASK_FLAG_US, MASK_FLAG_PWT, MASK_FLAG_PCD, MASK_FLAG_XD,
-    MASK_ADDR, MASK_PG_FLAG_PAT, MASK_L1_PG_FLAG_PS, MASK_DIR_ADDR, MASK_L1_PG_ADDR,
-    MASK_L2_PG_ADDR, MASK_L3_PG_ADDR, MASK_NEG_DIRTY_ACCESS, MASK_L3_PG_FLAG_PAT,
+    MASK_ADDR, MASK_PG_FLAG_PAT, MASK_L1_PG_FLAG_PS,
+    MASK_NEG_DIRTY_ACCESS, MASK_L3_PG_FLAG_PAT,
     MASK_NEG_PROT_FLAGS,
 };
+#[cfg(verus_keep_ghost)]
+use crate::spec_t::mmu::translation::{MASK_DIR_ADDR, MASK_L1_PG_ADDR, MASK_L2_PG_ADDR, MASK_L3_PG_ADDR};
 #[cfg(verus_keep_ghost)]
 use crate::extra;
 use crate::impl_u::wrapped_token::{ WrappedMapToken, WrappedUnmapToken, WrappedProtectToken, WrappedTokenView, OpArgs };

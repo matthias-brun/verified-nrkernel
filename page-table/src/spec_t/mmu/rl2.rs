@@ -5,9 +5,9 @@ use crate::spec_t::mmu::pt_mem::*;
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::defs::{
     aligned, bit, WORD_SIZE, MAX_PHYADDR_WIDTH, axiom_max_phyaddr_width_facts, MemOp,
-    LoadResult, update_range, MAX_VIRTADDR, Paddr, Vaddr, Vpn, Pcid, Cr3
+    LoadResult, update_range, MAX_VIRTADDR,
 };
-use crate::spec_t::mmu::defs::{ Core, PTE };
+use crate::spec_t::mmu::defs::{ Core, PTE, Paddr, Vaddr, Vpn, Pcid, Cr3 };
 use crate::spec_t::mmu::rl3::{ Writes };
 use crate::spec_t::mmu::translation::{
     MASK_NEG_DIRTY_ACCESS, MASK_NEG_PROT_FLAGS
