@@ -87,6 +87,7 @@ pub proof fn next_preserves_inv(c: os::Constants, s1: os::State, s2: os::State, 
 }
 
 #[verifier(spinoff_prover)]
+#[verifier::rlimit(200)]
 pub proof fn next_step_preserves_inv_basic(c: os::Constants, s1: os::State, s2: os::State, step: os::Step, lbl: RLbl)
     requires
         s1.inv(c),
