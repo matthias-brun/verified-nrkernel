@@ -908,6 +908,7 @@ proof fn next_step_preserves_inv_unmapping(pre: State, post: State, c: Constants
     next_step_preserves_inv_notin_nonpos_Unmapping(pre, post, c, step, lbl);
 }
 
+#[verifier::rlimit(200)]
 #[verifier(spinoff_prover)]
 proof fn next_step_preserves_inv_unmapping__valid_walk(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
     requires

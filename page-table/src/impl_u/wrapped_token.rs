@@ -842,6 +842,7 @@ impl WrappedMapToken {
         assert(tok@ =~= old(tok)@.write(idx, value, r, true));
     }
 
+    #[verifier::spinoff_prover]
     pub exec fn allocate(Tracked(tok): Tracked<&mut Self>, layer: usize) -> (res: MemRegionExec)
         requires
             !old(tok)@.change_made,
@@ -1418,6 +1419,7 @@ impl WrappedUnmapToken {
         assert(tok@ =~= old(tok)@.write(idx, value, r, true));
     }
 
+    #[verifier(spinoff_prover)]
     pub exec fn deallocate(Tracked(tok): Tracked<&mut Self>, layer: usize, region: MemRegionExec)
         requires
             old(tok)@.regions.contains_key(region@),
@@ -1980,6 +1982,7 @@ impl WrappedProtectToken {
     }
 
     // TODO: duplicated from WrappedMapToken
+    #[verifier(spinoff_prover)]
     pub proof fn lemma_regions_derived_from_view_after_write(self, r: MemRegion, idx: usize, value: usize, change: bool)
         requires
             self.inv(),
