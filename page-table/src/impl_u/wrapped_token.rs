@@ -10,7 +10,7 @@ use crate::spec_t::mmu::WalkResult;
 use crate::spec_t::os_ext;
 #[cfg(verus_keep_ghost)]
 use crate::spec_t::mmu::defs::{
-    aligned, bit, candidate_mapping_overlaps_existing_vmem, WORD_SIZE,
+    aligned, bit, candidate_mapping_overlaps_existing_vmem, overlap, WORD_SIZE,
     bitmask_inc, x86_arch_spec, x86_arch_spec_upper_bound, MAX_BASE, align_to_usize
 };
 use crate::spec_t::mmu::defs::{
@@ -1016,6 +1016,7 @@ impl WrappedMapToken {
         Tracked(tok.tok)
     }
 
+    #[verifier(spinoff_prover)]
     pub proof fn lemma_regions_derived_from_view_after_write(self, r: MemRegion, idx: usize, value: usize, change: bool)
         requires
             self.inv(),
@@ -1470,6 +1471,7 @@ impl WrappedUnmapToken {
     }
 
     // TODO: duplicated from WrappedMapToken
+    #[verifier(spinoff_prover)]
     pub proof fn lemma_regions_derived_from_view_after_write(self, r: MemRegion, idx: usize, value: usize, change: bool)
         requires
             self.inv(),
@@ -1479,10 +1481,23 @@ impl WrappedUnmapToken {
             self@.write(idx, value, r, change).regions_derived_from_view()
     {
         let self_write = self@.write(idx, value, r, change);
+        let waddr = add(r.base as usize, mul(idx, 8));
         assert forall|r2| self_write.regions.contains_key(r2)
             implies
             #[trigger] self_write.regions[r2] =~= Seq::new(512, |i: int| self_write.pt_mem.mem[(r2.base + i * 8) as usize])
         by {
+            // Allocated regions are disjoint, so the write to `r` leaves every address of
+            // any other region untouched.
+            if r2 != r {
+                assert(!overlap(r, r2));
+            }
+            assert_seqs_equal!(
+                self_write.regions[r2] == Seq::new(512, |i: int| self_write.pt_mem.mem[(r2.base + i * 8) as usize]),
+                i => {
+                    if r2 != r || i != idx as int {
+                        assert((r2.base + i * 8) as usize != waddr);
+                    }
+                });
         };
     }
 
