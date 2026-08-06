@@ -570,7 +570,7 @@ pub mod code {
                 // unsafe { print("Waiting for CPU ack:\0".as_ptr() as *const c_char, cpu_id); }
                 while SHOOTDOWN_ACKS[cpu_id].load(Ordering::Relaxed) == 0 {
                     // spin
-                    unsafe { do_cpu_relax(); }
+                    // unsafe { do_cpu_relax(); }
                 }
             }
             // unsafe { print("<<<<<<<<<<<<<<<<<<<<:\0".as_ptr() as *const c_char, 0); }
