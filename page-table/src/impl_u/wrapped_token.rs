@@ -543,6 +543,60 @@ impl WrappedTokenView {
 
         assert(PT::interp(self, pt).interp() =~= crate::spec_t::mmu::defs::nat_keys(self.interp()));
     }
+
+    /// A write that leaves the l0 interpretation unchanged also leaves the interpretation of the
+    /// page table memory unchanged. Spun off to keep `PT::inv`'s quantifiers out of callers.
+    #[verifier(spinoff_prover)]
+    pub proof fn lemma_stutter_write_preserves_interp(self, r: MemRegion, idx: usize, value: usize, root_pt1: PTDir, root_pt2: PTDir)
+        requires
+            self.regions_derived_from_view(),
+            self.write(idx, value, r, false).regions_derived_from_view(),
+            PT::inv(self, root_pt1),
+            PT::inv(self.write(idx, value, r, false), root_pt2),
+            PT::interp_to_l0(self.write(idx, value, r, false), root_pt2) == PT::interp_to_l0(self, root_pt1),
+        ensures
+            crate::spec_t::mmu::defs::nat_keys(self.write(idx, value, r, false).pt_mem@)
+                == crate::spec_t::mmu::defs::nat_keys(self.pt_mem@)
+    {
+        self.lemma_interps_match(root_pt1);
+        self.write(idx, value, r, false).lemma_interps_match(root_pt2);
+    }
+}
+
+/// Refines an `rl3` write down to the specific `rl1::Step::WriteNonpos`. `to_rl1::next_refines`
+/// only yields the existential `rl1::next`, so we also have to eliminate the other write steps.
+/// Both halves are expensive, hence the separate query.
+#[verifier(spinoff_prover)]
+pub proof fn lemma_write_nonpos_refines(
+    pre: mmu::rl3::State,
+    post: mmu::rl3::State,
+    c: mmu::Constants,
+    core: mmu::defs::Core,
+    addr: usize,
+    value: usize,
+)
+    requires
+        pre.inv(c),
+        pre.interp().inv(c),
+        mmu::rl3::next(pre, post, c, mmu::Lbl::Write(core, addr, value)),
+        pre@.happy,
+        pre@.pt_mem.read(addr) & 1 == 1,
+        value & 1 == 0,
+        !pre@.writes.tso.is_empty() ==> core == pre@.writes.core,
+    ensures
+        mmu::rl1::next_step(pre@, post@, c, mmu::rl1::Step::WriteNonpos, mmu::Lbl::Write(core, addr, value)),
+{
+    broadcast use to_rl1::next_refines;
+    lemma_bits_misc();
+    let lbl = mmu::Lbl::Write(core, addr, value);
+    // `WriteNonpos` is enabled, which rules out `SadWrite`; the present bit rules out
+    // `WriteNonneg` and (with `lemma_bits_misc`) `WriteProtect`.
+    assert(pre@.is_happy_writenonpos(core, addr, value));
+    assert(!pre@.pt_mem.is_nonneg_write(addr, value));
+    assert(!pre@.pt_mem.is_prot_write(addr, value));
+    let step = choose|step| mmu::rl1::next_step(pre@, post@, c, step, lbl);
+    assert(mmu::rl1::next_step(pre@, post@, c, step, lbl));
+    assert(step is WriteNonpos);
 }
 
 pub tracked struct WrappedMapToken {
@@ -1216,7 +1270,7 @@ impl WrappedUnmapToken {
         }
     }
 
-    pub proof fn lemma_regions_derived_from_view(self)
+    pub proof fn lemma_regions_derived_from_view(&self)
         requires self.inv()
         ensures self@.regions_derived_from_view()
     {}
@@ -1278,8 +1332,6 @@ impl WrappedUnmapToken {
         idx: usize,
         value: usize,
         Ghost(r): Ghost<MemRegion>,
-        Ghost(root_pt1): Ghost<PTDir>,
-        Ghost(root_pt2): Ghost<PTDir>,
     )
         requires
             old(tok)@.change_made,
@@ -1289,30 +1341,85 @@ impl WrappedUnmapToken {
             old(tok).inv(),
             value & 1 == 0,
             old(tok)@.read(idx, r) & 1 == 1,
-            PT::inv(old(tok)@, root_pt1),
-            PT::inv(old(tok)@.write(idx, value, r, false), root_pt2),
-            PT::interp_to_l0(old(tok)@.write(idx, value, r, false), root_pt2) == PT::interp_to_l0(old(tok)@, root_pt1),
+            // Callers establish this via `WrappedTokenView::lemma_stutter_write_preserves_interp`.
+            // Requiring it instead of `PT::inv` + `PT::interp_to_l0` keeps the page table
+            // invariant's quantifiers out of the MMU/OS reasoning below.
+            crate::spec_t::mmu::defs::nat_keys(old(tok)@.write(idx, value, r, false).pt_mem@)
+                == crate::spec_t::mmu::defs::nat_keys(old(tok)@.pt_mem@),
         ensures
             final(tok)@ == old(tok)@.write(idx, value, r, false),
             final(tok).inv(),
     {
-        proof { lemma_bits_misc(); }
+        // `write_stutter_inner` needs the OS invariant unfolded; we only pass it along. Unfolding
+        // it here would drag in the rl2 invariant's very expensive page table walk quantifiers.
+        hide(os::State::inv);
+
+        Self::write_stutter_inner(Tracked(tok), pbase, idx, value, Ghost(r));
+
+        // Lifting `write_stutter_inner`'s state machine facts to the view is pure extensional
+        // equality reasoning, which needs a disjoint set of quantifiers.
+        proof {
+            old(tok).lemma_regions_derived_from_view_after_write(r, idx, value, false);
+            assert(tok@.regions =~= old(tok)@.write(idx, value, r, false).regions);
+            assert(tok@ =~= old(tok)@.write(idx, value, r, false));
+        }
+    }
+
+    /// The state machine half of `write_stutter`: takes the `UnmapOpStutter` step and reports its
+    /// effect on the OS state. The lifting to `WrappedTokenView` happens in `write_stutter`.
+    #[verifier(spinoff_prover)]
+    exec fn write_stutter_inner(
+        Tracked(tok): Tracked<&mut Self>,
+        pbase: usize,
+        idx: usize,
+        value: usize,
+        Ghost(r): Ghost<MemRegion>,
+    )
+        requires
+            old(tok)@.change_made,
+            old(tok)@.regions.contains_key(r),
+            r.base == pbase,
+            idx < 512,
+            old(tok).inv(),
+            value & 1 == 0,
+            old(tok)@.read(idx, r) & 1 == 1,
+            crate::spec_t::mmu::defs::nat_keys(old(tok)@.write(idx, value, r, false).pt_mem@)
+                == crate::spec_t::mmu::defs::nat_keys(old(tok)@.pt_mem@),
+        ensures
+            final(tok).inv(),
+            final(tok).tok.core() == old(tok).tok.core(),
+            final(tok).orig_st == old(tok).orig_st,
+            final(tok).change_made == old(tok).change_made,
+            final(tok).tok.st().mmu@.pt_mem
+                == old(tok).tok.st().mmu@.pt_mem.write(add(pbase, mul(idx, 8)), value),
+            final(tok).tok.st().os_ext.allocated == old(tok).tok.st().os_ext.allocated,
+            final(tok).tok.st().core_states[old(tok).tok.core()]
+                == old(tok).tok.st().core_states[old(tok).tok.core()],
+    {
+        // We only need the rl2 invariant as an opaque hypothesis of `lemma_write_nonpos_refines`
+        // and `next_preserves_inv`; its page table walk quantifiers are very expensive.
+        hide(mmu::rl2::State::inv);
+
+        proof {
+            // `WrappedTokenView::read` masks out the dirty/access bits, leaving the present bit
+            // alone. Instantiated directly because `lemma_bits_misc`'s quantifiers are expensive.
+            let v = tok@.regions[r][idx as int];
+            assert(v & MASK_NEG_DIRTY_ACCESS & 1 == v & 1) by (bit_vector);
+        }
 
         let addr = pbase + idx * 8;
         let ghost state1 = tok.tok.st();
         let ghost core = tok.tok.core();
         let tracked mut mmu_tok = tok.tok.get_mmu_token();
         proof {
-            old(tok)@.lemma_interps_match(root_pt1);
-            old(tok).lemma_regions_derived_from_view_after_write(r, idx, value, false);
-            old(tok)@.write(idx, value, r, false).lemma_interps_match(root_pt2);
-            broadcast use to_rl1::next_refines;
+            old(tok).lemma_regions_derived_from_view();
             assert(!state1.mmu@.writes.tso.is_empty() ==> core == state1.mmu@.writes.core);
             mmu_tok.prophesy_write(addr, value);
             let post = os::State { mmu: mmu_tok.post(), ..tok.tok.st() };
 
             assert(mmu::rl3::next(tok.tok.st().mmu, post.mmu, tok.tok.consts().common, mmu_tok.lbl()));
-            assert(mmu::rl1::next_step(tok.tok.st().mmu@, post.mmu@, tok.tok.consts().common, mmu::rl1::Step::WriteNonpos, mmu_tok.lbl()));
+            // Gives the `pt_mem` and `happy` relations that `step_UnmapOpStutter` needs.
+            lemma_write_nonpos_refines(state1.mmu, post.mmu, tok.tok.consts().common, core, addr, value);
             assert(os::step_UnmapOpStutter(tok.tok.consts(), tok.tok.st(), post, core, addr, value, RLbl::Tau));
             let step = os::Step::UnmapOpStutter { core, paddr: addr, value };
             assert(os::next_step(tok.tok.consts(), tok.tok.st(), post, step, RLbl::Tau));
@@ -1332,10 +1439,6 @@ impl WrappedUnmapToken {
             assert(unchanged_state_during_concurrent_trs(state2, state3, core));
             assert(state2.mmu@.pt_mem == state1.mmu@.pt_mem.write(add(pbase, mul(idx, 8)), value));
             assert(tok.inv());
-            assert(tok.tok.st().core_states[core] == old(tok).tok.st().core_states[core]);
-            assert(tok@.regions[r] =~= old(tok)@.regions[r].update(idx as int, value));
-            assert(tok@.regions[r] == tok@.regions[r].update(idx as int, value));
-            assert(tok@.regions =~= old(tok)@.regions.insert(r, tok@.regions[r].update(idx as int, value)));
         }
     }
 
@@ -1472,7 +1575,7 @@ impl WrappedUnmapToken {
 
     // TODO: duplicated from WrappedMapToken
     #[verifier(spinoff_prover)]
-    pub proof fn lemma_regions_derived_from_view_after_write(self, r: MemRegion, idx: usize, value: usize, change: bool)
+    pub proof fn lemma_regions_derived_from_view_after_write(&self, r: MemRegion, idx: usize, value: usize, change: bool)
         requires
             self.inv(),
             self@.regions.contains_key(r),

@@ -3151,9 +3151,14 @@ fn unmap_aux(
                             assert_seqs_equal!(tok@.regions[unmap_reg@] == seq![0; 512], i => {
                                 assert(entry_at_spec(tok@, dir_pt_res, layer as nat + 1, dir_addr, i as nat)@ is Invalid);
                             });
+                            // Established here rather than inside `write_stutter`, to keep the page
+                            // table invariant's quantifiers out of its MMU/OS state machine proof.
+                            tok.lemma_regions_derived_from_view();
+                            tok.lemma_regions_derived_from_view_after_write(pt.region, idx, 0usize, false);
+                            tok@.lemma_stutter_write_preserves_interp(pt.region, idx, 0usize, root_pt_after_rec, root_pt_after_write);
                         }
 
-                        WrappedUnmapToken::write_stutter(Tracked(tok), ptr, idx, 0usize, Ghost(pt.region), Ghost(root_pt_after_rec), Ghost(root_pt_after_write));
+                        WrappedUnmapToken::write_stutter(Tracked(tok), ptr, idx, 0usize, Ghost(pt.region));
 
                         WrappedUnmapToken::deallocate(Tracked(tok), layer, unmap_reg);
 
