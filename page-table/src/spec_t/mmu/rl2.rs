@@ -934,38 +934,7 @@ proof fn next_step_preserves_inv_unmapping__valid_walk(pre: State, post: State, 
             assert(post.inv_unmapping__valid_walk(c));
         },
         Step::WriteNonpos => {
-            let (wrcore, wraddr, value) =
-                if let Lbl::Write(core, addr, value) = lbl {
-                    (core, addr, value)
-                } else { arbitrary() };
-            assert forall|va: usize, core| #![auto]
-                c.valid_core(core) && va < MAX_BASE && post.core_mem(core).pt_walk(va).result() is Valid implies {
-                    let core_walk = post.core_mem(core).pt_walk(va);
-                    let vbase = core_walk.result()->Valid_vbase;
-                    let pte = core_walk.result()->Valid_pte;
-                    let writer_walk = post.writer_mem().pt_walk(va);
-                    if post.hist.pending_unmaps.contains_key(vbase) {
-                        post.hist.pending_unmaps[vbase] == pte
-                    } else {
-                        core_walk == writer_walk
-                    }
-                }
-            by {
-                lemma_pt_walk_result_vbase_equal(pre.writer_mem(), va);
-                broadcast use lemma_unmapping__pt_walk_valid_in_post_unchanged;
-                reveal(pt_mem::PTMem::view);
-
-                let core_walk = post.core_mem(core).pt_walk(va);
-                let writer_walk = post.writer_mem().pt_walk(va);
-                let vbase = core_walk.result()->Valid_vbase;
-                let pte = core_walk.result()->Valid_pte;
-                if wrcore == core {
-                    pt_mem::PTMem::lemma_pt_walk(pre.writer_mem(), va);
-                } else {
-                    assert(core_walk == pre.core_mem(core).pt_walk(va));
-                }
-            };
-            assert(post.inv_unmapping__valid_walk(c));
+            next_step_preserves_inv_unmapping__valid_walk_WriteNonpos(pre, post, c, step, lbl);
         },
         Step::Writeback { core } => {
             assert(bit!(0usize) == 1) by (bit_vector);
@@ -978,6 +947,61 @@ proof fn next_step_preserves_inv_unmapping__valid_walk(pre: State, post: State, 
         },
         _ => assert(post.inv_unmapping__valid_walk(c)),
     }
+}
+
+/// The `WriteNonpos` case of `next_step_preserves_inv_unmapping__valid_walk`. Split into its own
+/// (spun off) query because it dominates the cost of that proof.
+#[verifier(spinoff_prover)]
+proof fn next_step_preserves_inv_unmapping__valid_walk_WriteNonpos(pre: State, post: State, c: Constants, step: Step, lbl: Lbl)
+    requires
+        pre.wf(c),
+        pre.happy,
+        post.happy,
+        post.polarity is Unmapping,
+        pre.writes.nonpos === iset![] ==> pre.hist.pending_unmaps === imap![],
+        pre.inv_sbuf_facts(c),
+        pre.writer_sbuf_entries_have_present_bit_0(),
+        pre.inv_unmapping__valid_walk(c),
+        post.inv_sbuf_facts(c),
+        next_step(pre, post, c, step, lbl),
+        step is WriteNonpos,
+    ensures post.inv_unmapping__valid_walk(c)
+{
+    broadcast use
+        group_ambient,
+        lemma_step_core_mem;
+    let (wrcore, wraddr, value) =
+        if let Lbl::Write(core, addr, value) = lbl {
+            (core, addr, value)
+        } else { arbitrary() };
+    assert forall|va: usize, core| #![auto]
+        c.valid_core(core) && va < MAX_BASE && post.core_mem(core).pt_walk(va).result() is Valid implies {
+            let core_walk = post.core_mem(core).pt_walk(va);
+            let vbase = core_walk.result()->Valid_vbase;
+            let pte = core_walk.result()->Valid_pte;
+            let writer_walk = post.writer_mem().pt_walk(va);
+            if post.hist.pending_unmaps.contains_key(vbase) {
+                post.hist.pending_unmaps[vbase] == pte
+            } else {
+                core_walk == writer_walk
+            }
+        }
+    by {
+        lemma_pt_walk_result_vbase_equal(pre.writer_mem(), va);
+        broadcast use lemma_unmapping__pt_walk_valid_in_post_unchanged;
+        reveal(pt_mem::PTMem::view);
+
+        let core_walk = post.core_mem(core).pt_walk(va);
+        let writer_walk = post.writer_mem().pt_walk(va);
+        let vbase = core_walk.result()->Valid_vbase;
+        let pte = core_walk.result()->Valid_pte;
+        if wrcore == core {
+            pt_mem::PTMem::lemma_pt_walk(pre.writer_mem(), va);
+        } else {
+            assert(core_walk == pre.core_mem(core).pt_walk(va));
+        }
+    };
+    assert(post.inv_unmapping__valid_walk(c));
 }
 
 // broadcast proof fn lemma_mapping__pt_walk_valid_in_pre_unchanged(pre: State, post: State, c: Constants, step: Step, lbl: Lbl, va: usize)
