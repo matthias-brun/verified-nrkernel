@@ -123,9 +123,7 @@ pub spec const MASK_L2_PG_ADDR: usize = bitmask_inc!(21usize, MAX_PHYADDR_WIDTH 
 pub spec const MASK_L3_PG_ADDR: usize = bitmask_inc!(12usize, MAX_PHYADDR_WIDTH - 1);
 pub spec const MASK_DIR_ADDR: usize = MASK_ADDR;
 
-#[allow(repr_transparent_non_zst_fields)]
 // An entry in any page directory (i.e. in PML4, PDPT, PD or PT)
-#[repr(transparent)]
 // Exec and trusted spec:
 // $line_count$Exec,Trusted${$
 pub struct PDE {
