@@ -30,7 +30,7 @@ impl CodeVC for PTImpl {
         let tracked mut tok = tok;
 
         wrapped_token::start_map_and_acquire_lock(Tracked(&mut tok), Ghost(vaddr as nat), Ghost(pte@));
-        let tracked wtok = WrappedMapToken::new(tok); //, tok.steps()[0]->MapEnd_result);
+        let tracked mut wtok = WrappedMapToken::new(tok); //, tok.steps()[0]->MapEnd_result);
         proof {
             wtok.lemma_regions_derived_from_view();
         }
@@ -97,7 +97,7 @@ impl CodeVC for PTImpl {
         let tracked mut tok = tok;
 
         wrapped_token::start_unmap_and_acquire_lock(Tracked(&mut tok), Ghost(vaddr as nat));
-        let tracked wtok = WrappedUnmapToken::new(tok); //, tok.steps()[0]->MapEnd_result);
+        let tracked mut wtok = WrappedUnmapToken::new(tok); //, tok.steps()[0]->MapEnd_result);
         proof {
             wtok.lemma_regions_derived_from_view();
         }
@@ -151,7 +151,7 @@ impl CodeVC for PTImpl {
         let tracked mut tok = tok;
 
         wrapped_token::start_protect_and_acquire_lock(Tracked(&mut tok), Ghost(vaddr as nat), Ghost(*flags));
-        let tracked wtok = WrappedProtectToken::new(tok);
+        let tracked mut wtok = WrappedProtectToken::new(tok);
         proof {
             wtok.lemma_regions_derived_from_view();
         }
